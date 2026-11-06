@@ -1,0 +1,23 @@
+# ビルド成果物
+/target
+/dist
+/build
+/node_modules
+
+# 環境ファイル（ローカル開発用）
+.env
+.env.local
+
+# エディタ
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ログ
+*.log

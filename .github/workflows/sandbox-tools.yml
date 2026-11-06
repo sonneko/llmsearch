@@ -1,0 +1,74 @@
+name: sandbox-tools
+
+# 目的: Arena サンドボックスの通信制限で直接取得できないツール・依存を Git Blob に退避する
+# ---------------------------------------------------------------------
+# Arena の開発サンドボックスからは GitHub Releases のアセット（objects.githubusercontent.com）や
+# 各種レジストリ（crates.io, static.rust-lang.org 等）に届かない。
+# そのため、必要なアーカイブをここで取得して Git Blob として保存し、
+# その SHA を PR にコメントする。
+#
+# 使い方:
+#   1. このワークフローに必要なツール・クレートの取得ジョブを追加する
+#   2. sandbox-tools.env の ENABLED=1 にして push する
+#   3. PR コメントに記録された blob=<SHA> sha256=<HASH> を控える
+#   4. scripts/bootstrap-toolchain.sh 等で取り出すスクリプトを記述する
+#   5. 取得完了後に ENABLED=0 に戻す
+#
+# 走るのは sandbox-tools.env を ENABLED=1 にして push したとき、または手動実行時のみ。
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "arena/**"
+    paths:
+      - .github/sandbox-tools.env
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sandbox-tools-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  example-tool:
+    name: Example tool to a git blob
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: fetch, store as a blob, comment
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./.github/sandbox-tools.env
+          if [ "${ENABLED:-0}" != "1" ] && [ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]; then
+            echo "ENABLED=0, skipping."
+            exit 0
+          fi
+
+          # --- ここにツールの取得・Blob 化の処理を記述する ---
+          # 例:
+          # curl -fsSL --retry 3 -o tool.tar.gz "https://example.com/tool.tar.gz"
+          # sha="$(sha256sum tool.tar.gz | cut -d' ' -f1)"
+          # python3 - <<'PY'
+          # import base64, json
+          # data = base64.b64encode(open("tool.tar.gz", "rb").read()).decode()
+          # json.dump({"content": data, "encoding": "base64"}, open("blob.json", "w"))
+          # PY
+          # blob="$(gh api -X POST "repos/${GITHUB_REPOSITORY}/git/blobs" --input blob.json --jq .sha)"
+          # pr="$(gh pr list --repo "${GITHUB_REPOSITORY}" --head "${GITHUB_REF_NAME}" --state all --json number --jq '.[0].number')"
+          # body="sandbox-tools: tool blob=${blob} sha256=${sha}"
+          # echo "$body"
+          # echo "$body" >> "$GITHUB_STEP_SUMMARY"
+          # if [ -n "$pr" ]; then
+          #   gh pr comment "$pr" --repo "${GITHUB_REPOSITORY}" --body "$body"
+          # fi
+          echo "Example tool job: 実際にはここにツールの取得・Blob 化の処理を記述する"

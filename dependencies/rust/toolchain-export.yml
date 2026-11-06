@@ -1,0 +1,160 @@
+name: toolchain-export
+
+# 目的: Rust ツールチェーンと vendored crates を Git ブランチに退避する
+# ---------------------------------------------------------------------
+# Arena サンドボックスからは static.rust-lang.org / crates.io に到達できない。
+# このワークフローは GitHub Actions 上で rustup + cargo vendor を実行し、
+# その成果物を cache/rust-toolchain 孤立ブランチに push する。
+#
+# 使い方:
+#   1. .github/toolchain.env の ENABLED=1 にして push（または手動実行）
+#   2. Actions が sysroot + vendor を取得してブランチに push
+#   3. サンドボックス側で bash scripts/bootstrap-rust.sh を実行
+#   4. 完了後、ENABLED=0 に戻す
+#
+# 出力されるブランチ構成:
+#   cache/rust-toolchain
+#   ├── chunks/sysroot.tar.gz.aa  (45MB 分割)
+#   ├── chunks/sysroot.tar.gz.ab
+#   ├── chunks/vendor.tar.gz.aa
+#   ├── chunks/vendor.tar.gz.ab
+#   ├── SHA256SUMS
+#   └── rust-version.txt
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "arena/**"
+    paths:
+      - .github/toolchain.env
+
+permissions:
+  contents: write
+
+concurrency:
+  group: toolchain-export-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUST_VERSION: "1.90.0"  # プロジェクトの rust-toolchain.toml に合わせて調整
+  TARGETS: "x86_64-unknown-linux-gnu,wasm32-unknown-unknown"
+  COMPONENTS: "rustfmt,clippy"
+
+jobs:
+  export:
+    name: Export Rust toolchain to cache branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Check if enabled
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./.github/toolchain.env
+          if [ "${ENABLED:-0}" != "1" ] && [ "${GITHUB_EVENT_NAME}" != "workflow_dispatch" ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "ENABLED=0, skipping."
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+            --default-toolchain "${{ env.RUST_VERSION }}" \
+            --target ${{ env.TARGETS }} \
+            --component ${{ env.COMPONENTS }}
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Verify toolchain
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          rustc --version
+          cargo --version
+          rustc --print sysroot
+          rustup target list --installed
+
+      - name: Vendor dependencies
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/export/vendor-src
+          cargo vendor --versioned-dirs /tmp/export/vendor-src
+          echo "vendored $(ls /tmp/export/vendor-src | wc -l) crates"
+
+      - name: Package sysroot
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          SYSROOT="$(rustc --print sysroot)"
+          mkdir -p /tmp/export/chunks
+          tar czf /tmp/export/sysroot.tar.gz -C "$SYSROOT" .
+          echo "sysroot size: $(du -h /tmp/export/sysroot.tar.gz | cut -f1)"
+
+      - name: Package vendor
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          tar czf /tmp/export/vendor.tar.gz -C /tmp/export vendor-src
+          echo "vendor size: $(du -h /tmp/export/vendor.tar.gz | cut -f1)"
+
+      - name: Split into chunks and compute checksums
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/export/chunks
+          split -b 45m /tmp/export/sysroot.tar.gz /tmp/export/chunks/sysroot.tar.gz.
+          split -b 45m /tmp/export/vendor.tar.gz /tmp/export/chunks/vendor.tar.gz.
+          cd /tmp/export/chunks
+          sha256sum * > SHA256SUMS
+          echo "chunks:"
+          ls -lh /tmp/export/chunks/
+          cat SHA256SUMS
+
+      - name: Record Rust version
+        if: steps.check.outputs.enabled == 'true'
+        run: |
+          rustc --version > /tmp/export/rust-version.txt
+          cat /tmp/export/rust-version.txt
+
+      - name: Push to cache/rust-toolchain
+        if: steps.check.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd /tmp/export
+
+          # 孤立ブランチとして push（既存の履歴を置き換え）
+          git init
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git checkout -b cache/rust-toolchain
+          cp -r chunks/ .
+          cp SHA256SUMS .
+          cp rust-version.txt .
+          git add -A
+          git commit -m "toolchain: $(cat rust-version.txt) / vendor $(ls vendor-src 2>/dev/null | wc -l || echo 0) crates"
+
+          # orphan push
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin cache/rust-toolchain
+
+          echo "Pushed to cache/rust-toolchain"
+
+          # PR にコメント（PR があれば）
+          PR=$(gh pr list --repo "${GITHUB_REPOSITORY}" --head "${GITHUB_REF_NAME}" --state all --json number --jq '.[0].number' 2>/dev/null || echo "")
+          if [ -n "$PR" ]; then
+            BODY="toolchain-export: $(cat rust-version.txt) ブランチ cache/rust-toolchain に push 完了"
+            echo "$BODY"
+            gh pr comment "$PR" --repo "${GITHUB_REPOSITORY}" --body "$BODY" || true
+          fi
+          echo "$BODY" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,167 @@
+name: CI
+
+# 継続的検証ワークフロー。
+#
+# ジョブ構成:
+# 1. `docs`: ドキュメント管理規則の検証 + 変更ファイルの判定（docs-only の場合は重いジョブをスキップ）
+# 2. `lint`: 静的解析・フォーマットチェック
+# 3. `test`: テストの実行
+# 4. `build`: ビルドの検証
+#
+# PR の draft 中はジョブをスキップし、ready for review で走らせる。
+# PR の push では古い実行をキャンセルする。
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CI_SHA: ${{ github.sha }}
+
+jobs:
+  docs:
+    name: Docs & Change Filter
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code_changed: ${{ steps.filter.outputs.code_changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify documentation rules (verify-docs.py)
+        run: python3 docs/script/verify-docs.py
+
+      - name: Detect whether code inputs changed
+        id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "code_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "code_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$base" HEAD)"
+          echo "Changed files:"
+          echo "$changed"
+          code_changed=false
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            case "$file" in
+              docs/developers.md|docs/plans.md|docs/handoff.md|docs/history.md|docs/designs/*|docs/script/*|README.md|LICENSE|.github/workflows/*)
+                ;;
+              *)
+                code_changed=true
+                break
+                ;;
+            esac
+          done <<< "$changed"
+          echo "code_changed=$code_changed"
+          echo "code_changed=$code_changed" >> "$GITHUB_OUTPUT"
+
+  lint:
+    name: Lint & Format
+    needs: docs
+    if: needs.docs.outputs.code_changed == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # --- プロジェクト固有の lint ツールをここに追加する ---
+      # 例（Rust）:
+      # - uses: dtolnay/rust-toolchain@stable
+      #   with:
+      #     components: rustfmt, clippy
+      # - run: cargo fmt --all --check
+      # - run: cargo clippy --locked --all-targets -- -D warnings
+      #
+      # 例（Node.js）:
+      # - uses: actions/setup-node@v4
+      # - run: npm ci
+      # - run: npm run lint
+      # - run: npm run format:check
+
+      - name: Placeholder lint step
+        run: |
+          echo "Lint step: プロジェクト固有の lint コマンドをここに設定する"
+
+  test:
+    name: Test
+    needs: docs
+    if: needs.docs.outputs.code_changed == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # --- プロジェクト固有のテストコマンドをここに追加する ---
+      # 例（Rust）:
+      # - uses: dtolnay/rust-toolchain@stable
+      # - uses: Swatinem/rust-cache@v2
+      # - run: cargo test --locked --all-targets --no-fail-fast
+      #
+      # 例（Node.js）:
+      # - uses: actions/setup-node@v4
+      # - run: npm ci
+      # - run: npm test
+
+      - name: Placeholder test step
+        run: |
+          echo "Test step: プロジェクト固有のテストコマンドをここに設定する"
+
+  build:
+    name: Build Check
+    needs: docs
+    if: needs.docs.outputs.code_changed == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # --- プロジェクト固有のビルドコマンドをここに追加する ---
+      # 例（Rust）:
+      # - uses: dtolnay/rust-toolchain@stable
+      # - run: cargo build --release
+      #
+      # 例（Node.js）:
+      # - uses: actions/setup-node@v4
+      # - run: npm ci
+      # - run: npm run build
+
+      - name: Placeholder build step
+        run: |
+          echo "Build step: プロジェクト固有のビルドコマンドをここに設定する"
