@@ -16,7 +16,11 @@
 
 ### 1.3 出力サイズ
 
-JSON の本文フィールドは `context.max_chars` に従う。エージェントが全文を必要とする場合は、節を分割して取得する。1 コマンドあたりの標準出力は既定で 32 KiB を超えないよう、メタ情報を最小限にする。
+JSON の本文フィールドは `context.maxChars` に従う。1 コマンドあたりの標準出力は既定で 32 KiB を超えないよう、メタ情報を最小限にする。
+
+### 1.4 クォータの可視性
+
+消費を伴うイベント（`search`, `next`, `document`, `content`）には `quota` オブジェクトを必ず含める。エージェントは残量から計画を調整できる。
 
 ---
 
@@ -31,33 +35,45 @@ JSON の本文フィールドは `context.max_chars` に従う。エージェン
 | `v` | 整数 | スキーマ版（初期リリースは `1`） |
 | `event` | 文字列 | イベント種別 |
 | `session` | 文字列 | セッション識別子 |
-| `at` | 文字列 | 実行日時（ISO 8601、UTC） |
+| `at` | 文字列 | 実行日時（UTC、`YYYY-MM-DDTHH:MM:SSZ`） |
 
 ### 2.2 イベント種別
 
 | `event` | 主なフィールド |
 |---|---|
-| `search` | `query`, `provider`, `results[]`, `page`, `hasMore` |
-| `next` | `page`, `results[]`, `hasMore` |
-| `refine` | `query`, `previousQuery` |
-| `document` | `documentId`, `url`, `finalUrl`, `title`, `site`, `chars`, `headings`, `warnings[]` |
-| `outline` | `documentId`, `depth`, `sections[]`, `totalChars` |
-| `content` | `documentId`, `sectionId`, `heading`, `level`, `text`, `chars`, `truncated`, `url` |
+| `search` | `query`, `engine`, `results[]`, `page`, `hasMore`, `filtered`, `quota` |
+| `next` | `page`, `results[]`, `hasMore`, `terminated`, `filtered`, `quota` |
+| `refine` | `query`, `previousQuery`, `session` |
+| `document` | `documentId`, `url`, `finalUrl`, `title`, `site`, `chars`, `warnings[]`, `quota` |
+| `outline` | `documentId`, `depth`, `sections[]`, `totalChars`, `hidden` |
+| `content` | `documentId`, `sectionId`, `heading`, `level`, `text`, `chars`, `truncated`, `nextSectionId`, `url`, `quota` |
+| `engines` | `engines[]`, `policy`（`engines list`） |
+| `engine` | `id`, `variant`, `definition`（`engines show`） |
+| `diagnostics` | `checks[]`（`engines validate`, `config validate`, `doctor`） |
+| `quota` | `metrics[]`, `policy`, `resetsAt[]` |
 | `history` | `entries[]`, `total` |
 | `done` | `command`, `summary` |
 | `error` | `code`, `message`, `hint`, `details` |
 
 ### 2.3 結果オブジェクト
 
-`results[]` の要素は `id`, `rank`, `title`, `url`, `site`, `snippet`, `published`（任意）を持つ。
+`results[]` の要素は `id`, `rank`, `title`, `url`, `site`, `snippet`, `published`（任意）, `engine` を持つ。
 
 ### 2.4 見出しオブジェクト
 
-`sections[]` の要素は `id`, `level`, `text`, `chars`, `hasChildren`, `line`（開始行）を持つ。
+`sections[]` の要素は `id`, `level`, `text`, `chars`, `hasChildren`, `line`, `hidden`（フィルタ・深度で隠れたか）を持つ。
 
-### 2.5 エラーオブジェクト
+### 2.5 フィルタ集計オブジェクト
 
-`error` は `code`（`E` + 4 桁）、`message`（利用者向けの 1 文）、`hint`（次の操作の提案）、`details`（任意の補足）を持つ。終了コードはエラー分類に対応する。
+`filtered` は `kept`, `removed`, `reasons`（キーと件数の対応）, `disabled` を持つ。
+
+### 2.6 クォータオブジェクト
+
+`quota` は `metrics[]` を持ち、各要素は `name`（`session.searches` 等）, `used`, `limit`（未設定は `null`）, `resetsAt` を持つ。
+
+### 2.7 エラーオブジェクト
+
+`error` は `code`（`E` + 4 桁）, `message`（利用者向けの 1 文）, `hint`（次の操作の提案）, `details`（任意の補足）を持つ。終了コードはエラー分類に対応する。
 
 ---
 
@@ -75,11 +91,11 @@ JSON の本文フィールドは `context.max_chars` に従う。エージェン
 
 ### 3.3 失敗時の回復
 
-`E2xxx` は再試行または別 URL の選択、`E3002` は本文を持たないページとして扱い別の結果へ切り替え、`E4xxx` はプロバイダ変更または時間を置いた再実行を行う。`hint` に回復手順が含まれる場合はそれに従う。
+`E2xxx` は再試行または別 URL の選択、`E3002` は本文を持たないページとして扱い別の結果へ切り替え、`E4xxx` はエンジン変更または時間を置いた再実行を行う。`E5xxx` のうちクォータ超過は、待機またはポリシー変更以外の回避手段を提供しない。`hint` に回復手順が含まれる場合はそれに従う。
 
 ### 3.4 予算管理
 
-`context.max_chars` を小さく指定して段階的に読み進めることができる。`truncated` が `true` の場合、その節の続きは別の見出し単位で取得する。
+`context.maxChars` を小さく指定して段階的に読み進めることができる。`truncated` が `true` の場合、続きの節は `nextSectionId` で取得する。
 
 ---
 
@@ -91,7 +107,7 @@ JSON の本文フィールドは `context.max_chars` に従う。エージェン
 
 ### 4.2 秘匿情報
 
-JSON 出力に API キー・Cookie・認証ヘッダを含めない。URL の秘匿パラメータは伏字化する。
+JSON 出力に API キー・Cookie・認証ヘッダを含めない。URL の秘匿パラメータは伏字化する。`engines show` の出力でも `value_env` の参照名のみを示し、値は示さない。
 
 ### 4.3 再現性
 

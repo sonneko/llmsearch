@@ -152,14 +152,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -uo pipefail
+          set +e -uo pipefail
           # push 専用のクリーンなディレクトリを作る。
           # /tmp/export には vendor-src や tar.gz 本体が含まれ巨大なため、
           # 分割済みチャンクだけを退避対象にする。
           rm -rf /tmp/pushrepo
           mkdir -p /tmp/pushrepo
           cp -r /tmp/export/chunks /tmp/pushrepo/
-          cp /tmp/export/SHA256SUMS /tmp/pushrepo/
+          cp /tmp/export/chunks/SHA256SUMS /tmp/pushrepo/
           cp /tmp/export/rust-version.txt /tmp/pushrepo/
           cd /tmp/pushrepo
           du -sh .
