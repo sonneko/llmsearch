@@ -178,9 +178,26 @@ jobs:
           git config http.version HTTP/1.1
 
           status=0
-          git push --force origin cache/rust-toolchain || status=$?
+          git push --force --progress origin cache/rust-toolchain > /tmp/tc_push.log 2>&1 || status=$?
           if [ "$status" -ne 0 ]; then
-            echo "::error title=push-failed::git push が exit $status で失敗した（/tmp/pushrepo の内容を確認）"
+            # サンドボックスからは Actions のログ API に到達できないため、
+            # 診断ログを小さなブランチに載せて運ぶ（小さな push は成功する）。
+            {
+              echo "toolchain push status=$status"
+              echo "--- pushrepo ---"
+              du -sh /tmp/pushrepo; ls -l /tmp/pushrepo/chunks
+              echo "--- log ---"
+              tail -c 4000 /tmp/tc_push.log
+            } > /tmp/diag.txt 2>&1
+            rm -rf /tmp/diagrepo && mkdir -p /tmp/diagrepo && cp /tmp/diag.txt /tmp/diagrepo/
+            cd /tmp/diagrepo
+            git init -q
+            git checkout -q -b cache/diag
+            git add -A
+            git -c user.email="actions@github.com" -c user.name="GitHub Actions" commit -q -m "diag"
+            git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            git push --force origin cache/diag > /dev/null 2>&1 || true
+            echo "::error title=push-failed::git push が exit $status で失敗した"
             exit "$status"
           fi
           echo "Pushed to cache/rust-toolchain"
