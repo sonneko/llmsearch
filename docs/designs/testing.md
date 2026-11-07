@@ -26,11 +26,17 @@
 
 `tests/contract/markdown_conversion.rs` が `tests/fixtures/markdown/*.html` と `*.expected.md` を突き合わせる。決定論性は同一入力を 2 回変換して文字列一致を検証する。
 
-### 1.4 安全性の受入基準
+### 1.4 設定駆動の受入基準
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-出所ヘッダ・マーカーの有無を `tests/contract/untrusted_marker.rs` で検証する。API キー混入は、ダミーの環境変数を設定して全コマンドを実行し、出力・履歴・状態ファイルに値が含まれないことを検証する。robots.txt はモック応答で検証する。
+`tests/contract/config_driven.rs` が、`tempfile::TempDir` に定義 JSON を書き出してからユースケースを実行する。エンジン追加は「`engines/extra.json` を置くと `engines list` と `search` の選択肢に現れる」ことを検証する。クォータは偽の `CounterStore` を注入して境界値（上限ちょうど・上限 +1）を検証する。キャッシュは偽 `HttpClient` の呼び出し回数で検証する。
+
+### 1.5 安全性の受入基準
+
+状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+
+出所ヘッダ・マーカーの有無を `tests/contract/untrusted_marker.rs` で検証する。API キー混入は、ダミーの環境変数を設定して全コマンドを実行し、出力・履歴・状態ファイルに値が含まれないことを検証する。robots.txt はモック応答で検証する。`engines show` は `SecretString` が `Serialize` を実装しないため、コンパイル時に混入経路が存在しないことを `tests/architecture.rs` で確認する。
 
 ---
 

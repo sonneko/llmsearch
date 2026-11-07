@@ -26,6 +26,12 @@
 
 本文は `context.maxChars` の範囲に収める。`details` は `--verbose` 時のみ付与し、既定では `code` / `message` / `hint` のみとする。
 
+### 1.4 クォータの可視性
+
+状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+
+`SearchEvent` / `NextEvent` / `DocumentEvent` / `ContentEvent` は `quota: QuotaView` を必須フィールドとして持つ（`Option` にしない）。`QuotaView` は `usecases::guard::quota::remaining` の結果から `From` 実装で生成する。テストでは「消費を伴うイベントに `quota` が存在する」ことを `tests/contract/json_contract.rs` で検証する。
+
 ---
 
 ## 2. 共通構造
@@ -56,7 +62,19 @@
 
 `From<&Heading> for AgentSection`。`line` は 1 始まり。`hidden` フラグ（深度・フィルタで隠れた見出し）も含める。
 
-### 2.5 エラーオブジェクト
+### 2.5 フィルタ集計オブジェクト
+
+状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+
+`From<&FilterStats> for AgentFiltered` を実装し、`reasons` は `BTreeMap<String, usize>` をそのまま `serde_json::Map` へ変換する（順序を固定するため）。
+
+### 2.6 クォータオブジェクト
+
+状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+
+`QuotaView { metrics: Vec<MetricView> }`、`MetricView { name, used, limit: Option<u64>, resets_at: Option<String> }`。`limit` が未設定（無制限）の項目も必ず含め、`limit: null` とする（項目の有無で判断させない）。
+
+### 2.7 エラーオブジェクト
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 

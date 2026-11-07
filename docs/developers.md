@@ -55,17 +55,17 @@ docs/
 
 <!-- プロジェクトに合わせて適宜書き換える -->
 
-- **言語・実行環境**: Node.js 22 以上（サンドボックスには導入済み）、npm 10 以上
-- **ビルドツール**: TypeScript 5.9（`tsc`）、`tsx`（実行）、`vitest`（テスト）、`biome`（整形・静的検査）
-- **依存導入**: `registry.npmjs.org` へ直接到達できるため `npm install` がそのまま使える。`crates.io` へは到達できないため、Rust 製のツールは導入しない方針とする（技術スタックの決定理由は `REF:docs/plans.md` §4 を参照）。
-- **成果物の置き場**: `node_modules/` と `dist/` はスナップショット対象外。`package-lock.json` はコミットする。
+- **言語・実行環境**: Rust 1.90 系（`REF:rust-toolchain.toml` で固定）。Rust 製の単一バイナリとして配布する（Node.js / Python は実行時に不要）。
+- **ビルド・検証ツール**: `cargo`、`rustfmt`、`clippy`、`cargo test`。整形・静的解析・テストはすべて `cargo` で完結させ、外部の lint ツールを追加しない。
+- **依存導入**: `crates.io` と `static.rust-lang.org` へは到達できないため、`REF:docs/designs/overview.md` §6.1 の構成を保ったまま、`REF:.github/workflows/toolchain-export.yml` の `cargo vendor` で退避したツールチェーンと vendored crates を用いる。
+- **成果物の置き場**: `target/` はスナップショット対象外。`Cargo.lock` はコミットし、`--locked` でビルドする。
 
 ### 2.2 Arena サンドボックス環境でのツールチェーン復旧
 
 Arena サンドボックスには初期状態で目的のツールチェーンが入っていない場合がある。外部通信が制限されているため、以下の手順でツールチェーンを展開する。
 
 **プロジェクトの技術スタックに応じた復旧手順**:
-- Rust を使用する場合: `dependencies/rust/README.md` の手順に従う（`scripts/bootstrap-rust.sh` を配置済みであること）
+- 本プロジェクトは Rust を使用する。`REF:scripts/bootstrap-rust.sh` と `REF:.github/workflows/toolchain-export.yml` を配置済みであり、`cache/rust-toolchain` ブランチからツールチェーンと vendored crates を展開する（背景は `REF:dependencies/rust/README.md`）。
 - その他の技術スタック: `dependencies/` 内の該当ディレクトリを参照（存在しない場合はプロジェクト固有の手順を記述すること）
 
 1. **ツールチェーンの展開**:
@@ -84,8 +84,6 @@ Arena サンドボックスには初期状態で目的のツールチェーン�
 
 ## 3. ソースコードのディレクトリ構造
 
-<!-- プロジェクトに合わせて適宜書き換える -->
-
 ```text
 project-root/
 ├── docs/
@@ -95,25 +93,38 @@ project-root/
 │   ├── history.md             # 過去の仕様改訂・意思決定・完了履歴（追記専用、REF:docs/history.md）
 │   ├── script/
 │   │   └── verify-docs.py     # ドキュメント管理規則・重複・REF 検査スクリプト
-│   ├── specifications/        # 純粋な仕様書（11 本）
-│   └── designs/               # 対応する設計書（同名 11 本）
+│   ├── specifications/        # 純粋な仕様書（15 本）
+│   └── designs/               # 対応する設計書（同名 15 本）
 ├── scripts/
-│   ├── bootstrap-toolchain.sh # サンドボックス用ツールチェーン展開
+│   ├── bootstrap-toolchain.sh # サンドボックス用ツールチェーン展開（Rust を呼ぶ）
+│   ├── bootstrap-rust.sh      # Rust ツールチェーン + vendored crates の展開
 │   └── verify.sh              # コミット前の一括検証スクリプト
 ├── src/
 │   ├── core/                  # 純粋ドメイン層（I/O なし）
-│   ├── ports/                 # 外部境界のインターフェース
-│   ├── adapters/              # http / providers / extract / state / config / env
-│   ├── usecases/              # ユースケース（オーケストレーション）
+│   │   ├── config/            # 設定・ネットワーク・フィルタ・クォータの型と検証
+│   │   ├── engine.rs          # エンジン定義の型
+│   │   ├── template.rs        # {{var}} 展開
+│   │   ├── extract/           # 抽出仕様の意味（JSON パス・変換）
+│   │   ├── markdown/          # 見出し・後処理・リンク
+│   │   ├── outline/           # 見出し抽出・節分割
+│   │   ├── context/           # コンテキスト予算
+│   │   ├── filter/            # 結果・本文フィルタ
+│   │   ├── quota.rs           # カウンタ・上限判定
+│   │   ├── history/           # 履歴イベント・要約・絞り込み
+│   │   ├── robots.rs          # robots.txt の評価
+│   │   └── errors/            # エラーコード・カタログ
+│   ├── ports/                 # 外部境界のトレイト
+│   ├── adapters/              # http / engine / extract / state / config / env
+│   ├── usecases/              # search / document / guard / history / config / doctor
 │   ├── ui/                    # cli（対話・サブコマンド）と render（text / json）
-│   └── main.ts                # エントリポイント
-├── tests/                     # unit / integration / contract / architecture / e2e / fixtures
-└── package.json               # bin: llmsearch
+│   └── main.rs                # エントリポイント
+├── assets/                    # 同梱の既定定義（engines / network / filters / quotas）
+├── tests/                     # unit / contract / integration / architecture / e2e / fixtures
+├── Cargo.toml
+└── rust-toolchain.toml
 ```
 
-各層の責務と依存方向は `REF:docs/specifications/overview.md` §6.1 と `REF:docs/designs/overview.md` §6.1 に従う。`src/core/` から `src/ports/` 以外への import を禁止する（`tests/architecture/` で機械検査する）。
-
----
+各層の責務と依存方向は `REF:docs/specifications/overview.md` §6.2 と `REF:docs/designs/overview.md` §6.1 に従う。`src/core/` から `src/ports/` 以外への import を禁止し、エンジン名による分岐を持たないことを `tests/architecture.rs` で機械検査する。
 
 ## 4. スクリプトの使い方
 
@@ -185,7 +196,7 @@ project-root/
 3. **統合テスト**: 機能単位のエンドツーエンド検証
 4. **E2Eテスト**: 実際の環境での動作検証
 
-本プロジェクトでの具体的なツール・ディレクトリ・受入基準は `REF:docs/specifications/testing.md` と `REF:docs/designs/testing.md` に定義する（テストは `vitest`、外部 HTTP は `undici` の `MockAgent` で固定する）。
+本プロジェクトでの具体的なツール・ディレクトリ・受入基準は `REF:docs/specifications/testing.md` と `REF:docs/designs/testing.md` に定義する（テストは `cargo test`、外部 HTTP は `ports::HttpClient` の偽実装で固定する）。
 
 ### 7.1 テストの運用規則
 

@@ -23,7 +23,7 @@
 
 ### 1.3 定義の同一性とキャッシュ
 
-エンジン定義の内容ハッシュを `engineHash` として記録する。同一クエリで同じ `engineHash` の結果はキャッシュを再利用できる（`REF:docs/specifications/configuration.md` §5）。
+エンジン定義の内容ハッシュを `engineHash` として記録する。同一クエリで同じ `engineHash` の結果はキャッシュを再利用できる（キャッシュの有効条件は設定の節で定める）。
 
 ---
 

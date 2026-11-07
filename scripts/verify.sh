@@ -52,20 +52,38 @@ if [ -f "$BUILD_DIR/env.sh" ]; then
     . "$BUILD_DIR/env.sh"
 fi
 
+HAVE_CARGO=0
+if command -v cargo >/dev/null 2>&1; then
+    HAVE_CARGO=1
+fi
+
 if [ "$FIX" = 1 ]; then
     head_ "自動フォーマット"
-    # プロジェクト固有のフォーマットコマンドをここに追加する
-    echo "（プロジェクト固有のフォーマットコマンドをここに設定する）"
+    if [ "$HAVE_CARGO" = 1 ]; then
+        run fmt cargo fmt --all
+    else
+        echo "（cargo が無いため省略。bash scripts/bootstrap-rust.sh を先に実行する）"
+    fi
 fi
 
 run docs      python3 "$ROOT/docs/script/verify-docs.py"
 
-# --- プロジェクト固有の lint / test / build をここに追加する ---
-# run lint    <lint コマンド>
-# run test    <test コマンド>
-# if [ "$QUICK" = 0 ]; then
-#     run build <build コマンド>
-# fi
+# --- プロジェクト固有の lint / test / build ---
+if [ "$HAVE_CARGO" = 1 ]; then
+    if [ "$FIX" = 0 ]; then
+        run fmt-check cargo fmt --all --check
+    fi
+    run lint  cargo clippy --locked --all-targets -- -D warnings
+    run test  cargo test --locked --all-targets --no-fail-fast
+    if [ "$QUICK" = 0 ]; then
+        run build cargo build --locked --release
+    fi
+else
+    head_ "Rust の検証"
+    echo "cargo が見つからないため、fmt / clippy / test / build を省略した。"
+    echo "  bash scripts/bootstrap-rust.sh   # ツールチェーンを展開"
+    echo "  . /home/user/build/env.sh        # 環境変数を読み込む"
+fi
 
 head_ "まとめ"
 exit_code=0

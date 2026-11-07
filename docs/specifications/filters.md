@@ -91,7 +91,7 @@
 
 - `deny`: `extension` が `pdf`, `zip`, `exe`, `dmg`, `apk` の結果（本文を読めないため）
 - `deny`: `host` が `localhost`, `127.0.0.1`, `*.local` の結果
-- `deny`: `urlRegex` が `[?&](utm_|fbclid|gclid)` を含む結果（追跡付きの重複を避ける）
+- `deny`: URL のクエリに `utm_` または `fbclid` または `gclid` を含む結果（追跡付きの重複を避ける）
 - `require`: なし
 - `maxPerHost`: `3`
 
