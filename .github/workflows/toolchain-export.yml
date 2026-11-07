@@ -153,39 +153,38 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
-          cd /tmp/export
+          LOG=/tmp/push.log
+          : > "$LOG"
+          say() { echo "$*" >> "$LOG"; }
+          cd /tmp/export || { echo "::error title=cd::/tmp/export に移動できない"; exit 1; }
+          say "== files =="; ls -l >> "$LOG" 2>&1; du -sh . >> "$LOG" 2>&1
+          ls -l chunks >> "$LOG" 2>&1
 
-          # 孤立ブランチとして push（既存の履歴を置き換え）
-          git init -q
+          git init -q; say "init=$?"
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
-          git checkout -q -b cache/rust-toolchain
-          cp -r chunks/ .
-          cp SHA256SUMS .
-          cp rust-version.txt .
-          git add -A
+          git checkout -q -b cache/rust-toolchain; say "checkout=$?"
+          cp -r chunks/ .; say "cp=$?"
+          cp SHA256SUMS rust-version.txt .; say "cp2=$?"
+          git add -A; say "add=$?"
           git -c user.email="actions@github.com" -c user.name="GitHub Actions" \
-              commit -q -m "toolchain: $(cat rust-version.txt) / $(du -sh . | cut -f1)"
-
+              commit -q -m "toolchain: $(cat rust-version.txt)"; say "commit=$?"
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git config http.postBuffer 524288000
+          say "== sizes =="; git count-objects -vH >> "$LOG" 2>&1
 
           status=0
-          git push --force origin cache/rust-toolchain > /tmp/push.log 2>&1 || status=$?
+          GIT_TRACE=0 git push --force --verbose origin cache/rust-toolchain >> "$LOG" 2>&1 || status=$?
+          say "push_status=$status"
           if [ "$status" -ne 0 ]; then
-            echo "git push が失敗した (exit $status)"
-            # サンドボックスからは Actions のログ API へ到達できないため、
-            # 失敗理由をチェックアノテーションとして残す（API から読める）。
-            msg="$(tr '\n' ' ' < /tmp/push.log | tail -c 900)"
+            echo "--- push failed (status=$status) ---"
+            tail -c 2000 "$LOG"
+            msg="$(tr '\n' ' ' < "$LOG" | tr -s ' ' | tail -c 800)"
+            [ -n "$msg" ] || msg="(log empty)"
             echo "::error title=push-failed::${msg}"
+            { echo "### push failed"; tail -c 3000 "$LOG"; } >> "$GITHUB_STEP_SUMMARY"
             exit "$status"
           fi
           echo "Pushed to cache/rust-toolchain"
-
           PR=$(gh pr list --repo "${GITHUB_REPOSITORY}" --head "${GITHUB_REF_NAME}" --state all --json number --jq '.[0].number' 2>/dev/null || echo "")
-          if [ -n "$PR" ]; then
-            BODY="toolchain-export: $(cat rust-version.txt) ブランチ cache/rust-toolchain に push 完了"
-            echo "$BODY"
-            gh pr comment "$PR" --repo "${GITHUB_REPOSITORY}" --body "$BODY" || true
-          fi
-          echo "toolchain-export 完了: $(cat rust-version.txt)" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$PR" ]; then gh pr comment "$PR" --repo "${GITHUB_REPOSITORY}" --body "toolchain-export: $(cat rust-version.txt) を cache/rust-toolchain に push" || true; fi
