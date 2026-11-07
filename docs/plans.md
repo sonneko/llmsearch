@@ -25,7 +25,7 @@
 - [x] GitHub Actions（CI）の設定
 - [x] `REF:docs/script/verify-docs.py` と `REF:scripts/verify.sh` の作成
 - [x] Rust ツールチェーン退避（`REF:scripts/bootstrap-rust.sh`, `REF:.github/workflows/toolchain-export.yml`）
-- [x] `REF:Cargo.toml` / `REF:rust-toolchain.toml` / `REF:src/main.rs` のスキャフォールド
+- [x] `REF:Cargo.toml` / `REF:rust-toolchain.toml` / `REF:src/main.rs` のスキャフォールド（`cargo check` まで通過）
 
 <a id="m1-spec"></a>
 ### M1: 仕様書・設計書の策定（v2: Rust / 全 JSON）
@@ -40,7 +40,7 @@
 <a id="m2-implement"></a>
 ### M2: コア実装（Rust）
 
-- [ ] 依存クレートの確定（`htmd` / `scraper` / `readability` 等）と vendor 退避の再実行
+- [x] 依存クレートの確定（`htmd 0.5` / `scraper 0.29` / `reqwest 0.12` 等）と vendor 退避・サンドボックスへの搬入
 - [ ] `src/ports/` のトレイト定義（`HttpClient`, `Fetcher`, `HtmlToMarkdown`, `StateStore`, `HistoryStore`, `CounterStore`, `Clock`, `IdGen`, `Env`, `Reporter`）
 - [ ] `src/core/` の純粋ロジック（設定型・エンジン定義型・抽出仕様・URL・テキスト・見出し・節・予算・フィルタ・クォータ・履歴イベント）
 - [ ] 設定ローダ（`$ref` 展開・5 層マージ・由来記録・未知キー温存・検証）

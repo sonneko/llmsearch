@@ -23,8 +23,8 @@
 - **PR**: 未作成
 - **現在の状態**: 仕様 v2（Rust・全 JSON 設定・エンジン非依存・フィルタ・クォータ）の作成完了。ユーザーレビュー待ち。
 - **未確定事項**:
-  - 依存クレート（`htmd`, `scraper`, `readability` 等）の確定。`REF:Cargo.toml` はバージョンを未固定（`*`）にしてあり、確定後に vendor 退避を再実行する。
-  - Rust ツールチェーンの搬入（`cache/rust-toolchain` ブランチの生成待ち）。詳細は `REF:docs/developers.md` §2.2。
+  - 依存クレートのバージョン固定は完了（`htmd 0.5`, `scraper 0.29` 等）。追加のクレートが必要になった場合は vendor 退避の再実行が必要。
+- **Rust ツールチェーン**: `cache/rust-toolchain` から `bash scripts/bootstrap-rust.sh` で搬入済み。`cargo check` / `fmt` / `clippy` / `test` / `build` が通ることを確認した（初回ビルド約 92 秒）。サンドボックス再起動後は再搬入が必要。
 - **検証**: `python3 docs/script/verify-docs.py` が通過することを確認済み（仕様 15 本・設計 15 本）。
 
 ---
@@ -53,4 +53,6 @@
 | `node -v` / `npm -v` | 1 秒未満 | 1 秒未満 |
 | `npm view <pkg> version`（レジストリ照会） | 2〜20 秒 | 2〜20 秒 |
 | `bash scripts/verify.sh` | 約 1 秒（docs 検査のみ） | 同左 |
-| `. /home/user/build/env.sh && cargo check` | 未計測（ツールチェーン搬入後） | 未計測 |
+| `. /home/user/build/env.sh && cargo check` | 約 43 秒 | 約 1 秒 |
+| `. /home/user/build/env.sh && cargo build` | 約 92 秒（release 含む） | 約 4 秒 |
+| `bash scripts/verify.sh`（cargo あり） | 約 95 秒 | 約 10 秒 |
