@@ -153,38 +153,37 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
-          LOG=/tmp/push.log
-          : > "$LOG"
-          say() { echo "$*" >> "$LOG"; }
-          cd /tmp/export || { echo "::error title=cd::/tmp/export に移動できない"; exit 1; }
-          say "== files =="; ls -l >> "$LOG" 2>&1; du -sh . >> "$LOG" 2>&1
-          ls -l chunks >> "$LOG" 2>&1
+          # push 専用のクリーンなディレクトリを作る。
+          # /tmp/export には vendor-src や tar.gz 本体が含まれ巨大なため、
+          # 分割済みチャンクだけを退避対象にする。
+          rm -rf /tmp/pushrepo
+          mkdir -p /tmp/pushrepo
+          cp -r /tmp/export/chunks /tmp/pushrepo/
+          cp /tmp/export/SHA256SUMS /tmp/pushrepo/
+          cp /tmp/export/rust-version.txt /tmp/pushrepo/
+          cd /tmp/pushrepo
+          du -sh .
+          ls -l chunks | head
 
-          git init -q; say "init=$?"
+          git init -q
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
-          git checkout -q -b cache/rust-toolchain; say "checkout=$?"
-          cp -r chunks/ .; say "cp=$?"
-          cp SHA256SUMS rust-version.txt .; say "cp2=$?"
-          git add -A; say "add=$?"
+          git checkout -q -b cache/rust-toolchain
+          git add -A
           git -c user.email="actions@github.com" -c user.name="GitHub Actions" \
-              commit -q -m "toolchain: $(cat rust-version.txt)"; say "commit=$?"
+              commit -q -m "toolchain: $(cat rust-version.txt)"
+          git count-objects -vH
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git config http.postBuffer 524288000
-          say "== sizes =="; git count-objects -vH >> "$LOG" 2>&1
+          git config http.version HTTP/1.1
 
           status=0
-          GIT_TRACE=0 git push --force --verbose origin cache/rust-toolchain >> "$LOG" 2>&1 || status=$?
-          say "push_status=$status"
+          git push --force origin cache/rust-toolchain || status=$?
           if [ "$status" -ne 0 ]; then
-            echo "--- push failed (status=$status) ---"
-            tail -c 2000 "$LOG"
-            msg="$(tr '\n' ' ' < "$LOG" | tr -s ' ' | tail -c 800)"
-            [ -n "$msg" ] || msg="(log empty)"
-            echo "::error title=push-failed::${msg}"
-            { echo "### push failed"; tail -c 3000 "$LOG"; } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=push-failed::git push が exit $status で失敗した（/tmp/pushrepo の内容を確認）"
             exit "$status"
           fi
           echo "Pushed to cache/rust-toolchain"
           PR=$(gh pr list --repo "${GITHUB_REPOSITORY}" --head "${GITHUB_REF_NAME}" --state all --json number --jq '.[0].number' 2>/dev/null || echo "")
           if [ -n "$PR" ]; then gh pr comment "$PR" --repo "${GITHUB_REPOSITORY}" --body "toolchain-export: $(cat rust-version.txt) を cache/rust-toolchain に push" || true; fi
+          echo "toolchain-export 完了" >> "$GITHUB_STEP_SUMMARY"
