@@ -11,17 +11,19 @@
 | 区分 | 状態 | 対象範囲 | 参照 |
 |---|---|---|---|
 | 初期マイルストーン | 完了 | プロジェクトセットアップ・ドキュメント管理規則の策定 | `REF:docs/history.md` |
-| 実装状況 | 計画フェーズ | 仕様書の作成中 | `REF:docs/plans.md` |
+| 仕様策定（M1） | 完了 | 9 本の仕様書・9 本の設計書の初版作成 | `REF:docs/specifications/overview.md` |
+| 実装（M2〜M3） | 未着手 | スキャフォールド以降のすべてのコード | `REF:docs/plans.md#m2-implement` |
 <!-- SYNC:END project-status -->
 
 ---
 
 ## 2. 現在のブランチ・PR・直近の作業状態
 
-- **現在のブランチ**: `arena/XXXXXXXX`（適宜書き換える）
-- **PR**: なし（または PR 番号を記載）
-- **現在の状態**: テンプレートの初期セットアップ完了。
-- **検証**: `python3 docs/script/verify-docs.py` が通過することを確認。
+- **現在のブランチ**: `arena/7d587114-llmsearch`
+- **PR**: 未作成
+- **現在の状態**: 仕様・設計ドキュメントの初版を作成し、ユーザーレビュー待ち。
+- **未確定事項**: `REF:docs/plans.md` §4 の技術スタックは提案段階であり、ユーザー承認後に確定する。
+- **検証**: `python3 docs/script/verify-docs.py` が通過することを確認済み。
 
 ---
 
@@ -37,4 +39,16 @@
    ```bash
    python3 docs/script/verify-docs.py
    ```
-3. `REF:docs/plans.md` に従い、次のマイルストーンの実装を進める。
+3. ユーザー承認が得られていれば `REF:docs/plans.md#m2-implement` のスキャフォールドから実装する。
+
+---
+
+## 4. コマンド所要時間の目安（サンドボックス）
+
+| コマンド | 初回 | 2 回目以降 |
+|---|---|---|
+| `python3 docs/script/verify-docs.py` | 約 1 秒 | 約 1 秒 |
+| `node -v` / `npm -v` | 1 秒未満（導入済み） | 1 秒未満 |
+| `npm view <pkg> version`（レジストリ照会） | 2〜20 秒 | 2〜20 秒 |
+| `npm install`（M2 のスキャフォールド後） | 未計測 | 未計測 |
+| `bash scripts/verify.sh` | 約 1 秒（docs 検査のみ） | 同左 |

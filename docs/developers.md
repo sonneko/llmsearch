@@ -55,8 +55,10 @@ docs/
 
 <!-- プロジェクトに合わせて適宜書き換える -->
 
-- **言語・ツール**: プロジェクトの依存関係に応じて調整すること
-- **ビルドツール**: 上記に同じ
+- **言語・実行環境**: Node.js 22 以上（サンドボックスには導入済み）、npm 10 以上
+- **ビルドツール**: TypeScript 5.9（`tsc`）、`tsx`（実行）、`vitest`（テスト）、`biome`（整形・静的検査）
+- **依存導入**: `registry.npmjs.org` へ直接到達できるため `npm install` がそのまま使える。`crates.io` へは到達できないため、Rust 製のツールは導入しない方針とする（技術スタックの決定理由は `REF:docs/plans.md` §4 を参照）。
+- **成果物の置き場**: `node_modules/` と `dist/` はスナップショット対象外。`package-lock.json` はコミットする。
 
 ### 2.2 Arena サンドボックス環境でのツールチェーン復旧
 
@@ -93,14 +95,23 @@ project-root/
 │   ├── history.md             # 過去の仕様改訂・意思決定・完了履歴（追記専用、REF:docs/history.md）
 │   ├── script/
 │   │   └── verify-docs.py     # ドキュメント管理規則・重複・REF 検査スクリプト
-│   ├── specifications/        # 純粋な仕様書
-│   └── designs/               # 対応する設計書
+│   ├── specifications/        # 純粋な仕様書（11 本）
+│   └── designs/               # 対応する設計書（同名 11 本）
 ├── scripts/
 │   ├── bootstrap-toolchain.sh # サンドボックス用ツールチェーン展開
 │   └── verify.sh              # コミット前の一括検証スクリプト
-├── src/                       # ソースコード
-└── tests/                     # テスト
+├── src/
+│   ├── core/                  # 純粋ドメイン層（I/O なし）
+│   ├── ports/                 # 外部境界のインターフェース
+│   ├── adapters/              # http / providers / extract / state / config / env
+│   ├── usecases/              # ユースケース（オーケストレーション）
+│   ├── ui/                    # cli（対話・サブコマンド）と render（text / json）
+│   └── main.ts                # エントリポイント
+├── tests/                     # unit / integration / contract / architecture / e2e / fixtures
+└── package.json               # bin: llmsearch
 ```
+
+各層の責務と依存方向は `REF:docs/specifications/overview.md` §6.1 と `REF:docs/designs/overview.md` §6.1 に従う。`src/core/` から `src/ports/` 以外への import を禁止する（`tests/architecture/` で機械検査する）。
 
 ---
 
@@ -173,6 +184,8 @@ project-root/
 2. **仕様書直結の契約テスト**: 仕様書の記述とコードの動作が一致することを検証
 3. **統合テスト**: 機能単位のエンドツーエンド検証
 4. **E2Eテスト**: 実際の環境での動作検証
+
+本プロジェクトでの具体的なツール・ディレクトリ・受入基準は `REF:docs/specifications/testing.md` と `REF:docs/designs/testing.md` に定義する（テストは `vitest`、外部 HTTP は `undici` の `MockAgent` で固定する）。
 
 ### 7.1 テストの運用規則
 
