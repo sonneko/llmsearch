@@ -125,6 +125,28 @@ jobs:
           rustc --version > /tmp/export/rust-version.txt
           cat /tmp/export/rust-version.txt
 
+      - name: Probe token write permission
+        if: steps.check.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          mkdir -p /tmp/probe && cd /tmp/probe
+          echo "probe $(date -u +%FT%TZ)" > probe.txt
+          git init -q
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git checkout -q -b cache/probe
+          git add -A
+          git commit -q -m "probe"
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          if ! git push --force origin cache/probe > /tmp/probe.log 2>&1; then
+            msg="$(tr '\n' ' ' < /tmp/probe.log | tail -c 900)"
+            echo "::error title=probe-push::${msg}"
+            exit 1
+          fi
+          echo "probe push ok"
+
       - name: Push to cache/rust-toolchain
         if: steps.check.outputs.enabled == 'true'
         env:
@@ -152,11 +174,10 @@ jobs:
           git push --force origin cache/rust-toolchain > /tmp/push.log 2>&1 || status=$?
           if [ "$status" -ne 0 ]; then
             echo "git push が失敗した (exit $status)"
-            tail -c 4000 /tmp/push.log
-            # サンドボックスからは Actions のログを取得できないため、コミットコメントに残す
-            tail -c 3000 /tmp/push.log > /tmp/push.tail
-            gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" \
-              -f body="$(cat /tmp/push.tail)" > /dev/null 2>&1 || true
+            # サンドボックスからは Actions のログ API へ到達できないため、
+            # 失敗理由をチェックアノテーションとして残す（API から読める）。
+            msg="$(tr '\n' ' ' < /tmp/push.log | tail -c 900)"
+            echo "::error title=push-failed::${msg}"
             exit "$status"
           fi
           echo "Pushed to cache/rust-toolchain"
