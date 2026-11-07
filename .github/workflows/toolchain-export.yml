@@ -45,7 +45,7 @@ jobs:
   export:
     name: Export Rust toolchain to cache branch
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -130,31 +130,41 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           cd /tmp/export
 
           # 孤立ブランチとして push（既存の履歴を置き換え）
-          git init
+          git init -q
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
-          git checkout -b cache/rust-toolchain
+          git checkout -q -b cache/rust-toolchain
           cp -r chunks/ .
           cp SHA256SUMS .
           cp rust-version.txt .
           git add -A
-          git commit -m "toolchain: $(cat rust-version.txt) / vendor $(ls vendor-src 2>/dev/null | wc -l || echo 0) crates"
+          git -c user.email="actions@github.com" -c user.name="GitHub Actions" \
+              commit -q -m "toolchain: $(cat rust-version.txt) / $(du -sh . | cut -f1)"
 
-          # orphan push
           git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git push --force origin cache/rust-toolchain
+          git config http.postBuffer 524288000
 
+          status=0
+          git push --force origin cache/rust-toolchain > /tmp/push.log 2>&1 || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "git push が失敗した (exit $status)"
+            tail -c 4000 /tmp/push.log
+            # サンドボックスからは Actions のログを取得できないため、コミットコメントに残す
+            tail -c 3000 /tmp/push.log > /tmp/push.tail
+            gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/comments" \
+              -f body="$(cat /tmp/push.tail)" > /dev/null 2>&1 || true
+            exit "$status"
+          fi
           echo "Pushed to cache/rust-toolchain"
 
-          # PR にコメント（PR があれば）
           PR=$(gh pr list --repo "${GITHUB_REPOSITORY}" --head "${GITHUB_REF_NAME}" --state all --json number --jq '.[0].number' 2>/dev/null || echo "")
           if [ -n "$PR" ]; then
             BODY="toolchain-export: $(cat rust-version.txt) ブランチ cache/rust-toolchain に push 完了"
             echo "$BODY"
             gh pr comment "$PR" --repo "${GITHUB_REPOSITORY}" --body "$BODY" || true
           fi
-          echo "$BODY" >> "$GITHUB_STEP_SUMMARY"
+          echo "toolchain-export 完了: $(cat rust-version.txt)" >> "$GITHUB_STEP_SUMMARY"

@@ -1,6 +1,6 @@
 # 設計書: 概要（Overview）
 
-本書は `REF:docs/specifications/overview.md` に対応する実装設計を記述する。ソースコードの実体は未作成のため、本書のパスは実装予定の配置を示す（`REF:docs/plans.md#m2-implement` 完了時点で `REF:` 参照へ切り替える）。
+本書は `REF:docs/specifications/overview.md` に対応する実装設計を記述する。プロジェクトは Rust（`edition 2021`、`rust-toolchain.toml` で 1.90 系に固定）で実装する。
 
 ---
 
@@ -8,25 +8,25 @@
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-<!-- 仕様の目的を実装でどう担保するかを記述する -->
+<!-- 目的を実装でどう担保するか、クレート構成の単位で記述する -->
 
 ### 1.1 解決したい課題
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-段階的開示をパイプラインの各工程で強制する。検索工程・アウトライン工程・節出力工程で戻り値の型を分離し、検索工程の戻り値型には本文フィールドを持たせない。これにより「一覧表示のつもりが本文を出してしまう」実装を型検査で排除する。
+段階的開示を型で強制する。`core` 層に `SearchHit`（本文を持たない）、`Outline`（見出しと文字数のみ）、`SectionBody`（選択節の本文のみ）を定義し、検索経路の戻り値から本文へ到達できない構造にする。エンジン依存は JSON 評価器（`adapters/engine/`）に閉じ込め、`core` はエンジン名を知らない。
 
 ### 1.2 提供する価値
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-対話スキン（`src/ui/cli/`）とエージェント向けサブコマンド（`src/ui/cli/commands/`）が同一のユースケース層（`src/usecases/`）を呼ぶ構成とする。価値の実装はユースケース層に集約し、UI 層は入力の解釈と出力の整形のみを担う。
+価値の実装はユースケース層に集約し、UI 層は入力の解釈と描画のみを担う。エンジン非依存は「エンジン定義の評価器が 1 種類しかない」ことではなく「エンジン固有の分岐が存在しない」ことをテスト（`tests/architecture.rs` の禁止パターン検査）で担保する。
 
 ### 1.3 想定利用者
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-エージェント向けには `REF:docs/designs/agent-integration.md` の JSON イベントを、開発者向けには `REF:docs/designs/cli-interface.md` の対話メニューを提供する。利用者ごとに別コードパスを作らず、出力レンダラのみを差し替える。
+エージェント向けの JSON 出力と、人間向けの対話メニューは同じユースケース関数を呼び、描画器のみを差し替える。クォータ残量は両方の出力に含め、計画立案に使えるようにする。
 
 ---
 
@@ -38,37 +38,49 @@
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-段階ごとに戻り値型を分ける。検索は `SearchView`（タイトル・URL・スニペットのみ）、アウトラインは `OutlineView`（見出しと文字数のみ）、節出力は `SectionView`（選択節の本文のみ）とし、下位段階の型から上位段階の本文へ到達できないようにする。定義は `src/core/view/` に置く。
+`core/view.rs` に段階ごとのビュー型を置く。`SearchHit` にスニペット以外の本文フィールドを持たせず、`Outline` から節本文を取り出す API を設けない。
 
 ### 2.2 コンテキスト予算の明示
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-予算計算を純粋関数として `src/core/context/budget.ts` に切り出し、書記素単位で計算する。切り詰めの判定と注記生成を同一関数で行い、表示側で再計算しない。
+予算計算は `core/context/budget.rs` の純粋関数とし、書記素ではなく `char` 数で計測する（表示幅は `ui/render/width.rs` が `unicode-width` で別途計算する）。切り詰めと注記生成を同一関数で行う。
 
 ### 2.3 探索と取得の分離
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-取得は `DocumentFetcher` ポート（`src/ports/document-fetcher.ts`）の背後に置き、検索ユースケースは取得ポートに依存しない。検索結果の選択が確定してはじめて取得ユースケースが呼ばれる。
+`ports::HttpClient` を検索と取得で共用するが、ユースケースは分ける。`usecases::search` は `ports::Fetcher` に依存しない。
 
-### 2.4 決定論的な出力
-
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
-
-時刻・乱数・TTY 判定は `Clock` / `IdGenerator` / `Env` ポート（`src/ports/`）を通じて注入する。変換・抽出の純粋関数は入力のみに依存させ、同一入出力をテストで検証する。
-
-### 2.5 ローカル完結とプライバシー
+### 2.4 エンジン非依存（宣言的定義）
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-永続化は状態ディレクトリ（`REF:docs/designs/session-state.md`）に閉じる。外部送信を行うのは検索プロバイダと文書取得の HTTP のみであり、テレメトリ用のコードパスを持たない。
+`core::engine` にエンジン定義の型（`EngineDef`, `RequestSpec`, `ExtractSpec`）を置き、`core::extract` に CSS セレクタ評価と JSON パス評価の純粋関数を置く。`adapters::engine` は HTTP 応答を `core` の型へ流し込むだけであり、エンジン識別子による `match` を持たない。
 
-### 2.6 礼儀正しいアクセス
+### 2.5 宣言的設定による挙動の外部化
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-レート制限・robots.txt 判定を `RefusalPolicy`（`src/usecases/net/refusal-policy.ts`）として独立させ、取得・検索の両方から共通に呼ぶ。テストではポリシーを差し替え、実通信なしで検証する。
+設定のマージは `usecases::config::resolve` で 5 層（既定値・利用者設定・プロファイル・環境変数・引数）を畳み込み、各項目の由来を `Origin` として保持する。未知キーは `serde_json::Map` に温存する（`#[serde(flatten)] extra`）。
+
+### 2.6 決定論的な出力
+
+状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+
+時刻・乱数・端末判定は `ports::{Clock, IdGen, Env}` を通す。テストでは固定実装（`tests/support/ports.rs`）を注入し、`SystemTime::now()` と `rand` 系の直接利用を禁止パターンとして検査する。
+
+### 2.7 ローカル完結とプライバシー
+
+状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+
+永続化は状態ディレクトリに閉じる。認証情報は設定の `value_env` 間接参照のみを許し、`serde` の `skip_serializing` により表示・保存の双方から値を排除する。
+
+### 2.8 礼儀と抑制
+
+状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+
+`usecases::guard` にレート制限（短時間の連続抑止）とクォータ（総量制限）を別々に実装し、取得・検索の全経路がここを通る。上限到達は `errors::AppError::Quota` として返し、暗黙の継続を行わない。
 
 ---
 
@@ -76,22 +88,25 @@
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-仕様の用語とコード上の型名の対応を次に固定する。用語の追加時はここに対応を追記する。
+仕様の用語とコード上の型名の対応を固定する。用語追加時はここへ追記する。
 
 | 用語 | 型・シンボル | 配置（実装予定） |
 |---|---|---|
-| セッション | `SessionState` | `src/core/session/state.ts` |
-| 検索結果 | `SearchResult` | `src/core/model/result.ts` |
-| ページ | `PageSlice` | `src/core/search/paging.ts` |
-| 文書 | `Document` | `src/core/model/document.ts` |
-| 見出し | `Heading` | `src/core/model/heading.ts` |
-| アウトライン | `Outline` | `src/core/outline/outline.ts` |
-| 節 | `Section` | `src/core/model/section.ts` |
-| スニペット | `Snippet` | `src/core/model/result.ts` |
-| コンテキスト予算 | `ContextBudget` | `src/core/context/budget.ts` |
-| プロバイダ | `SearchProvider`（ポート） | `src/ports/search-provider.ts` |
-| 状態ディレクトリ | `StatePaths` | `src/adapters/state/paths.ts` |
-| 対話モード | `InteractiveSession` | `src/ui/cli/interactive.ts` |
+| セッション | `SessionState` | `src/core/session.rs` |
+| 検索結果 | `SearchHit` | `src/core/model.rs` |
+| ページ | `PageSlice` | `src/core/search/paging.rs` |
+| 文書 | `Document` | `src/core/model.rs` |
+| 見出し | `Heading` | `src/core/model.rs` |
+| アウトライン | `Outline` | `src/core/outline.rs` |
+| 節 | `Section` | `src/core/model.rs` |
+| エンジン定義 | `EngineDef` | `src/core/engine.rs` |
+| 抽出ルール | `FieldSpec`, `ExtractSpec` | `src/core/engine.rs` |
+| ネットワークプロファイル | `NetworkProfile` | `src/core/config/network.rs` |
+| フィルタ | `FilterSet` | `src/core/filter.rs` |
+| クォータ | `QuotaPolicy`, `Counter` | `src/core/quota.rs` |
+| カウンタ | `Counters` | `src/core/quota.rs` |
+| 状態ディレクトリ | `StatePaths` | `src/adapters/state/paths.rs` |
+| 対話モード | `InteractiveSession` | `src/ui/cli/interactive.rs` |
 
 ---
 
@@ -103,19 +118,25 @@
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-`REF:docs/designs/cli-interface.md` のメニュー実装がユースケース層を順に呼ぶ。中断・復帰はメニューの状態機械で表現し、各状態の遷移を単体テストする。
+メニューは状態機械（`ui/cli/screens`）として実装し、遷移関数を純粋関数としてテストする。非同期ランタイム（tokio）は `ui/cli/runtime.rs` の 1 か所で `block_on` し、画面コードは同期で書く。
 
 ### 4.2 エージェントからの 1 回呼び出し
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-各サブコマンドはセッション状態を読み込み、ユースケースを 1 つ実行し、イベントを出力して状態を書き戻す。プロセスをまたぐ暗黙のキャッシュを持たない。
+各サブコマンドは状態を読み、ユースケースを 1 つ実行し、イベントを出力して書き戻す。出力には常に `quota` オブジェクト（残量）を含める。
 
 ### 4.3 過去の閲覧の再参照
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-履歴レコードから文書 ID と節識別子を引き、キャッシュが有効なら取得ポートを呼ばずに節を再構成する。
+履歴レコードから文書 ID と節 ID を引き、キャッシュが有効なら `ports::Fetcher` を呼ばずに節を再構成する。
+
+### 4.4 エンジンの切り替えと検証
+
+状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+
+`engines validate` はエンジン定義のデシリアライズと参照解決（`value_env` の存在、セレクタ構文、JSON パス構文）を検査する。`engines test` はクォータを消費する点を明示し、`--dry-run` でリクエスト定義のみを表示できるようにする。
 
 ---
 
@@ -127,13 +148,13 @@
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-スコープの各項目は `REF:docs/plans.md` のマイルストーンで実装する。実装順序は同ファイルのフェーズに従う。
+スコープの各項目は `REF:docs/plans.md` のマイルストーンに割り当てる。実装順序は同ファイルのフェーズに従う。
 
 ### 5.2 非目標
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-非目標に該当する機能は、依存の追加も行わない。将来拡張の候補は `REF:docs/plans.md#unplanned` に記録し、初期リリースのコードに準備用の分岐を残さない。
+非目標に該当する機能は依存の追加も行わない。将来拡張は `REF:docs/plans.md#unplanned` に記載し、準備用の分岐を残さない。
 
 ### 5.3 将来拡張の候補
 
@@ -152,27 +173,34 @@
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
 ```
-ui/cli（対話・サブコマンド）──┐
-ui/render（text / json）    ──┴─► usecases ─► core（純粋ロジック）
-                                    │
-                                    ├─► ports（SearchProvider, DocumentFetcher, StateStore,
-                                    │          HistoryStore, Clock, IdGenerator, Env, Reporter）
-                                    └─► adapters（http, state/fs, providers/*, extract/*）
+ui/cli（対話・サブコマンド）
+  └─► ui/render（text / json）
+        └─► usecases（search / fetch / outline / read / history / config / quota）
+              ├─► core（model, engine, extract, markdown, outline, context, filter, quota）
+              └─► ports（HttpClient, Fetcher, StateStore, HistoryStore, Clock, IdGen, Env, Reporter）
+                    └─► adapters（http/reqwest, state/fs, engine/eval, extract/density）
 ```
 
-依存方向は `ui → usecases → core`、`usecases → ports ← adapters` とする。`core` は `ports` と `adapters` に依存しない（`tests/architecture/layering.test.ts` で import 文を走査して検査）。
+依存方向は `ui → usecases → core`、`usecases → ports ← adapters`。`core` は `ports`・`adapters` に依存しない（`tests/architecture.rs` がソースの `use` 文を走査して検査する）。
 
-### 6.2 状態の保持単位
-
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
-
-セッション・文書・履歴の 3 種を `StateStore` / `HistoryStore` ポートで抽象化し、アダプタとしてファイルシステム実装（`src/adapters/state/fs-store.ts`）を用意する。テストではメモリ実装（`src/adapters/state/memory-store.ts`）を用いる。
-
-### 6.3 拡張点
+### 6.2 設定駆動の境界
 
 状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
 
-1. **プロバイダ追加**: `SearchProvider` ポートの実装追加のみで完結させる。登録方法は `REF:docs/designs/search-providers.md` §1.1 に記述する。
-2. **変換器の差し替え**: `HtmlToMarkdown` ポートを設け、既定実装を `src/adapters/extract/readability.ts` に置く。
-3. **出力形式の追加**: `Renderer` インターフェース（`text` / `json`）を出力形式ごとに実装する。
-4. **未知設定の温存**: 設定パーサで未知キーを保持し、書き戻し時に再出力する（`REF:docs/designs/configuration.md` §3.2）。
+`core::engine::EngineDef` のフィールド以外に、エンジン固有の知識をコードへ置かない。禁止パターン（特定ドメインの文字列リテラル、エンジン ID による分岐）を `tests/architecture.rs` で検出する。組み込み既定エンジンも `engines/*.json` として同梱し、コードへ埋め込まない。
+
+### 6.3 状態の保持単位
+
+状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+
+セッション・文書・履歴・カウンタの 4 種を `StateStore` / `HistoryStore` / `CounterStore` トレイトで抽象化し、ファイル実装（`adapters/state/fs_*.rs`）とメモリ実装（`tests/support/memory_store.rs`）を用意する。
+
+### 6.4 拡張点
+
+状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+
+1. **エンジン追加**: JSON の追加のみ。応答種別は `response.kind`（`html` / `json`）で宣言する。
+2. **抽出方式の追加**: `trait Extractor` を追加実装し、`response.kind` への登録を 1 か所（`adapters/engine/registry.rs`）に限定する。
+3. **ネットワーク実装の差し替え**: `ports::HttpClient` の実装差し替えで完結させる。
+4. **出力形式の追加**: `trait Renderer`（`text` / `json`）を追加実装する。
+5. **未知設定の温存**: `#[serde(flatten)] extra` に保持し、書き戻し時に再出力する。
