@@ -13,10 +13,10 @@
         "url_regex": "^https?://[^/]+/(login|signin|register)"
       },
       {
-        "title_regex": "^(ログイン|サインイン|Sign in|Log in)\\b"
+        "title_regex": "^(ログイン|サインイン|Sign in|Log in)(\\b|$)"
       },
       {
-        "title_contains": ["404 Not Found", "ページが見つかりません"]
+        "titleRegex": "404 Not Found|ページが見つかりません"
       }
     ],
     "allow": [

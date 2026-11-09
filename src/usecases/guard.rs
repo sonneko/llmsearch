@@ -25,8 +25,14 @@ impl Guard {
         store: Arc<dyn CounterStore>,
         clock: Arc<dyn Clock>,
         reporter: Arc<dyn Reporter>,
+        session_id: &str,
     ) -> Result<Self, AppError> {
         let mut counters = store.load()?;
+        // セッションが変わったらセッション消費量を 0 に戻す
+        if counters.session_key != session_id {
+            counters.session_key = session_id.to_string();
+            counters.session = Usage::default();
+        }
         let today = clock.today_local().format("%Y-%m-%d").to_string();
         if counters.day_key != today {
             counters.day = Usage::default();
@@ -39,12 +45,13 @@ impl Guard {
         if !policy.enabled {
             reporter.verbose("クォータは無効（全ての上限を適用しない）");
         }
+        let session = counters.session;
         Ok(Self {
             policy,
             store,
             clock,
             reporter,
-            session: Usage::default(),
+            session,
             counters,
         })
     }
@@ -99,6 +106,7 @@ impl Guard {
 
     fn apply(&mut self, metric: Metric, amount: u64) {
         self.session.add(metric, amount);
+        self.counters.session.add(metric, amount);
         self.counters.day.add(metric, amount);
         self.counters.total.add(metric, amount);
         let now = self.clock.now_utc();
@@ -209,6 +217,7 @@ mod tests {
             store,
             Arc::new(SystemClock::new()),
             Arc::new(Silent),
+            "test-session",
         )
         .unwrap()
     }

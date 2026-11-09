@@ -183,6 +183,9 @@ pub struct WindowCounter {
 #[serde(rename_all = "camelCase", default)]
 pub struct Counters {
     pub day_key: String,
+    /// セッション消費量の持ち主（セッション識別子）。
+    pub session_key: String,
+    pub session: Usage,
     pub day: Usage,
     pub window: Vec<WindowCounter>,
     pub total: Usage,

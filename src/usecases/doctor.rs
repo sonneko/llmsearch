@@ -184,11 +184,16 @@ pub fn run(app: &App) -> Vec<CheckResult> {
         });
     }
 
+    let session = app.current_session_id();
     out.push(CheckResult {
         name: "session".into(),
         check: Check::Ok(format!(
             "{} / 既定エンジン {}",
-            app.current_session_id(),
+            if session.is_empty() {
+                "(未作成)"
+            } else {
+                session.as_str()
+            },
             app.default_engine
         )),
     });

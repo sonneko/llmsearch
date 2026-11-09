@@ -59,12 +59,24 @@ pub struct App {
 impl App {
     /// ガード（レート制限 + クォータ）を作る。
     pub fn guard(&self) -> Result<Guard, AppError> {
+        let session = self.current_session_id();
         Guard::new(
             self.quota.clone(),
             Arc::clone(&self.counters),
             Arc::clone(&self.clock),
             Arc::clone(&self.reporter),
+            &session,
         )
+    }
+
+    /// HTTP 実装を差し替える（テスト・診断用）。
+    pub fn set_http(&mut self, http: Arc<dyn HttpClient>) {
+        self.http = http;
+    }
+
+    /// 時計を差し替える。
+    pub fn set_clock(&mut self, clock: Arc<dyn Clock>) {
+        self.clock = clock;
     }
 
     /// 追跡パラメータ。

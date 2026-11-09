@@ -51,6 +51,10 @@ pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppEr
     let limit = app.settings.search.limit.max(1);
     let limit_u32 = limit as u32;
 
+    // セッションを確定してからクォータを判定する（セッション単位の上限のため）
+    let session_id = app.ensure_session()?;
+    app.set_session(session_id);
+
     // クォータ確認（送信前に判定し、成功後に消費する）
     let mut guard = app.guard()?;
     guard.check(Metric::Searches, 1)?;

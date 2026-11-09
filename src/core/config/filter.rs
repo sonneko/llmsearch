@@ -152,9 +152,29 @@ fn any_match(values: &OneOrMany, f: impl Fn(&str) -> bool) -> bool {
     values.iter().any(|v| f(v))
 }
 
+/// 規則が「何も指定していない」状態か。
+fn is_empty_rule(spec: &RuleSpec) -> bool {
+    spec.host.is_none()
+        && spec.host_regex.is_none()
+        && spec.url_regex.is_none()
+        && spec.path_prefix.is_none()
+        && spec.title_regex.is_none()
+        && spec.snippet_regex.is_none()
+        && spec.title_contains.is_none()
+        && spec.scheme.is_none()
+        && spec.older_than_days.is_none()
+        && spec.newer_than_days.is_none()
+        && spec.extension.is_none()
+        && spec.language.is_none()
+}
+
 impl CompiledRule {
     pub fn matches(&self, hit: &SearchHit, now: chrono::NaiveDate) -> bool {
         let spec = &self.spec;
+        if is_empty_rule(spec) {
+            // 空の規則は何にも一致しない（全件除外を避ける）
+            return false;
+        }
         let url = match url::parse(&hit.url) {
             Ok(u) => u,
             Err(_) => return spec.host.is_some() || spec.url_regex.is_some(),

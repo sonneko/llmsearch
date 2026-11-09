@@ -45,7 +45,7 @@ pub struct Resolved {
 
 /// 同梱リソースのディレクトリ。
 pub fn bundled_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
 }
 
 /// 依存を組み立ててアプリを作る。
@@ -136,10 +136,12 @@ pub fn build(
         .or_else(|| env.var("LLMSEARCH_ENGINE"))
         .or_else(|| loaded.settings.search.engine.clone())
         .or_else(|| {
+            // 認証情報が不要なエンジンを優先し、その中では定義順の先頭を選ぶ
             loaded_engines
                 .registry
                 .enabled()
-                .next()
+                .find(|e| !e.limits.requires_api_key)
+                .or_else(|| loaded_engines.registry.enabled().next())
                 .map(|e| e.selector())
         })
         .ok_or_else(|| {

@@ -116,6 +116,7 @@ pub fn validate(app: &App, selectors: &[String]) -> Vec<(String, Vec<Check>)> {
 }
 
 /// リクエストの組み立て結果（`--dry-run`）。
+#[derive(Debug, Clone)]
 pub struct DryRun {
     pub url: String,
     pub method: String,

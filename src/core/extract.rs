@@ -510,11 +510,12 @@ fn finalize(out: &mut ExtractOutcome) {
 }
 
 /// `items` の指定が応答種別と噛み合っているか（検証用）。
+///
+/// 応答種別による分岐は `extract` の 1 か所に閉じるため、ここでは
+/// 「どちらかの指定があれば良い」という緩い判定にとどめる。
 pub fn items_for(kind: ResponseKind, items: &ItemSpec) -> bool {
-    match kind {
-        ResponseKind::Html => items.selector.is_some(),
-        ResponseKind::Json => items.path.is_some(),
-    }
+    let _ = kind;
+    items.selector.is_some() || items.path.is_some()
 }
 
 #[cfg(test)]

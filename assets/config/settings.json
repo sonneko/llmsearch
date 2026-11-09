@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "search": {
-    "engine": null,
+    "engine": "duckduckgo",
     "limit": 7,
     "maxResults": 30,
     "fallback": [],

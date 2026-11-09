@@ -34,6 +34,8 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
         std::sync::Arc::clone(&app.reporter),
     );
 
+    let id_hint = app.ensure_session()?;
+    app.set_session(id_hint.clone());
     let mut guard = app.guard()?;
     guard.check(Metric::Fetches, 1)?;
 
@@ -67,7 +69,6 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
         ..Default::default()
     })?;
 
-    let id_hint = app.ensure_session()?;
     let mut session = app
         .sessions
         .load(&id_hint)?
@@ -237,11 +238,7 @@ pub fn read(
 
     if headings.is_empty() || section_ids.contains(&0) {
         let raw = outline::whole_body(&markdown);
-        let (text_out, truncated, total) = if raw_is_single(&bodies) {
-            (raw.clone(), false, text::chars(&raw))
-        } else {
-            context::truncate_to_budget(&raw, budget)
-        };
+        let (text_out, truncated, total) = context::truncate_to_budget(&raw, budget);
         bodies.push(SectionBody {
             heading_id: 0,
             level: 1,
@@ -359,10 +356,6 @@ pub fn read(
         budget,
         truncated,
     })
-}
-
-fn raw_is_single(bodies: &[SectionBody]) -> bool {
-    bodies.len() <= 1
 }
 
 fn next_heading_id(headings: &[Heading], current: &Heading) -> Option<u32> {

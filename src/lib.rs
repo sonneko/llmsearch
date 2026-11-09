@@ -5,6 +5,7 @@
 pub mod adapters;
 pub mod core;
 pub mod ports;
+pub mod ui;
 pub mod usecases;
 
 /// 版数。
