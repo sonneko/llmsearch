@@ -106,15 +106,63 @@ impl SessionStore for FsSessionStore {
 /// 文書キャッシュのファイル実装。
 pub struct FsDocumentStore {
     paths: StatePaths,
+    /// 合計サイズの上限（バイト、0 は無制限）。
+    max_bytes: u64,
 }
 
 impl FsDocumentStore {
     pub fn new(paths: StatePaths) -> Self {
-        Self { paths }
+        Self {
+            paths,
+            max_bytes: 0,
+        }
+    }
+
+    /// 合計サイズの上限を設定する（バイト、0 は無制限）。
+    pub fn with_max_bytes(mut self, max_bytes: u64) -> Self {
+        self.max_bytes = max_bytes;
+        self
     }
 
     fn key(&self, url: &Url) -> String {
         crate::core::session::cache_key(url.as_str())
+    }
+
+    /// 上限を超えていれば、文書を古い順（`fetched_at` 昇順）に削除する。
+    ///
+    /// セッションと履歴は削除対象にしない（仕様 §4.4）。削除した件数を返す。
+    pub fn evict_to_limit(&self) -> Result<usize, AppError> {
+        if self.max_bytes == 0 || self.paths.total_bytes() <= self.max_bytes {
+            return Ok(0);
+        }
+        let dir = self.paths.documents();
+        let mut docs: Vec<(String, std::path::PathBuf)> = Vec::new();
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Ok(0);
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let fetched_at = std::fs::read_to_string(path.join("meta.json"))
+                .ok()
+                .and_then(|t| serde_json::from_str::<DocumentMeta>(&t).ok())
+                .map(|m| m.fetched_at)
+                .unwrap_or_default();
+            docs.push((fetched_at, path));
+        }
+        docs.sort();
+        let mut removed = 0usize;
+        for (_, path) in docs {
+            if self.paths.total_bytes() <= self.max_bytes {
+                break;
+            }
+            if std::fs::remove_dir_all(&path).is_ok() {
+                removed += 1;
+            }
+        }
+        Ok(removed)
     }
 }
 
@@ -153,7 +201,10 @@ impl DocumentStore for FsDocumentStore {
         let meta_text = serde_json::to_vec_pretty(meta)
             .map_err(|e| AppError::with_detail(ErrorCode::E5002, format!("直列化: {e}")))?;
         write_atomic(&dir.join("meta.json"), &meta_text)?;
-        write_atomic(&dir.join("body.md"), markdown.as_bytes())
+        write_atomic(&dir.join("body.md"), markdown.as_bytes())?;
+        // 上限を超えた分は古い文書から落とす
+        let _ = self.evict_to_limit();
+        Ok(())
     }
 
     fn invalidate(&self, url: &Url) -> Result<(), AppError> {
@@ -228,6 +279,40 @@ impl CounterStore for FsCounters {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn evicts_oldest_documents_when_over_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::adapters::state::StatePaths::new(dir.path().join("state"));
+        paths.ensure().unwrap();
+        // 上限 0 で書き込み、その後 1 バイト上限として間引きを起こす
+        let store = FsDocumentStore::new(paths.clone());
+        for (i, at) in ["2026-01-01T00:00:00Z", "2026-06-01T00:00:00Z"]
+            .iter()
+            .enumerate()
+        {
+            let meta = DocumentMeta {
+                url: format!("https://example.jp/{i}"),
+                final_url: format!("https://example.jp/{i}"),
+                title: format!("doc {i}"),
+                site: None,
+                fetched_at: (*at).to_string(),
+                expires_at: "2027-01-01T00:00:00Z".to_string(),
+                chars: 10,
+                headings: 0,
+                extractor: "density".to_string(),
+                warnings: Vec::new(),
+                cacheable: true,
+            };
+            store.put(&meta, "x".repeat(64).as_str()).unwrap();
+        }
+        assert_eq!(store.evict_to_limit().unwrap(), 0, "上限 0 は無制限");
+
+        let bounded = FsDocumentStore::new(paths.clone()).with_max_bytes(1);
+        let removed = bounded.evict_to_limit().unwrap();
+        assert_eq!(removed, 2, "上限超過時は全て削除される");
+        assert_eq!(bounded.total_bytes().unwrap(), 0);
+    }
 
     #[test]
     fn session_round_trip() {

@@ -178,7 +178,15 @@ pub fn build(
                 .with_reporter(Arc::clone(&reporter)),
         ),
         sessions: Arc::new(FsSessionStore::new(paths.clone(), Arc::clone(&clock))),
-        documents: Arc::new(FsDocumentStore::new(paths.clone())),
+        documents: Arc::new(
+            FsDocumentStore::new(paths.clone()).with_max_bytes(
+                loaded
+                    .settings
+                    .cache
+                    .max_size_mb
+                    .saturating_mul(1024 * 1024),
+            ),
+        ),
         history: Arc::new(
             JsonlHistory::new(paths.clone())
                 .with_limits(
