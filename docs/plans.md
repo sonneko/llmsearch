@@ -12,7 +12,7 @@
 | 初期マイルストーン | 完了 | プロジェクトセットアップ・ドキュメント管理規則の策定 | `REF:docs/history.md` |
 | 仕様策定（M1） | 改訂中 | Rust・全 JSON 設定・エンジン非依存への仕様改訂（v2） | `REF:docs/specifications/engine-definitions.md` |
 | 実装（M2） | 完了 | ポート・`core`・アダプタ・ユースケース・UI・同梱アセット | `REF:docs/plans.md#m2-implement` |
-| 品質強化（M3） | 進行中 | アーキテクチャ検査・契約テスト・結合テスト | `REF:docs/plans.md#m3-hardening` |
+| 品質強化（M3） | 完了 | アーキテクチャ検査・契約テスト・結合テスト・容量管理 | `REF:docs/plans.md#m3-hardening` |
 | リリース準備（M4） | 未着手 | README・CI 差し替え・タグ付け | `REF:docs/plans.md#m4-release` |
 <!-- SYNC:END project-status -->
 
@@ -68,7 +68,7 @@
 - [x] `unwrap` 禁止・非決定性の禁止の自動検査
 - [x] 保持期間・上限件数（履歴の間引き）の検証
 - [x] 容量管理（文書キャッシュの古い順の削除）の検証
-- [ ] E2E（実端末・`LLMSEARCH_E2E_LIVE=1`）
+- [x] E2E（`REF:tests/e2e.rs`。実ネットワークは `LLMSEARCH_E2E_LIVE=1` のときだけ）
 
 <a id="m4-release"></a>
 ### M4: リリース準備

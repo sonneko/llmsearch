@@ -87,6 +87,12 @@ python3 docs/script/verify-docs.py
 
 テストは lib（単体）・`tests/architecture.rs`（層構造・エンジン非依存・警告コードの発行元・決定論性）・`tests/contract.rs`（JSON 定義の契約）・`tests/integration.rs`（検索→取得→アウトライン→節読み）の 4 種。
 
+実ネットワークを使う E2E は既定で実行しない。動かす場合は次のとおり。
+
+```bash
+LLMSEARCH_E2E_LIVE=1 cargo test --test e2e -- --nocapture
+```
+
 ---
 
 ## リポジトリの来歴（テンプレート）
