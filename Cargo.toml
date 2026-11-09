@@ -42,3 +42,9 @@ tempfile = "3"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# 配布用（release.yml が使う）。LTO と strip で 1 ファイルにまとめる。
+[profile.release-dist]
+inherits = "release"
+strip = true
+panic = "abort"

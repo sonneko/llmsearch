@@ -122,3 +122,12 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
 - `W4006`: 仕様書の表に存在しない。実装でも使用していないため、コード表に追加しない。
 - あわせて `W1001`（端末でないのに装飾を要求された）と `W2001`（レート制限の待機）を実際に発行するようにし、`W3004`（再取得で見出し数が変化）を追加した。宣言だけされて発行されないコードは、利用者にとって存在しないのと同じであるため。
 - この不変条件は `REF:tests/architecture.rs` の `warning_codes_are_emitted_where_spec_says` で機械検査する。
+
+### [HIST:DECISION:D007] 2026-11-09 配布は Linux x86_64 の単一バイナリ 1 種類とする
+[HIST-TAG: category=DECISION id=D007 topics=release,ci,dist,binary]
+
+- ユーザー指示により、リリース時にビルドする成果物は Linux x86_64 の実行ファイル 1 種類のみとした。
+- 配布用プロファイル `release-dist`（`REF:Cargo.toml`）で LTO と `strip` を有効にし、約 9.4 MiB の単体ファイルにする。`panic = "abort"` も指定し、実行時サイズを抑える。
+- リリースは `REF:.github/workflows/release.yml` がタグ push（`v*`）で実行し、`llmsearch-<version>-x86_64-unknown-linux-gnu.tar.gz` と SHA256 を添付する。リリースノートは GitHub が自動生成する。
+- 却下案: 複数 OS・複数アーキテクチャのマトリクスビルドは、現時点で必要とされていないため見送った。追加する場合は同じワークフローに `strategy.matrix` を足すだけで済む。
+- 削除: 用途のない Pages デプロイ用ワークフロー（旧 `deploy.yml`）は誤って走る余地があるため削除した。

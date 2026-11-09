@@ -100,31 +100,36 @@ project-root/
 │   ├── bootstrap-rust.sh      # Rust ツールチェーン + vendored crates の展開
 │   └── verify.sh              # コミット前の一括検証スクリプト
 ├── src/
-│   ├── core/                  # 純粋ドメイン層（I/O なし）
-│   │   ├── config/            # 設定・ネットワーク・フィルタ・クォータの型と検証
-│   │   ├── engine.rs          # エンジン定義の型
-│   │   ├── template.rs        # {{var}} 展開
-│   │   ├── extract/           # 抽出仕様の意味（JSON パス・変換）
-│   │   ├── markdown/          # 見出し・後処理・リンク
-│   │   ├── outline/           # 見出し抽出・節分割
-│   │   ├── context/           # コンテキスト予算
-│   │   ├── filter/            # 結果・本文フィルタ
-│   │   ├── quota.rs           # カウンタ・上限判定
-│   │   ├── history/           # 履歴イベント・要約・絞り込み
+│   ├── core/                  # 純粋ドメイン層（I/O なし。ファイルは 1 概念 1 モジュール）
+│   │   ├── config/            # settings / network / filter / quota の型と検証・マージ
+│   │   ├── engine.rs          # エンジン定義の型（JSON スキーマ）
+│   │   ├── extract.rs         # 抽出仕様の評価（HTML / JSON）
+│   │   ├── template.rs        # エンジン定義の {{var}} 展開
+│   │   ├── convert.rs         # HTML → Markdown（密度推定・htmd）
+│   │   ├── markdown.rs        # 後処理・リンク・正規化
+│   │   ├── outline.rs         # 見出し抽出・節分割
+│   │   ├── context.rs         # コンテキスト予算と切り詰め
+│   │   ├── search.rs          # 検索結果の正規化・重複除去・採番
+│   │   ├── select.rs          # 選択入力（`D1:S3` 等）の解釈
+│   │   ├── history.rs         # 履歴イベント・絞り込み
+│   │   ├── session.rs         # セッション状態・キャッシュキー
 │   │   ├── robots.rs          # robots.txt の評価
-│   │   └── errors/            # エラーコード・カタログ
-│   ├── ports/                 # 外部境界のトレイト
-│   ├── adapters/              # http / engine / extract / state / config / env
-│   ├── usecases/              # search / document / guard / history / config / doctor
-│   ├── ui/                    # cli（対話・サブコマンド）と render（text / json）
-│   └── main.rs                # エントリポイント
-├── assets/                    # 同梱の既定定義（engines / network / filters / quotas）
-├── tests/                     # unit / contract / integration / architecture / e2e / fixtures
+│   │   ├── secret.rs          # 秘匿値の伏字化
+│   │   ├── text.rs / url.rs   # 文字数・切り詰め / URL 正規化
+│   │   └── errors.rs          # エラーコード・警告コード・メッセージ
+│   ├── ports/                 # 外部境界のトレイト（http / fetch / state / system）
+│   ├── adapters/              # http / engine（loader・eval）/ extract / state / config / system
+│   ├── usecases/              # search / document / guard / history / engines / config / doctor / target
+│   ├── ui/                    # cli（引数）・commands（非対話）・interactive・menu・render
+│   ├── lib.rs                 # モジュール公開
+│   └── main.rs                # エントリポイント（依存の組み立てと振り分けのみ）
+├── assets/                    # 同梱の既定定義（engines / network / filters / quotas / config）
+├── tests/                     # support / architecture / contract / integration / assets / e2e
 ├── Cargo.toml
 └── rust-toolchain.toml
 ```
 
-各層の責務と依存方向は `REF:docs/specifications/overview.md` §6.2 と `REF:docs/designs/overview.md` §6.1 に従う。`src/core/` から `src/ports/` 以外への import を禁止し、エンジン名による分岐を持たないことを `tests/architecture.rs` で機械検査する。
+各層の責務と依存方向は `REF:docs/specifications/overview.md` §6.2 と `REF:docs/designs/overview.md` §6.1 に従う。`src/core/` から `src/ports/`・`src/adapters/`・`src/usecases/`・`src/ui/` への import を禁止し（`core` は純粋層）、エンジン名による分岐を持たないことを `REF:tests/architecture.rs` で機械検査する。
 
 ## 4. スクリプトの使い方
 
@@ -196,7 +201,15 @@ project-root/
 3. **統合テスト**: 機能単位のエンドツーエンド検証
 4. **E2Eテスト**: 実際の環境での動作検証
 
-本プロジェクトでの具体的なツール・ディレクトリ・受入基準は `REF:docs/specifications/testing.md` と `REF:docs/designs/testing.md` に定義する（テストは `cargo test`、外部 HTTP は `ports::HttpClient` の偽実装で固定する）。
+本プロジェクトでの具体的なツール・ディレクトリ・受入基準は `REF:docs/specifications/testing.md` と `REF:docs/designs/testing.md` に定義する。実行は `cargo test --locked --offline` で完結し、外部 HTTP は `REF:tests/support/mod.rs` の `FakeHttp` で固定する。
+
+| ファイル | 層 | 検証内容 |
+|---|---|---|
+| `REF:tests/architecture.rs` | アーキテクチャ | 層の依存方向、`core` の純粋性、エンジン名分岐の禁止、警告コードの発行元、テスト外の `panic` 禁止、時刻・乱数・環境変数の直読み禁止、同梱 JSON の秘匿値 |
+| `REF:tests/contract.rs` | 契約 | エンジン種別に依存しない抽出、変換の意味、`errorWhen`、フィルタの適用範囲 |
+| `REF:tests/integration.rs` | 統合 | 検索→選択→取得→アウトライン→節読み、クォータ停止、キャッシュ |
+| `REF:tests/assets.rs` | 契約 | 同梱アセットが定義として妥当であること |
+| `REF:tests/e2e.rs` | E2E | 同梱アセットのみでの起動、出力の決定論性、非 TTY の `E1001`。実ネットワークは `LLMSEARCH_E2E_LIVE=1` のときだけ |
 
 ### 7.1 テストの運用規則
 
