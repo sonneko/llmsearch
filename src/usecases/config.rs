@@ -179,7 +179,14 @@ pub fn build(
         ),
         sessions: Arc::new(FsSessionStore::new(paths.clone(), Arc::clone(&clock))),
         documents: Arc::new(FsDocumentStore::new(paths.clone())),
-        history: Arc::new(JsonlHistory::new(paths.clone())),
+        history: Arc::new(
+            JsonlHistory::new(paths.clone())
+                .with_limits(
+                    loaded.settings.history.retention_days,
+                    loaded.settings.history.max_entries,
+                )
+                .with_clock(Arc::clone(&clock)),
+        ),
         counters: Arc::new(FsCounters::new(paths.clone(), Arc::clone(&clock))),
         engines: loaded_engines.registry,
         no_filter: bootstrap.no_filter,
