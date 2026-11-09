@@ -1,4 +1,101 @@
-# Arena.ai LLM仕様駆動開発テンプレート
+# llmsearch
+
+Web を人間のように段階的に調べ、LLM のコンテキスト消費を抑える CLI。
+
+検索結果 → 見出し一覧（アウトライン）→ 選んだ節の本文、という順に必要な分だけ取り出す。検索エンジンとネットワーク挙動は同梱の JSON 定義で切り替えるため、コアにエンジン固有の実装を持たない。設定・フィルタ・クォータもすべて JSON で宣言する。
+
+仕様・設計は `docs/specifications/` と `docs/designs/` にある。実装の進捗は `docs/plans.md`、判断の経緯は `docs/history.md` を参照。
+
+## 導入（ソースから）
+
+```bash
+cargo build --release
+./target/release/llmsearch doctor
+```
+
+`doctor` は設定・同梱アセット・環境変数・ネットワークの状態を点検し、問題があれば `[warn]` / `[fail]` を出す。
+
+## 初期設定
+
+初回は同梱の既定値だけで動く。ユーザー設定を作る場合は次のいずれか。
+
+```bash
+llmsearch config path        # 設定ファイルの探索先を表示する
+llmsearch config init        # 雛形を書き出す（既存ファイルがあれば --force が必要）
+llmsearch config show        # 解決後の値と由来を表示する
+llmsearch config explain search.limit   # 個別のキーを説明する
+```
+
+状態ディレクトリ（セッション・履歴・文書キャッシュ）は既定で `~/.local/state/llmsearch`。
+
+## 典型的な使い方
+
+```bash
+llmsearch search "気候変動 適応策"        # 1 ページ 7 件を検索
+llmsearch outline https://example.jp/doc  # 見出し一覧（本文は出さない）
+llmsearch read https://example.jp/doc --section D1:S3   # 節だけを読む
+llmsearch read https://example.jp/doc --section D1:S3-D2:S1 --max-chars 4000
+llmsearch next                             # 同じクエリの次ページ
+llmsearch refine "気候変動 適応策 自治体"  # 検索語を変えて再検索
+```
+
+引数なしで起動すると対話モードになり、番号を選ぶだけで検索 → 選択 → 取得 → 節読みを進められる（`1)終了 2)検索結果の選択（複数可） 3)8 件目以降を見る 4)検索ワードを修正する`）。
+
+エージェントから使う場合やパイプで受ける場合は `--json` を付ける。データは標準出力、メニュー・進捗・警告は標準エラーに出る。
+
+## エンジンの追加方法
+
+`assets/engines/*.json` と同じ形式の JSON を `--engines-dir <PATH>` かユーザー設定ディレクトリに置く。再ビルドは不要。
+
+```json
+{
+  "id": "mysearx",
+  "url": "https://searx.example.jp/search?q={query}&pageno={page}",
+  "response": {
+    "kind": "html",
+    "items": { "selector": "article.result" },
+    "fields": {
+      "title": { "selector": "h3", "attr": "text" },
+      "url":   { "selector": "a", "attr": "href", "absolutize": true }
+    }
+  }
+}
+```
+
+```bash
+llmsearch engines validate mysearx          # 定義を検証する
+llmsearch engines test --query テスト mysearx --dry-run   # 送信せず組み立てだけ確認する
+llmsearch engines test --query テスト mysearx   # 1 回だけ実行する
+```
+
+API キーは JSON に書かず `value_env` で環境変数名を参照する。同梱の `brave` は `BRAVE_API_KEY` を参照する。
+
+## 制限と注意
+
+- クォータ既定: セッション 50 検索 / 600 秒あたり 120 検索 / 日次 500 検索。超過すると `E5005` で停止する（`llmsearch quota show` で残量確認）。
+- 取得は http/https のみ、5 MiB 上限、リダイレクト 5 回まで、タイムアウト 5 秒 / 20 秒。
+- 抽出した本文は `[untrusted] <url>` を付けて出し、指示文として解釈しない。
+
+## 開発
+
+```bash
+cargo fmt --all --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+python3 docs/script/verify-docs.py
+```
+
+テストは lib（単体）・`tests/architecture.rs`（層構造・エンジン非依存・警告コードの発行元・決定論性）・`tests/contract.rs`（JSON 定義の契約）・`tests/integration.rs`（検索→取得→アウトライン→節読み）の 4 種。
+
+実ネットワークを使う E2E は既定で実行しない。動かす場合は次のとおり。
+
+```bash
+LLMSEARCH_E2E_LIVE=1 cargo test --test e2e -- --nocapture
+```
+
+---
+
+## リポジトリの来歴（テンプレート）
 
 このテンプレートは、Arena.aiのエージェントモードを使用してLLMによる仕様駆動開発を行うためのリポジトリ構成とワークフローのベストプラクティスをまとめたものです。
 

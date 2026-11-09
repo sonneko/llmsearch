@@ -1,0 +1,82 @@
+name: Release
+
+# タグ（vX.Y.Z）の push で、Linux x86_64 の実行ファイル 1 種類をビルドしてリリースへ添付する。
+# 仕様: 単一バイナリ配布（REF:docs/developers.md §2.1）。
+#
+# 使い方:
+#   git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "既存のタグ名（例: v0.1.0）"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BIN: llmsearch
+  TARGET: x86_64-unknown-linux-gnu
+
+jobs:
+  build:
+    name: Build & Release (Linux x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.90.0"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --locked --profile release-dist
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            version="${{ github.event.inputs.tag }}"
+          fi
+          name="${BIN}-${version}-${TARGET}"
+          mkdir -p "dist/${name}"
+          cp "target/release-dist/${BIN}" "dist/${name}/"
+          cp README.md LICENSE "dist/${name}/"
+          ( cd dist && tar -czf "${name}.tar.gz" "${name}" )
+          ( cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256" )
+          echo "ARTIFACT=dist/${name}.tar.gz" >> "$GITHUB_ENV"
+          echo "CHECKSUM=dist/${name}.tar.gz.sha256" >> "$GITHUB_ENV"
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          ./target/release-dist/llmsearch --version
+          ./target/release-dist/llmsearch engines list > /dev/null
+          ./target/release-dist/llmsearch config show > /dev/null
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            ${{ env.ARTIFACT }}
+            ${{ env.CHECKSUM }}

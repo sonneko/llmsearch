@@ -55,15 +55,17 @@ docs/
 
 <!-- プロジェクトに合わせて適宜書き換える -->
 
-- **言語・ツール**: プロジェクトの依存関係に応じて調整すること
-- **ビルドツール**: 上記に同じ
+- **言語・実行環境**: Rust 1.90 系（`REF:rust-toolchain.toml` で固定）。Rust 製の単一バイナリとして配布する（Node.js / Python は実行時に不要）。
+- **ビルド・検証ツール**: `cargo`、`rustfmt`、`clippy`、`cargo test`。整形・静的解析・テストはすべて `cargo` で完結させ、外部の lint ツールを追加しない。
+- **依存導入**: `crates.io` と `static.rust-lang.org` へは到達できないため、`REF:docs/designs/overview.md` §6.1 の構成を保ったまま、`REF:.github/workflows/toolchain-export.yml` の `cargo vendor` で退避したツールチェーンと vendored crates を用いる。
+- **成果物の置き場**: `target/` はスナップショット対象外。`Cargo.lock` はコミットし、`--locked` でビルドする。
 
 ### 2.2 Arena サンドボックス環境でのツールチェーン復旧
 
 Arena サンドボックスには初期状態で目的のツールチェーンが入っていない場合がある。外部通信が制限されているため、以下の手順でツールチェーンを展開する。
 
 **プロジェクトの技術スタックに応じた復旧手順**:
-- Rust を使用する場合: `dependencies/rust/README.md` の手順に従う（`scripts/bootstrap-rust.sh` を配置済みであること）
+- 本プロジェクトは Rust を使用する。`REF:scripts/bootstrap-rust.sh` と `REF:.github/workflows/toolchain-export.yml` を配置済みであり、`cache/rust-toolchain` ブランチからツールチェーンと vendored crates を展開する（背景は `REF:dependencies/rust/README.md`）。
 - その他の技術スタック: `dependencies/` 内の該当ディレクトリを参照（存在しない場合はプロジェクト固有の手順を記述すること）
 
 1. **ツールチェーンの展開**:
@@ -82,8 +84,6 @@ Arena サンドボックスには初期状態で目的のツールチェーン�
 
 ## 3. ソースコードのディレクトリ構造
 
-<!-- プロジェクトに合わせて適宜書き換える -->
-
 ```text
 project-root/
 ├── docs/
@@ -93,16 +93,43 @@ project-root/
 │   ├── history.md             # 過去の仕様改訂・意思決定・完了履歴（追記専用、REF:docs/history.md）
 │   ├── script/
 │   │   └── verify-docs.py     # ドキュメント管理規則・重複・REF 検査スクリプト
-│   ├── specifications/        # 純粋な仕様書
-│   └── designs/               # 対応する設計書
+│   ├── specifications/        # 純粋な仕様書（15 本）
+│   └── designs/               # 対応する設計書（同名 15 本）
 ├── scripts/
-│   ├── bootstrap-toolchain.sh # サンドボックス用ツールチェーン展開
+│   ├── bootstrap-toolchain.sh # サンドボックス用ツールチェーン展開（Rust を呼ぶ）
+│   ├── bootstrap-rust.sh      # Rust ツールチェーン + vendored crates の展開
 │   └── verify.sh              # コミット前の一括検証スクリプト
-├── src/                       # ソースコード
-└── tests/                     # テスト
+├── src/
+│   ├── core/                  # 純粋ドメイン層（I/O なし。ファイルは 1 概念 1 モジュール）
+│   │   ├── config/            # settings / network / filter / quota の型と検証・マージ
+│   │   ├── engine.rs          # エンジン定義の型（JSON スキーマ）
+│   │   ├── extract.rs         # 抽出仕様の評価（HTML / JSON）
+│   │   ├── template.rs        # エンジン定義の {{var}} 展開
+│   │   ├── convert.rs         # HTML → Markdown（密度推定・htmd）
+│   │   ├── markdown.rs        # 後処理・リンク・正規化
+│   │   ├── outline.rs         # 見出し抽出・節分割
+│   │   ├── context.rs         # コンテキスト予算と切り詰め
+│   │   ├── search.rs          # 検索結果の正規化・重複除去・採番
+│   │   ├── select.rs          # 選択入力（`D1:S3` 等）の解釈
+│   │   ├── history.rs         # 履歴イベント・絞り込み
+│   │   ├── session.rs         # セッション状態・キャッシュキー
+│   │   ├── robots.rs          # robots.txt の評価
+│   │   ├── secret.rs          # 秘匿値の伏字化
+│   │   ├── text.rs / url.rs   # 文字数・切り詰め / URL 正規化
+│   │   └── errors.rs          # エラーコード・警告コード・メッセージ
+│   ├── ports/                 # 外部境界のトレイト（http / fetch / state / system）
+│   ├── adapters/              # http / engine（loader・eval）/ extract / state / config / system
+│   ├── usecases/              # search / document / guard / history / engines / config / doctor / target
+│   ├── ui/                    # cli（引数）・commands（非対話）・interactive・menu・render
+│   ├── lib.rs                 # モジュール公開
+│   └── main.rs                # エントリポイント（依存の組み立てと振り分けのみ）
+├── assets/                    # 同梱の既定定義（engines / network / filters / quotas / config）
+├── tests/                     # support / architecture / contract / integration / assets / e2e
+├── Cargo.toml
+└── rust-toolchain.toml
 ```
 
----
+各層の責務と依存方向は `REF:docs/specifications/overview.md` §6.2 と `REF:docs/designs/overview.md` §6.1 に従う。`src/core/` から `src/ports/`・`src/adapters/`・`src/usecases/`・`src/ui/` への import を禁止し（`core` は純粋層）、エンジン名による分岐を持たないことを `REF:tests/architecture.rs` で機械検査する。
 
 ## 4. スクリプトの使い方
 
@@ -173,6 +200,16 @@ project-root/
 2. **仕様書直結の契約テスト**: 仕様書の記述とコードの動作が一致することを検証
 3. **統合テスト**: 機能単位のエンドツーエンド検証
 4. **E2Eテスト**: 実際の環境での動作検証
+
+本プロジェクトでの具体的なツール・ディレクトリ・受入基準は `REF:docs/specifications/testing.md` と `REF:docs/designs/testing.md` に定義する。実行は `cargo test --locked --offline` で完結し、外部 HTTP は `REF:tests/support/mod.rs` の `FakeHttp` で固定する。
+
+| ファイル | 層 | 検証内容 |
+|---|---|---|
+| `REF:tests/architecture.rs` | アーキテクチャ | 層の依存方向、`core` の純粋性、エンジン名分岐の禁止、警告コードの発行元、テスト外の `panic` 禁止、時刻・乱数・環境変数の直読み禁止、同梱 JSON の秘匿値 |
+| `REF:tests/contract.rs` | 契約 | エンジン種別に依存しない抽出、変換の意味、`errorWhen`、フィルタの適用範囲 |
+| `REF:tests/integration.rs` | 統合 | 検索→選択→取得→アウトライン→節読み、クォータ停止、キャッシュ |
+| `REF:tests/assets.rs` | 契約 | 同梱アセットが定義として妥当であること |
+| `REF:tests/e2e.rs` | E2E | 同梱アセットのみでの起動、出力の決定論性、非 TTY の `E1001`。実ネットワークは `LLMSEARCH_E2E_LIVE=1` のときだけ |
 
 ### 7.1 テストの運用規則
 

@@ -72,14 +72,18 @@ if [ "${REGENERATE_ONLY:-0}" != 1 ]; then
         || die "ダウンロードに失敗した。ブランチ $BRANCH が存在するか確認すること。"
     say "ダウンロード完了: $(du -h tc.tgz | cut -f1)"
 
-    rm -rf ./std-app-dev-template-*
-    tar xzf tc.tgz
-    work="$(find . -maxdepth 1 -type d -name 'std-app-dev-template-*' | head -1)"
+    # リポジトリ名に依存しないよう、tarball の先頭エントリから展開先を決める
+    work="$(tar tzf tc.tgz | head -1 | cut -d/ -f1)"
     [ -n "$work" ] || die "tarball の中に展開先ディレクトリが見つからない"
+    rm -rf "./$work"
+    tar xzf tc.tgz
     cd "$work"
 
+    # SHA256SUMS は chunks/ 配下で生成されているため、chunks 内で検証する
     say "sha256 の検証"
-    if [ -f SHA256SUMS ]; then
+    if [ -f chunks/SHA256SUMS ]; then
+        ( cd chunks && sha256sum -c SHA256SUMS ) || die "sha256 が合わない。ブランチを再生成すること。"
+    elif [ -f SHA256SUMS ]; then
         sha256sum -c SHA256SUMS || die "sha256 が合わない。ブランチを再生成すること。"
     fi
 
@@ -94,6 +98,7 @@ if [ "${REGENERATE_ONLY:-0}" != 1 ]; then
     tar xzf sysroot.tar.gz -C "$BUILD_DIR/sysroot"
 
     say "vendor を展開"
+    rm -rf "$BUILD_DIR/vendor-src"
     if [ -f chunks/vendor.tar.gz.* ]; then
         cat chunks/vendor.tar.gz.* > vendor.tar.gz
     elif [ -f vendor.tar.gz ]; then

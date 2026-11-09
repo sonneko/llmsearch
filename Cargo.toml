@@ -1,0 +1,50 @@
+[package]
+name = "llmsearch"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "Web search and reading for LLMs, one deliberate step at a time (human-like browsing)"
+license = "MIT"
+repository = "https://github.com/sonneko/llmsearch"
+
+[[bin]]
+name = "llmsearch"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+clap = { version = "4", features = ["derive", "wrap_help"] }
+dirs = "5"
+encoding_rs = "0.8"
+htmd = "0.5"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "gzip",
+    "deflate",
+    "brotli",
+    "http2",
+    "charset",
+] }
+scraper = "0.29"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+unicode-width = "0.2"
+url = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# 配布用（release.yml が使う）。LTO と strip で 1 ファイルにまとめる。
+[profile.release-dist]
+inherits = "release"
+strip = true
+panic = "abort"

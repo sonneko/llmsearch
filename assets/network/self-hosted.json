@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 2,
+  "id": "self-hosted",
+  "description": "自前のサービス向け。待機を短くし、間隔を詰める。",
+  "timeoutConnectMs": 2000,
+  "timeoutTotalMs": 15000,
+  "maxBytes": 8388608,
+  "maxRedirects": 5,
+  "redirectPolicy": "follow",
+  "userAgent": "llmsearch/0.1.0 (+https://github.com/sonneko/llmsearch)",
+  "headers": {
+    "Accept": "application/json,text/html;q=0.9,*/*;q=0.8"
+  },
+  "compression": ["gzip", "deflate", "br"],
+  "httpVersion": "auto",
+  "minIntervalMs": 200,
+  "maxConcurrency": 4,
+  "retry": {
+    "enabled": true,
+    "maxAttempts": 3,
+    "backoffMs": 200,
+    "backoffFactor": 2.0,
+    "maxBackoffMs": 2000,
+    "jitterMs": 100,
+    "onStatus": [429, 502, 503, 504],
+    "onError": ["timeout", "connect"],
+    "respectRetryAfter": true
+  },
+  "tls": {
+    "verify": true,
+    "caFile": ""
+  },
+  "robots": {
+    "respect": false,
+    "ttlMinutes": 60,
+    "userAgentToken": "llmsearch",
+    "onError": "allow",
+    "maxBytes": 524288
+  },
+  "acceptLanguage": "ja,en;q=0.8"
+}

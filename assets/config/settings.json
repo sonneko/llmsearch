@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "search": {
+    "engine": "duckduckgo",
+    "limit": 7,
+    "maxResults": 30,
+    "fallback": [],
+    "merge": false,
+    "engines": [],
+    "snippetChars": 120,
+    "titleChars": 100
+  },
+  "network": "default",
+  "filters": "default",
+  "quota": "default",
+  "context": {
+    "maxChars": 8000,
+    "outlineDepth": 3,
+    "includeChildren": true,
+    "minSectionChars": 0
+  },
+  "cache": {
+    "enabled": true,
+    "ttlHours": 24,
+    "maxSizeMb": 512,
+    "searchResults": false
+  },
+  "history": {
+    "enabled": true,
+    "retentionDays": 90,
+    "maxEntries": 50000
+  },
+  "session": {
+    "ttlDays": 7,
+    "maxSessions": 200
+  },
+  "ui": {
+    "color": "auto",
+    "locale": "ja",
+    "pageSize": 7
+  },
+  "state": {
+    "dir": ""
+  }
+}

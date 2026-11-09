@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 2,
+  "id": "default",
+  "description": "一般的な公開サイト向けの既定プロファイル。",
+  "timeoutConnectMs": 5000,
+  "timeoutTotalMs": 20000,
+  "maxBytes": 5242880,
+  "maxRedirects": 5,
+  "redirectPolicy": "follow",
+  "userAgent": "llmsearch/0.1.0 (+https://github.com/sonneko/llmsearch)",
+  "headers": {
+    "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8"
+  },
+  "compression": ["gzip", "deflate", "br"],
+  "httpVersion": "auto",
+  "minIntervalMs": 1000,
+  "maxConcurrency": 2,
+  "retry": {
+    "enabled": true,
+    "maxAttempts": 2,
+    "backoffMs": 500,
+    "backoffFactor": 2.0,
+    "maxBackoffMs": 8000,
+    "jitterMs": 250,
+    "onStatus": [429, 502, 503, 504],
+    "onError": ["timeout", "connect"],
+    "respectRetryAfter": true
+  },
+  "tls": {
+    "verify": true,
+    "caFile": ""
+  },
+  "robots": {
+    "respect": true,
+    "ttlMinutes": 60,
+    "userAgentToken": "llmsearch",
+    "onError": "allow",
+    "maxBytes": 524288
+  },
+  "acceptLanguage": "ja,en;q=0.8"
+}

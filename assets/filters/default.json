@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 2,
+  "id": "default",
+  "description": "一般的な調査向けの既定フィルタ。広告・まとめ・PDF を除き、同一ホストの偏りを抑える。",
+  "mode": "default",
+  "results": {
+    "deny": [
+      {
+        "extension": ["pdf", "zip", "exe", "dmg", "apk", "iso"]
+      },
+      {
+        "host": ["*.pinterest.com", "*.quora.com", "*.facebook.com"],
+        "url_regex": "^https?://[^/]+/(login|signin|register)"
+      },
+      {
+        "title_regex": "^(ログイン|サインイン|Sign in|Log in)(\\b|$)"
+      },
+      {
+        "titleRegex": "404 Not Found|ページが見つかりません"
+      }
+    ],
+    "allow": [
+      {
+        "host": ["*.wikipedia.org", "*.go.jp", "*.ac.jp"]
+      }
+    ],
+    "require": [],
+    "maxResults": 60,
+    "maxPerHost": 3,
+    "diversity": true
+  },
+  "content": {
+    "stripSelectors": [],
+    "stripPatterns": [
+      "(?m)^\\s*\\[?広告\\]?\\s*$",
+      "(?m)^\\s*(記事をシェア|Share this article|この記事をシェアする)\\s*$"
+    ],
+    "stripLines": [
+      {
+        "boilerplate": [
+          "Cookie",
+          "クッキー",
+          "プライバシーポリシー",
+          "利用規約",
+          "無断転載を禁じます",
+          "All rights reserved",
+          "JavaScript を有効",
+          "このサイトを続けて閲覧"
+        ]
+      },
+      {
+        "repeatedAtLeast": 3
+      }
+    ],
+    "keepOnly": [],
+    "normalize": {
+      "collapseBlankLines": true,
+      "trimLineEnds": true,
+      "ensureTrailingNewline": true,
+      "decodeEntities": true
+    },
+    "minSectionChars": 0,
+    "dropEmptySections": true,
+    "maxHeadingDepth": 4
+  }
+}
