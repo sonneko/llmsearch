@@ -57,7 +57,7 @@ pub struct SearchResponse {
     pub dropped: usize,
     pub no_results: bool,
     pub engine: String,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<Diagnostic>,
     pub cached: bool,
 }
 

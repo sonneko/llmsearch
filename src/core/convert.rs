@@ -4,7 +4,7 @@ use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 
 use crate::core::config::filter::ContentFilters;
-use crate::core::errors::{AppError, ErrorCode};
+use crate::core::errors::{AppError, Diagnostic, ErrorCode, WarningCode};
 use crate::core::markdown;
 use crate::core::model::{DocumentMeta, Heading};
 use crate::core::outline;
@@ -51,7 +51,7 @@ pub struct Converted {
     pub language: Option<String>,
     pub published: Option<String>,
     pub mode: ExtractMode,
-    pub warnings: Vec<String>,
+    pub warnings: Vec<Diagnostic>,
     pub headings: Vec<Heading>,
 }
 
@@ -125,7 +125,10 @@ pub fn convert(
                 .unwrap_or_else(|| doc.root_element().inner_html());
             let cleaned = remove_selectors(&body, &strip);
             if mode != ExtractMode::Whole {
-                warnings.push("本文推定に失敗したため本文全体を変換した".to_string());
+                warnings.push(Diagnostic::new(
+                    WarningCode::W3001,
+                    "本文推定に失敗したため本文全体を変換した",
+                ));
             }
             cleaned
         }
@@ -154,7 +157,10 @@ pub fn convert(
     let headings = outline::extract_headings(&md);
 
     if text::chars(&md) < 200 {
-        warnings.push("本文が 200 文字未満。JavaScript 依存のページかもしれない".to_string());
+        warnings.push(Diagnostic::new(
+            WarningCode::W3002,
+            "本文が 200 文字未満。JavaScript 依存のページかもしれない",
+        ));
     }
 
     Ok(Converted {
@@ -198,7 +204,7 @@ pub fn build_meta(
         chars: text::chars(&converted.markdown),
         headings: converted.headings.len(),
         extractor: converted.mode.as_str().to_string(),
-        warnings: converted.warnings.clone(),
+        warnings: converted.warnings.iter().map(|w| w.text()).collect(),
         cacheable: ttl_hours > 0,
     }
 }

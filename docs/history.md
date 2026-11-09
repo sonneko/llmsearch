@@ -103,3 +103,22 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
 - `@mozilla/readability` 相当の処理は Rust では `readability` クレートが候補だが、`scraper` との型の相性に不確実性がある。
 - 方針: `core/extract/` に密度推定（段落数・テキスト密度・リンク密度）を純粋関数として実装し、外部クレートの挙動に依存しない。Markdown 化は `htmd` を用いる。
 - 影響: 抽出失敗の判定（`W3001` / `W3002`）を自前で行えるため、フォールバックの制御が明確になる。
+
+### [HIST:MILESTONE:M002] 2026-11-09 M2（コア実装）完了
+[HIST-TAG: category=MILESTONE id=M002 topics=implement,ports,core,adapters,usecases,ui,tests]
+
+- ポート（`REF:src/ports/`）→ `core`（純粋ロジック）→ アダプタ（HTTP・取得・設定・エンジン評価・状態保存）→ ユースケース → CLI・対話 UI の順に実装し、M2 の全項目を完了した。
+- 検証: `cargo test --locked --offline` で lib 111 / architecture 9 / assets 4 / contract 8 / integration 13 が通過。`cargo clippy --all-targets -- -D warnings` も通過。
+- 設計判断: セッション単位のクォータは CLI 呼び出しをまたぐため、カウンタに `session_key` を持たせ、`Guard` がキーの変化時にセッション枠のみを初期化する方式にした。
+- 設計判断: 警告コードの発行元を仕様（`REF:docs/specifications/errors.md` §3）どおりに固定し、`ExtractOutcome` / `Converted` / `FetchedDocument` の警告をコード付き（`Diagnostic`）に変えた。文字列だと受け取る層がコードを推測することになり、`W4001` と `W4003` の取り違えが起きたため。
+- 設計判断: 文書の初回登録は警告ではないため `W4001` を出さない。`W4001` は「抽出に失敗した結果を破棄した」場合に限る。
+
+### [HIST:SPEC-FIX:F003] 2026-11-09 警告コード W4002 / W4005 / W4006 の整理
+[HIST-TAG: category=SPEC-FIX id=F003 topics=warning,errors,spec,drift]
+
+- 仕様と実装で警告コードの意味が食い違っていたため、仕様書の表を正として実装を合わせた。
+- `W4002`: 「エンジン定義の重複を無視した」。発行元は定義読込（`REF:src/adapters/engine/loader.rs`）。
+- `W4005`: 「マージ時に重複 URL を除去した」。発行元は検索の正規化（`REF:src/usecases/search.rs`）。
+- `W4006`: 仕様書の表に存在しない。実装でも使用していないため、コード表に追加しない。
+- あわせて `W1001`（端末でないのに装飾を要求された）と `W2001`（レート制限の待機）を実際に発行するようにし、`W3004`（再取得で見出し数が変化）を追加した。宣言だけされて発行されないコードは、利用者にとって存在しないのと同じであるため。
+- この不変条件は `REF:tests/architecture.rs` の `warning_codes_are_emitted_where_spec_says` で機械検査する。

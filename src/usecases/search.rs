@@ -148,15 +148,7 @@ pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppEr
                         format!("{from} の代わりに {} を使用した", def.selector()),
                     ));
                 }
-                for w in &engine_call.outcome.warnings {
-                    warnings.push(Diagnostic::new(WarningCode::W4001, w.clone()));
-                }
-                if engine_call.truncated {
-                    warnings.push(Diagnostic::new(
-                        WarningCode::W3003,
-                        "応答サイズの上限で打ち切った".to_string(),
-                    ));
-                }
+                warnings.extend(engine_call.outcome.warnings.iter().cloned());
 
                 return Ok(SearchOutcome {
                     hits: page_hits,

@@ -11,12 +11,14 @@ use crate::core::config::network::RedirectPolicy;
 use crate::core::errors::{AppError, Diagnostic, ErrorCode, WarningCode};
 use crate::ports::http::{HttpRequest, HttpResponse};
 use crate::ports::system::{SystemEnv, in_no_proxy};
-use crate::ports::{Clock, Env, HttpClient};
+use crate::ports::{Clock, Env, HttpClient, Reporter};
 
 /// `reqwest` を使うクライアント。
 pub struct ReqwestClient {
     clock: std::sync::Arc<dyn Clock>,
     env: SystemEnv,
+    /// 待機などの通知先（省略時は何も出さない）。
+    reporter: Option<std::sync::Arc<dyn Reporter>>,
     runtime: tokio::runtime::Runtime,
     /// 直近の送信時刻（ホストごとのレート制限）。
     last: std::sync::Mutex<std::collections::HashMap<String, u64>>,
@@ -32,9 +34,16 @@ impl ReqwestClient {
         Self {
             clock,
             env: SystemEnv::new(),
+            reporter: None,
             runtime,
             last: std::sync::Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    /// 通知先を設定する（レート制限の待機を `W2001` として知らせるため）。
+    pub fn with_reporter(mut self, reporter: std::sync::Arc<dyn Reporter>) -> Self {
+        self.reporter = Some(reporter);
+        self
     }
 
     fn build_client(&self, profile: &NetworkProfile) -> Result<reqwest::Client, AppError> {
@@ -83,6 +92,12 @@ impl ReqwestClient {
             let elapsed_ms = now_ns.saturating_sub(prev) / 1_000_000;
             let remaining = profile.min_interval_ms.saturating_sub(elapsed_ms);
             if remaining > 0 {
+                if let Some(reporter) = &self.reporter {
+                    reporter.warn(&Diagnostic::new(
+                        WarningCode::W2001,
+                        format!("{host} への送信を {remaining} ms 待機した（レート制限）"),
+                    ));
+                }
                 self.clock.sleep(Duration::from_millis(remaining));
             }
         }

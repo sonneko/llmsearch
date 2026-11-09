@@ -23,6 +23,8 @@ pub struct Fetched {
 pub struct LoadedDocument {
     pub document: DocumentRef,
     pub markdown: String,
+    /// キャッシュを使わずに取り直したか。
+    pub refetched: bool,
 }
 
 /// 取得してセッションへ登録する。
@@ -89,7 +91,6 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
     let id = session.register_document(document.clone());
     let mut document = document;
     document.id = id;
-    let known = session.documents.iter().any(|d| d.id == id);
     session.touch(app.clock.now_utc());
     app.sessions.save(&session)?;
 
@@ -109,26 +110,7 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
     );
     let _ = app.history.append(&entry);
 
-    let mut warnings: Vec<Diagnostic> = fetched
-        .warnings
-        .iter()
-        .map(|w| {
-            let code = if w.contains("JavaScript") {
-                WarningCode::W3002
-            } else if w.contains("本文推定") {
-                WarningCode::W3001
-            } else {
-                WarningCode::W3003
-            };
-            Diagnostic::new(code, w.clone())
-        })
-        .collect();
-    if !known {
-        warnings.push(Diagnostic::new(
-            WarningCode::W4001,
-            format!("D{id} を新規に登録した"),
-        ));
-    }
+    let warnings: Vec<Diagnostic> = fetched.warnings.clone();
     Ok(Fetched {
         document,
         new,
@@ -146,6 +128,7 @@ pub fn load(app: &mut App, document: &DocumentRef) -> Result<LoadedDocument, App
         return Ok(LoadedDocument {
             document: document.clone(),
             markdown,
+            refetched: false,
         });
     }
     let fetched = fetch(app, &url)?;
@@ -162,6 +145,7 @@ pub fn load(app: &mut App, document: &DocumentRef) -> Result<LoadedDocument, App
     Ok(LoadedDocument {
         document: fetched.document,
         markdown,
+        refetched: true,
     })
 }
 
@@ -182,6 +166,18 @@ pub fn outline(app: &mut App, document: &DocumentRef, depth: u8) -> Result<Outli
     let loaded = load(app, document)?;
     let markdown = filter_content(app, &loaded.markdown);
     let mut headings = outline::extract_headings(&markdown);
+    // 再取得で見出し構成が変わった場合は知らせる（節 ID のずれに気付けるように）
+    if loaded.refetched && loaded.document.headings != headings.len() {
+        app.reporter.warn(&Diagnostic::new(
+            WarningCode::W3004,
+            format!(
+                "D{} を再取得したところ見出し数が {} から {} に変化した",
+                loaded.document.id,
+                loaded.document.headings,
+                headings.len()
+            ),
+        ));
+    }
     let hidden = headings.iter().filter(|h| h.level > depth).count();
     for h in headings.iter_mut() {
         if h.level > depth {

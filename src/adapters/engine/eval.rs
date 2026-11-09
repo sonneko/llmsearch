@@ -2,7 +2,7 @@
 
 use crate::core::config::NetworkProfile;
 use crate::core::engine::EngineDef;
-use crate::core::errors::{AppError, ErrorCode};
+use crate::core::errors::{AppError, Diagnostic, ErrorCode, WarningCode};
 use crate::core::extract::{self, ExtractOutcome};
 use crate::core::secret::Secrets;
 use crate::core::template::{self, TmplCtx};
@@ -52,12 +52,18 @@ pub fn evaluate(
 
     let (body, _had_errors) = decode(&response, def);
     let mut outcome = extract::extract(&def.response, &body, &response.final_url, tracking)?;
+    if response.truncated {
+        outcome.warnings.push(Diagnostic::new(
+            WarningCode::W3003,
+            "応答サイズの上限で打ち切った",
+        ));
+    }
     if outcome.hits.is_empty() && outcome.items_seen == 0 && !body.trim().is_empty() {
-        // 抽出規則が合っていない可能性（応答の先頭のみ示す）
-        let head: String = body.chars().take(300).collect();
-        outcome.warnings.push(format!(
-            "応答の形式が想定と異なる可能性: {}",
-            head.replace('\n', " ")
+        // 抽出規則が合っていない可能性（先頭 2048 文字のみ示す。本文は出さない）
+        let head: String = body.chars().take(2048).collect();
+        outcome.warnings.push(Diagnostic::new(
+            WarningCode::W4004,
+            format!("応答が想定形式と異なる可能性: {}", head.replace('\n', " ")),
         ));
         return Err(AppError::with_detail(
             ErrorCode::E4004,

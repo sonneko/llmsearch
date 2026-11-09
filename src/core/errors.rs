@@ -728,6 +728,11 @@ impl Diagnostic {
             message: message.into(),
         }
     }
+
+    /// 表示用の 1 行（`W4002 メッセージ` 形式ではない点に注意）。
+    pub fn text(&self) -> String {
+        self.message.clone()
+    }
 }
 
 /// 検証結果（`[ok]` / `[warn]` / `[fail]`）。

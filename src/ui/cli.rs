@@ -71,8 +71,12 @@ pub struct Global {
     pub engines_dir: Vec<PathBuf>,
 
     /// 装飾を無効化する。
-    #[arg(long, global = true)]
+    #[arg(long, global = true, conflicts_with = "color")]
     pub no_color: bool,
+
+    /// 端末でなくても装飾する。
+    #[arg(long, global = true)]
+    pub color: bool,
 
     /// 進捗表示を抑制する。
     #[arg(long, global = true)]

@@ -11,7 +11,9 @@
 |---|---|---|---|
 | 初期マイルストーン | 完了 | プロジェクトセットアップ・ドキュメント管理規則の策定 | `REF:docs/history.md` |
 | 仕様策定（M1） | 改訂中 | Rust・全 JSON 設定・エンジン非依存への仕様改訂（v2） | `REF:docs/specifications/engine-definitions.md` |
-| 実装（M2〜M4） | 未着手 | スキャフォールド以降のすべてのコード | `REF:docs/plans.md#m2-implement` |
+| 実装（M2） | 完了 | ポート・`core`・アダプタ・ユースケース・UI・同梱アセット | `REF:docs/plans.md#m2-implement` |
+| 品質強化（M3） | 進行中 | アーキテクチャ検査・契約テスト・結合テスト | `REF:docs/plans.md#m3-hardening` |
+| リリース準備（M4） | 未着手 | README・CI 差し替え・タグ付け | `REF:docs/plans.md#m4-release` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -41,28 +43,29 @@
 ### M2: コア実装（Rust）
 
 - [x] 依存クレートの確定（`htmd 0.5` / `scraper 0.29` / `reqwest 0.12` 等）と vendor 退避・サンドボックスへの搬入
-- [ ] `src/ports/` のトレイト定義（`HttpClient`, `Fetcher`, `HtmlToMarkdown`, `StateStore`, `HistoryStore`, `CounterStore`, `Clock`, `IdGen`, `Env`, `Reporter`）
-- [ ] `src/core/` の純粋ロジック（設定型・エンジン定義型・抽出仕様・URL・テキスト・見出し・節・予算・フィルタ・クォータ・履歴イベント）
-- [ ] 設定ローダ（`$ref` 展開・5 層マージ・由来記録・未知キー温存・検証）
-- [ ] 状態ディレクトリ（原子的書き込み・セッション・文書キャッシュ・カウンタ）
-- [ ] HTTP アダプタ（reqwest・リダイレクト・タイムアウト・サイズ上限・文字コード・再試行）
-- [ ] エンジン評価器（HTML 抽出・JSON 抽出・変換パイプライン・ページング）
-- [ ] 抽出と変換（`scraper` + 密度推定 + `htmd`、後処理、JavaScript 依存の検出）
-- [ ] 見出し抽出・節分割・アウトライン・コンテキスト予算
-- [ ] フィルタ評価（結果・本文）と集計
-- [ ] ガード（レート制限・クォータ・消費記録）
-- [ ] サブコマンド（`search` / `next` / `refine` / `outline` / `read` / `history` / `engines` / `network` / `filters` / `quota` / `config` / `doctor`）
-- [ ] JSON イベント出力とエラーカタログ
-- [ ] 対話モードの状態機械
-- [ ] 同梱アセット（`assets/engines/*.json`, `assets/network/*.json`, `assets/filters/*.json`, `assets/quotas/*.json`）
+- [x] `src/ports/` のトレイト定義（`HttpClient`, `Fetcher`, `HtmlToMarkdown`, `StateStore`, `HistoryStore`, `CounterStore`, `Clock`, `IdGen`, `Env`, `Reporter`）
+- [x] `src/core/` の純粋ロジック（設定型・エンジン定義型・抽出仕様・URL・テキスト・見出し・節・予算・フィルタ・クォータ・履歴イベント）
+- [x] 設定ローダ（`$ref` 展開・5 層マージ・由来記録・未知キー温存・検証）
+- [x] 状態ディレクトリ（原子的書き込み・セッション・文書キャッシュ・カウンタ）
+- [x] HTTP アダプタ（reqwest・リダイレクト・タイムアウト・サイズ上限・文字コード・再試行）
+- [x] エンジン評価器（HTML 抽出・JSON 抽出・変換パイプライン・ページング）
+- [x] 抽出と変換（`scraper` + 密度推定 + `htmd`、後処理、JavaScript 依存の検出）
+- [x] 見出し抽出・節分割・アウトライン・コンテキスト予算
+- [x] フィルタ評価（結果・本文）と集計
+- [x] ガード（レート制限・クォータ・消費記録）
+- [x] サブコマンド（`search` / `next` / `refine` / `outline` / `read` / `history` / `engines` / `network` / `filters` / `quota` / `config` / `doctor`）
+- [x] JSON イベント出力とエラーカタログ
+- [x] 対話モードの状態機械
+- [x] 同梱アセット（`assets/engines/*.json`, `assets/network/*.json`, `assets/filters/*.json`, `assets/quotas/*.json`）
 
 <a id="m3-hardening"></a>
 ### M3: 品質強化
 
-- [ ] アーキテクチャ検査（層構造・エンジン名分岐の禁止・`unwrap` 禁止・非決定性の禁止・仕様節との対応）
-- [ ] 契約テスト（JSON スキーマ・設定駆動・変換・無害化）
-- [ ] 結合テスト（検索→選択→取得→アウトライン→節読み）
-- [ ] 追加の同梱エンジン（SearXNG・Brave 等）を JSON のみで追加し、コード変更が不要であることを検証
+- [x] アーキテクチャ検査（層構造・エンジン名分岐の禁止・警告コードの発行元・仕様節との対応）
+- [x] 契約テスト（JSON スキーマ・設定駆動・変換・無害化）
+- [x] 結合テスト（検索→選択→取得→アウトライン→節読み）
+- [x] 追加の同梱エンジン（SearXNG・Brave 等）を JSON のみで追加し、コード変更が不要であることを検証
+- [ ] `unwrap` 禁止・非決定性の禁止の自動検査
 - [ ] 容量管理・保持期間・削除操作の検証
 - [ ] E2E（実端末・`LLMSEARCH_E2E_LIVE=1`）
 
@@ -93,7 +96,7 @@
 
 | 領域 | 採用 | 決定理由（要約） |
 |---|---|---|
-| 言語 | Rust（edition 2021、1.90 系） | ユーザー指定。単一バイナリ配布・型による安全性・決定論的な文字列処理に強い |
+| 言語 | Rust（edition 2024、1.90 系） | ユーザー指定。単一バイナリ配布・型による安全性・決定論的な文字列処理に強い |
 | HTTP | `reqwest`（rustls, gzip/deflate/brotli） | 非同期・リダイレクト制御・プロキシ・TLS 設定を宣言的に扱える |
 | 非同期 | `tokio`（rt-multi-thread） | `reqwest` と同一ランタイムで完結し、対話モードでは `block_on` 1 か所に閉じる |
 | CLI | `clap`（derive） | サブコマンド・ヘルプ生成が安定し、依存が小さい |

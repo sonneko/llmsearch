@@ -9,7 +9,7 @@ use scraper::{Html, Selector};
 use crate::core::engine::{
     ErrorCond, FieldSpec, ItemSpec, ResponseKind, ResponseSpec, Transform, TransformArgs,
 };
-use crate::core::errors::{AppError, ErrorCode};
+use crate::core::errors::{AppError, Diagnostic, ErrorCode, WarningCode};
 use crate::core::search::RawHit;
 use crate::core::{text, url};
 
@@ -21,7 +21,8 @@ pub struct ExtractOutcome {
     pub items_seen: usize,
     pub dropped: usize,
     pub no_results: bool,
-    pub warnings: Vec<String>,
+    /// 抽出中に検出した警告。どのコードで出すかは検出した層が決める。
+    pub warnings: Vec<Diagnostic>,
 }
 
 fn selector_of(pattern: &str) -> Result<Selector, AppError> {
@@ -114,12 +115,15 @@ fn extract_html(
     Ok(out)
 }
 
-fn trigger_contains(spec: &ResponseSpec, doc: &Html, body: &str) -> Option<String> {
+fn trigger_contains(spec: &ResponseSpec, doc: &Html, body: &str) -> Option<Diagnostic> {
     for cond in &spec.error_when {
         match cond {
             ErrorCond::Contains { contains } => {
                 if body.contains(contains) {
-                    return Some(format!("errorWhen.contains: {contains}"));
+                    return Some(Diagnostic::new(
+                        WarningCode::W4004,
+                        format!("errorWhen.contains: {contains}"),
+                    ));
                 }
             }
             ErrorCond::FieldEmpty { field } => {
@@ -127,7 +131,10 @@ fn trigger_contains(spec: &ResponseSpec, doc: &Html, body: &str) -> Option<Strin
                     && let Ok(sel) = Selector::parse(selector)
                     && doc.select(&sel).next().is_none()
                 {
-                    return Some(format!("errorWhen.fieldEmpty: {field}"));
+                    return Some(Diagnostic::new(
+                        WarningCode::W4004,
+                        format!("errorWhen.fieldEmpty: {field}"),
+                    ));
                 }
             }
             ErrorCond::PathExists { .. } | ErrorCond::Status { .. } => {}
@@ -158,14 +165,20 @@ fn extract_json(
                     .unwrap_or(false)
                 {
                     out.no_results = true;
-                    out.warnings.push(format!("errorWhen.pathExists: {path}"));
+                    out.warnings.push(Diagnostic::new(
+                        WarningCode::W4004,
+                        format!("errorWhen.pathExists: {path}"),
+                    ));
                     return Ok(out);
                 }
             }
             ErrorCond::Contains { contains } => {
                 if body.contains(contains) {
                     out.no_results = true;
-                    out.warnings.push(format!("errorWhen.contains: {contains}"));
+                    out.warnings.push(Diagnostic::new(
+                        WarningCode::W4004,
+                        format!("errorWhen.contains: {contains}"),
+                    ));
                     return Ok(out);
                 }
             }
@@ -495,9 +508,12 @@ fn normalize_date(value: &str, formats: &[String]) -> String {
 
 fn finalize(out: &mut ExtractOutcome) {
     if out.hits.is_empty() && out.dropped > 0 {
-        out.warnings.push(format!(
-            "抽出に失敗した結果を {} 件破棄した（title / url が空）",
-            out.dropped
+        out.warnings.push(Diagnostic::new(
+            WarningCode::W4001,
+            format!(
+                "抽出に失敗した結果を {} 件破棄した（title / url が空）",
+                out.dropped
+            ),
         ));
     }
     if out.hits.is_empty() && out.items_seen == 0 {

@@ -50,6 +50,7 @@ pub struct DocumentRef {
     pub fetched_at: String,
     pub chars: usize,
     pub headings: usize,
+    /// 取得時の警告（表示用の文字列。コードは履歴側で保持する）。
     pub warnings: Vec<String>,
     /// 文書キャッシュのキー（URL のハッシュ）。
     pub cache_key: String,

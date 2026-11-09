@@ -6,23 +6,23 @@
 
 ## 1. 基本方針
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 ### 1.1 プロファイル方式
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `core::config::network::NetworkProfile` が仕様の全キーを持つ。`adapters::http::reqwest_client` は `NetworkProfile` から `reqwest::Client` を組み立てる関数 `build_client(&NetworkProfile, &Secrets) -> Result<Client>` を提供し、プロファイル以外の設定（環境変数等）を読まない。
 
 ### 1.2 プロファイルの選択順
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `usecases::config::network::select(opts, settings, store) -> Result<NetworkProfile>`。エンジン定義が `network` を持つ場合は、そのプロファイルを用いる（設定の既定より優先）。`--verbose` では「どのプロファイルがどの経路で選ばれたか」を表示する。
 
 ### 1.3 プロファイルの探索
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `adapters::config::layout::network_dirs(config_path) -> Vec<PathBuf>` が 4 経路を返す。同梱既定は `assets/network/*.json` を `include_str!` で埋め込み、`&'static str` として保持する（実行時にファイルシステム上のリポジトリを参照しない）。
 
@@ -30,17 +30,17 @@
 
 ## 2. プロファイルの構造
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 ### 2.1 トップレベル
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `NetworkProfile` は `Default` 実装で仕様の既定値を返し、`#[serde(default)]` を各フィールドに付す。`headers` は `BTreeMap<String, String>`。`retry`, `proxy`, `tls`, `robots` はサブ構造体。
 
 ### 2.2 値の範囲
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `NetworkProfile::validate() -> Vec<Diagnostic>` が範囲を検査する。範囲はマクロ `check_range!(name, value, min, max)` で記述し、キー名と範囲を 1 か所にまとめる。
 
@@ -48,9 +48,9 @@
 
 ## 3. 再試行（`retry`）
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/adapters/http.rs）
 
-再試行は `src/adapters/http/retry.rs` の `retry_with(policy, clock, f)` を汎用関数として実装する。
+再試行は `src/adapters/http.rs` の `retry_with(policy, clock, f)` を汎用関数として実装する。
 
 - 判定: `should_retry(policy, outcome) -> bool`（`Outcome` は `Status(u16)` か `Err(io_kind)`）。
 - 待機: `backoff(policy, attempt) -> Duration`（`backoffMs * factor^(attempt-1)` を `maxBackoffMs` で頭打ちにし、`jitterMs` の範囲で疑似乱数を加える）。
@@ -62,7 +62,7 @@
 
 ## 4. プロキシ（`proxy`）
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `ProxySpec` は `Url(String)` か `Detailed { url, no_proxy, auth }` の列挙。`reqwest::Proxy::custom` に `no_proxy` の判定関数を渡し、判定ロジックは `core::net::proxy::matches_no_proxy(host, patterns)` として純粋関数に切り出す。認証は `reqwest::Proxy::basic_auth` に `value_env` 解決済みの値（`SecretString`）を渡す。
 
@@ -70,7 +70,7 @@
 
 ## 5. TLS（`tls`）
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `reqwest` の `rustls-tls` フィーチャを使用する。`verify=false` は `danger_accept_invalid_certs(true)`、`caFile` は `Certificate::from_pem` を `add_root_certificate` で追加する。`verify=false` の警告 `W1005` は `build_client` の戻り値に `Diagnostic` を含める形で返し、呼び出し側が 1 回だけ表示する。
 
@@ -78,7 +78,7 @@
 
 ## 6. robots.txt（`robots`）
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/robots.rs）
 
 解析は `src/core/robots.rs` の `RobotsRules::parse(text, token) -> RobotsRules` と `RobotsRules::allows(path) -> bool`。
 
@@ -91,7 +91,7 @@
 
 ## 7. ヘッダの合成順
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `core::net::headers::compose(profile, engine, accept) -> HeaderMap` が 4 段の合成を 1 か所で行い、禁止ヘッダの検査（`E1004`）もここで行う。`reqwest::Client::builder().default_headers()` にはプロファイル分のみを設定し、エンジン固有ヘッダはリクエスト単位で付す（クライアントの再利用で混線しないようにするため）。
 
@@ -99,28 +99,28 @@
 
 ## 8. 受信の扱い
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 ### 8.1 文字符号化
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `adapters::http::decode::decode_body(bytes, content_type, profile_charset, html_meta_charset) -> (String, Option<Diagnostic>)` が `encoding_rs` で復号する。順序は仕様のとおり。`U+FFFD` の出現を数え、1 件以上なら警告を返す。
 
 ### 8.2 サイズ超過
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `bytes_stream()` を読みながら累積し、`maxBytes` を超えた時点で `W3003` を記録して打ち切る。打ち切った本文でも変換を試みる。
 
 ### 8.3 ステータスの扱い
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `adapters::http::status::classify(status, context) -> StatusClass` が仕様の表に従って分類し、`usecases` 側が `AppError` へ写像する。`401/403` をエンジンの `errorWhen` より優先するため、`classify` は抽出より前に呼ぶ。
 
 ### 8.4 ログと秘匿情報
 
-状態: 未実装・実装計画済み（REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `redact::url_with_secrets(url, secret_values)` が `value_env` 由来の値を `***` に置換する。`SecretString` の保持する値と照合して置換するため、置換漏れが起きにくい。`Authorization` はヘッダ名で一律に伏字化する。

@@ -172,8 +172,10 @@ pub fn build(
         clock: Arc::clone(&clock),
         env: Arc::clone(&env),
         ids,
-        reporter,
-        http: Arc::new(crate::adapters::http::ReqwestClient::new(clock)),
+        reporter: Arc::clone(&reporter),
+        http: Arc::new(
+            crate::adapters::http::ReqwestClient::new(clock).with_reporter(Arc::clone(&reporter)),
+        ),
         sessions: Arc::new(FsSessionStore::new(paths.clone())),
         documents: Arc::new(FsDocumentStore::new(paths.clone())),
         history: Arc::new(JsonlHistory::new(paths.clone())),

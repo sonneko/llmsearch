@@ -16,9 +16,11 @@ use llmsearch::usecases::config::{self as config_uc, Bootstrap};
 fn main() {
     let cli = Cli::parse();
     let deps = config_uc::default_deps();
+    let tty = deps.1.is_stdout_tty();
+    let color = !cli.global.no_color && (cli.global.color || tty);
     let renderer = std::sync::Arc::new(Renderer::new(
         cli.global.json,
-        !cli.global.no_color && deps.1.is_stdout_tty(),
+        color,
         llmsearch::core::errors::Locale::Ja,
         cli.global.quiet,
         deps.1.terminal_width(),
@@ -27,6 +29,14 @@ fn main() {
         std::sync::Arc::clone(&renderer),
         cli.global.verbose,
     ));
+    // 色付けを要求されたが端末でない場合は、装飾を無効化した旨を 1 度だけ知らせる
+    if cli.global.color && !cli.global.no_color && !tty && !cli.global.json && !cli.global.quiet {
+        use llmsearch::ports::Reporter as _;
+        reporter.warn(&llmsearch::core::errors::Diagnostic::new(
+            llmsearch::core::errors::WarningCode::W1001,
+            "標準出力が端末ではないため装飾を無効化した",
+        ));
+    }
 
     let mut overrides = config_uc::env_overrides(deps.1.as_ref());
     if cli.global.no_filter {

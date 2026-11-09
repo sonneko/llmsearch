@@ -4,7 +4,7 @@ use url::Url;
 
 use crate::core::config::NetworkProfile;
 use crate::core::convert::ExtractMode;
-use crate::core::errors::AppError;
+use crate::core::errors::{AppError, Diagnostic};
 use crate::core::model::DocumentMeta;
 use crate::ports::http::HttpResponse;
 
@@ -58,7 +58,8 @@ pub struct RawDocument {
 pub struct FetchedDocument {
     pub meta: DocumentMeta,
     pub markdown: String,
-    pub warnings: Vec<String>,
+    /// 取得・変換で検出した警告（発行元がコードを決めたもの）。
+    pub warnings: Vec<Diagnostic>,
     pub cached: bool,
 }
 

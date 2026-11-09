@@ -4,7 +4,7 @@ use url::Url;
 
 use crate::core::config::NetworkProfile;
 use crate::core::convert::{self, Converted, ExtractMode};
-use crate::core::errors::{AppError, ErrorCode};
+use crate::core::errors::{AppError, Diagnostic, ErrorCode, WarningCode};
 use crate::core::markdown;
 use crate::core::model::DocumentMeta;
 use crate::core::outline;
@@ -63,8 +63,8 @@ impl HttpFetcher {
         );
         let (body, had_errors) = decode_body(&response.body, &charset);
         if had_errors || guessed {
-            self.reporter.warn(&crate::core::errors::Diagnostic::new(
-                crate::core::errors::WarningCode::W3003,
+            self.reporter.warn(&Diagnostic::new(
+                WarningCode::W3003,
                 format!(
                     "文字コードを {} と推定した（置換文字あり: {had_errors}）",
                     charset
@@ -83,12 +83,14 @@ impl HttpFetcher {
         let meta =
             convert::build_meta(&converted, url, &response.final_url, now, options.ttl_hours);
         if response.truncated {
-            converted
-                .warnings
-                .push("応答サイズの上限で打ち切った".to_string());
+            converted.warnings.push(Diagnostic::new(
+                WarningCode::W3003,
+                "応答サイズの上限で打ち切った",
+            ));
         }
         let mut meta = meta;
-        meta.warnings = converted.warnings.clone();
+        // 文書メタデータは JSON として保存・表示するため文字列で持つ
+        meta.warnings = converted.warnings.iter().map(|w| w.text()).collect();
         meta.cacheable = meta.cacheable && options.profile.robots.respect && cacheable(&response);
 
         if let Some(store) = &self.store
@@ -118,7 +120,11 @@ impl HttpFetcher {
             return None;
         }
         Some(FetchedDocument {
-            warnings: meta.warnings.clone(),
+            warnings: meta
+                .warnings
+                .iter()
+                .map(|w| Diagnostic::new(WarningCode::W3003, w.clone()))
+                .collect(),
             meta,
             markdown,
             cached: true,

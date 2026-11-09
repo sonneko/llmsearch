@@ -12,7 +12,9 @@
 |---|---|---|---|
 | 初期マイルストーン | 完了 | プロジェクトセットアップ・ドキュメント管理規則の策定 | `REF:docs/history.md` |
 | 仕様策定（M1） | 改訂中 | Rust・全 JSON 設定・エンジン非依存への仕様改訂（v2） | `REF:docs/specifications/engine-definitions.md` |
-| 実装（M2〜M4） | 未着手 | スキャフォールド以降のすべてのコード | `REF:docs/plans.md#m2-implement` |
+| 実装（M2） | 完了 | ポート・`core`・アダプタ・ユースケース・UI・同梱アセット | `REF:docs/plans.md#m2-implement` |
+| 品質強化（M3） | 進行中 | アーキテクチャ検査・契約テスト・結合テスト | `REF:docs/plans.md#m3-hardening` |
+| リリース準備（M4） | 未着手 | README・CI 差し替え・タグ付け | `REF:docs/plans.md#m4-release` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -20,8 +22,9 @@
 ## 2. 現在のブランチ・PR・直近の作業状態
 
 - **現在のブランチ**: `arena/7d587114-llmsearch`
-- **PR**: 未作成
-- **現在の状態**: 仕様 v2（Rust・全 JSON 設定・エンジン非依存・フィルタ・クォータ）の作成完了。ユーザーレビュー待ち。
+- **PR**: #1（`arena/7d587114-llmsearch` → `main`）
+- **現在の状態**: M2（実装）完了。ポート・`core`・アダプタ・ユースケース・UI・同梱アセットが揃い、`cargo test` は lib 111 / architecture 9 / assets 4 / contract 8 / integration 13 が通過する。M3（品質強化）を進行中。
+- **検証**: `cargo fmt --all --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`（すべて `--locked --offline`）が通過。`python3 docs/script/verify-docs.py` も通過。
 - **未確定事項**:
   - 依存クレートのバージョン固定は完了（`htmd 0.5`, `scraper 0.29` 等）。追加のクレートが必要になった場合は vendor 退避の再実行が必要。
 - **Rust ツールチェーン**: `cache/rust-toolchain` から `bash scripts/bootstrap-rust.sh` で搬入済み。`cargo check` / `fmt` / `clippy` / `test` / `build` が通ることを確認した（初回ビルド約 92 秒）。サンドボックス再起動後は再搬入が必要。
@@ -41,7 +44,7 @@
    ```bash
    python3 docs/script/verify-docs.py
    ```
-3. ユーザー承認が得られていれば `REF:docs/plans.md#m2-implement` の依存確定から実装する。
+3. `REF:docs/plans.md#m3-hardening` の残項目（`unwrap` 禁止・非決定性の禁止の自動検査）と `REF:docs/plans.md#m4-release` を進める。
 
 ---
 
