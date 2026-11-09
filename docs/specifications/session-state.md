@@ -68,7 +68,7 @@
 
 ```text
 <state-dir>/
-├── config.toml          # 既定の設定ファイル（初回起動時に生成）
+├── config/              # 設定一式（settings.json, engines/, network/, filters/, quotas/）
 ├── sessions/
 │   └── <sessionId>.json # セッション状態
 ├── documents/
