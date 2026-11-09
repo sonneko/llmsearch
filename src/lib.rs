@@ -2,6 +2,7 @@
 //!
 //! 依存方向は `ui → usecases → core`、`usecases → ports ← adapters`。
 
+pub mod adapters;
 pub mod core;
 pub mod ports;
 

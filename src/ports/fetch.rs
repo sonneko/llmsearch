@@ -17,6 +17,16 @@ pub struct FetchOptions {
     pub ttl_hours: u64,
     pub profile: NetworkProfile,
     pub max_chars: Option<usize>,
+    /// 本文フィルタ（設定の `filters.content`）。
+    pub content_filters: Option<crate::core::config::filter::ContentFilters>,
+    /// 追跡パラメータの一覧。
+    pub tracking: Vec<String>,
+}
+
+impl FetchOptions {
+    pub fn content_filters(&self) -> Option<&crate::core::config::filter::ContentFilters> {
+        self.content_filters.as_ref()
+    }
 }
 
 impl Default for FetchOptions {
@@ -28,6 +38,8 @@ impl Default for FetchOptions {
             ttl_hours: 24,
             profile: NetworkProfile::default(),
             max_chars: None,
+            content_filters: None,
+            tracking: Vec::new(),
         }
     }
 }

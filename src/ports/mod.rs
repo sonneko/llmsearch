@@ -8,10 +8,12 @@ use crate::core::model::{DocumentMeta, SearchHit};
 pub mod fetch;
 pub mod http;
 pub mod state;
+pub mod system;
 
 pub use fetch::{FetchOptions, FetchedDocument, RawDocument};
 pub use http::{HttpClient, HttpRequest, HttpResponse};
 pub use state::{CounterStore, DocumentStore, HistoryQuery, HistoryStore, SessionStore};
+pub use system::{SystemClock, SystemEnv, SystemIdGen};
 
 /// 時刻。
 pub trait Clock: Send + Sync {

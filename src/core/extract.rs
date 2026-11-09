@@ -17,6 +17,8 @@ use crate::core::{text, url};
 #[derive(Debug, Clone, Default)]
 pub struct ExtractOutcome {
     pub hits: Vec<RawHit>,
+    /// 応答から取り出せた要素数（抽出規則の一致判定に使う）。
+    pub items_seen: usize,
     pub dropped: usize,
     pub no_results: bool,
     pub warnings: Vec<String>,
@@ -78,6 +80,7 @@ fn extract_html(
         .collect();
 
     for element in doc.select(&item_sel) {
+        out.items_seen += 1;
         let mut values: BTreeMap<String, String> = BTreeMap::new();
         for (name, field) in &spec.fields {
             let raw = match field {
@@ -179,6 +182,7 @@ fn extract_json(
         None => Vec::new(),
     };
 
+    out.items_seen = items.len();
     for item in &items {
         let mut values: BTreeMap<String, String> = BTreeMap::new();
         for (name, field) in &spec.fields {
@@ -496,7 +500,11 @@ fn finalize(out: &mut ExtractOutcome) {
             out.dropped
         ));
     }
-    if out.hits.is_empty() && out.dropped == 0 {
+    if out.hits.is_empty() && out.items_seen == 0 {
+        // 抽出規則が応答と一致していない可能性（呼び出し側で E4004 にする）
+        return;
+    }
+    if out.hits.is_empty() {
         out.no_results = true;
     }
 }
