@@ -273,6 +273,29 @@ pub fn duckduckgo_html(items: &[(usize, &str, &str)]) -> String {
     body
 }
 
+/// 実データに近い DuckDuckGo の結果（リンクが `//duckduckgo.com/l/?uddg=` で包まれる）。
+pub fn duckduckgo_redirect_html(items: &[(usize, &str, &str)]) -> String {
+    let mut body = String::from("<html><body><div id=\"links\">");
+    for (n, title, url) in items {
+        let encoded: String = url
+            .bytes()
+            .map(|b| match b {
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                    (b as char).to_string()
+                }
+                _ => format!("%{b:02X}"),
+            })
+            .collect();
+        body.push_str(&format!(
+            r#"<div class="result results_links"><div class="links_main">
+                 <h2><a class="result__a" href="//duckduckgo.com/l/?uddg={encoded}&rut=x">{title}</a></h2>
+                 <a class="result__snippet">スニペット {n}</a></div></div>"#
+        ));
+    }
+    body.push_str("</div></body></html>");
+    body
+}
+
 /// 記事 HTML。
 pub const ARTICLE: &str = r#"<html lang="ja"><head><title>適応策の手引き</title>
 <meta property="og:site_name" content="環境省"></head><body>

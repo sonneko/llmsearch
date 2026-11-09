@@ -227,6 +227,7 @@ fn warning_codes_are_emitted_where_spec_says() {
         ("W4002", "src/adapters/engine/loader.rs", &[]),
         ("W4003", "src/usecases/search.rs", &[]),
         ("W4005", "src/usecases/search.rs", &[]),
+        ("W4006", "src/usecases/search.rs", &[]),
     ];
 
     let mut violations = Vec::new();

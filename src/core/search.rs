@@ -32,6 +32,36 @@ pub fn dedup(hits: Vec<RawHit>) -> (Vec<RawHit>, usize) {
     (out, removed)
 }
 
+/// 結果 URL に残ったエンジン側のリダイレクトを解く。
+///
+/// エンジン定義側で `unwrap_redirect` を指定していれば抽出時に解かれるが、
+/// 定義の書き漏らしや想定外の形式でも「取得したらエンジンのページだった」と
+/// いう状態にならないよう、正規化の段階でもう一度解いておく。
+///
+/// 戻り値は `(変換した件数, 例)`。`例` は変換前の URL（通知用）。
+pub fn unwrap_redirects(hits: Vec<RawHit>) -> (Vec<RawHit>, usize, Option<String>) {
+    let mut changed = 0usize;
+    let mut example: Option<String> = None;
+    let out = hits
+        .into_iter()
+        .map(|mut hit| {
+            let Ok(parsed) = url::parse(&hit.url) else {
+                return hit;
+            };
+            let Some(inner) = url::target_of_redirect(&parsed) else {
+                return hit;
+            };
+            changed += 1;
+            if example.is_none() {
+                example = Some(hit.url.clone());
+            }
+            hit.url = inner;
+            hit
+        })
+        .collect();
+    (out, changed, example)
+}
+
 /// 複数エンジンの結果をラウンドロビンで統合する。
 ///
 /// 戻り値は `(統合結果, 由来エンジン, 重複除去件数)`。

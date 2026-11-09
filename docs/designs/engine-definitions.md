@@ -121,6 +121,14 @@
 
 `title` か `url` が空の要素は破棄し、破棄件数を数える。全件破棄時は `W4004` とともに応答先頭 2048 文字のテキストを標準エラーへ出す（`Debug` 出力は使わない）。応答本文の全文出力は行わない。
 
+### 4.7 リダイレクト URL の展開
+
+状態: 実装完了（REF:src/core/url.rs, REF:src/core/extract.rs, REF:src/core/search.rs, REF:src/usecases/search.rs）
+
+- 抽出時: `unwrap_redirect` が `REF:src/core/extract.rs` の `unwrap_redirect` を呼ぶ。基準 URL（`base_url`）で絶対化してから解釈するため、`//duckduckgo.com/l/?uddg=...` のようなプロトコル相対・相対パスでも解ける。値のパーセントエンコードと 2 段までの入れ子を解く。
+- 正規化時: 定義側の書き漏らしに備え、`REF:src/core/search.rs` の `unwrap_redirects` が全結果 URL をもう一度検査する。変換した件数を `W4006` として `REF:src/usecases/search.rs` から報告する。判定は `REF:src/core/url.rs` の `target_of_redirect`（設定に依存しない既定キー）。
+- 取得時: HTTP の 3xx は HTTP 層が追う。加えて `REF:src/adapters/extract/mod.rs` が `REF:src/core/url.rs` の `html_redirect_target` で `<meta http-equiv="refresh">` とスクリプトの location 遷移を検出し、`maxRedirects` を上限にたどり直す。中継ページの本文を「記事」として読んでしまうことを防ぐ。
+
 ---
 
 ## 5. ページング定義（`paging`）

@@ -36,6 +36,83 @@ fn harness_with_results(count: usize) -> (support::Harness, Vec<String>) {
     (harness, urls)
 }
 
+/// 検索結果の URL がエンジンのリダイレクト URL のまま出てくると、取得時に
+/// エンジン側のページしか読めない。実 URL に展開されていること。
+#[test]
+fn search_unwraps_engine_redirect_urls() {
+    let harness = support::harness(None);
+    let items = [
+        (1usize, "A のタイトル", "https://a.example.jp/one"),
+        (2, "B のタイトル", "https://b.example.jp/two?x=1"),
+    ];
+    let html = support::duckduckgo_redirect_html(&items);
+    harness.http.route(
+        "html.duckduckgo.com",
+        200,
+        "text/html; charset=utf-8",
+        &html,
+    );
+    let mut h = harness;
+    let outcome = search::run(&mut h.app, "気候変動", 1).expect("検索に失敗");
+    let urls: Vec<&str> = outcome.hits.iter().map(|hit| hit.url.as_str()).collect();
+    assert_eq!(
+        urls,
+        vec!["https://a.example.jp/one", "https://b.example.jp/two?x=1"],
+        "リダイレクト URL が残っている: {urls:?}"
+    );
+    for hit in &outcome.hits {
+        assert!(
+            !hit.url.contains("duckduckgo.com"),
+            "エンジンのホストが残っている: {}",
+            hit.url
+        );
+    }
+}
+
+/// 結果 URL がリダイレクトページのまま残っていても、取得時に中継ページを
+/// たどって実体の記事を読めること（`<meta refresh>` と JS の location）。
+#[test]
+fn fetch_follows_html_redirect_page() {
+    let harness = support::harness(None);
+    harness.http.route(
+        "relay.example",
+        200,
+        "text/html; charset=utf-8",
+        r#"<html><head><meta http-equiv="refresh" content="0; url=https://dest.example/article"></head><body>移動中…</body></html>"#,
+    );
+    harness.http.route(
+        "jsrelay.example",
+        200,
+        "text/html; charset=utf-8",
+        r#"<html><body><script>window.location.href = "https://dest.example/article";</script></body></html>"#,
+    );
+    harness.http.route(
+        "dest.example",
+        200,
+        "text/html; charset=utf-8",
+        support::ARTICLE,
+    );
+    let mut h = harness;
+
+    for entry in [
+        "https://relay.example/out?uddg=x",
+        "https://jsrelay.example/go",
+    ] {
+        let url = llmsearch::core::url::parse(entry).unwrap();
+        let fetched = document::fetch(&mut h.app, &url).expect("取得に失敗");
+        assert!(
+            fetched.document.final_url.contains("dest.example"),
+            "リダイレクト先を追えていない: {}",
+            fetched.document.final_url
+        );
+        assert!(
+            fetched.document.title.contains("適応策"),
+            "実体の記事を読めていない: {}",
+            fetched.document.title
+        );
+    }
+}
+
 #[test]
 fn search_returns_only_titles_and_snippets() {
     let (mut h, _) = harness_with_results(10);

@@ -43,8 +43,28 @@ impl HttpFetcher {
     /// 取得（キャッシュは使わない）。
     fn fetch_fresh(&self, url: &Url, options: &FetchOptions) -> Result<FetchedDocument, AppError> {
         core_url::validate_scheme(url)?;
-        let request = HttpRequest::get(url.clone());
-        let response = self.client.send_blocking(&options.profile, &request)?;
+        let mut target = url.clone();
+        let mut hops = 0usize;
+        // HTTP の 3xx は HTTP 層が追う。ここでは HTML の中継ページ
+        // （<meta refresh> / JS の location）で返るリダイレクトを追う。
+        let response = loop {
+            let request = HttpRequest::get(target.clone());
+            let response = self.client.send_blocking(&options.profile, &request)?;
+            if hops >= options.profile.max_redirects.max(1) {
+                break response;
+            }
+            let Ok(text) = String::from_utf8(response.body.clone()) else {
+                break response;
+            };
+            let Some(next) = core_url::html_redirect_target(&text, &response.final_url) else {
+                break response;
+            };
+            if next == target {
+                break response;
+            }
+            target = next;
+            hops += 1;
+        };
 
         if !is_html_response(&response) {
             return Err(AppError::with_detail(
