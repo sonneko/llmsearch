@@ -56,9 +56,10 @@ impl JsonlHistory {
             .store(skipped, std::sync::atomic::Ordering::Relaxed);
         Ok(out)
     }
+}
 
-    /// 次の識別子（`H<n>`）。
-    pub fn next_id(&self) -> Result<String, AppError> {
+impl HistoryStore for JsonlHistory {
+    fn next_id(&self) -> Result<String, AppError> {
         let all = self.read_all()?;
         let max = all
             .iter()
@@ -67,9 +68,7 @@ impl JsonlHistory {
             .unwrap_or(0);
         Ok(format!("H{}", max + 1))
     }
-}
 
-impl HistoryStore for JsonlHistory {
     fn append(&self, entry: &HistoryEntry) -> Result<(), AppError> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {

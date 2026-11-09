@@ -5,6 +5,7 @@
 pub mod adapters;
 pub mod core;
 pub mod ports;
+pub mod usecases;
 
 /// 版数。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

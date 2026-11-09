@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 2,
+  "id": "default",
+  "description": "既定のクォータ。セッション・日次・合計の 3 段で制限する。",
+  "enabled": true,
+  "session": {
+    "searches": 50,
+    "fetches": 100,
+    "results": 500,
+    "chars": 200000
+  },
+  "day": {
+    "searches": 500,
+    "fetches": 1000,
+    "results": 5000,
+    "chars": 2000000
+  },
+  "window": [
+    {
+      "minutes": 60,
+      "searches": 120
+    }
+  ],
+  "total": {},
+  "onExceed": "stop"
+}

@@ -169,6 +169,11 @@ impl AppError {
         self
     }
 
+    /// 利用者向けの 1 文（既定は日本語）。
+    pub fn message(&self) -> &'static str {
+        message(self.code, Locale::default())
+    }
+
     pub fn exit_code(&self) -> i32 {
         self.code.kind().exit_code()
     }

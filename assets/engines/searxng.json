@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "id": "searxng",
+  "variant": "json",
+  "name": "SearXNG (JSON)",
+  "description": "自前の SearXNG の JSON API を読む。接続先 URL は request.url を書き換えて指定する。",
+  "enabled": true,
+  "tags": ["general", "self-hosted"],
+  "network": "self-hosted",
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8888/search",
+    "query": {
+      "q": "{{query}}",
+      "format": "json",
+      "pageno": "{{page}}",
+      "language": "{{locale}}"
+    },
+    "headers": {
+      "Accept": "application/json"
+    },
+    "encoding": "utf-8"
+  },
+  "response": {
+    "kind": "json",
+    "items": {
+      "path": "results"
+    },
+    "fields": {
+      "title": {
+        "path": "title",
+        "transform": ["trim", "collapse_ws"]
+      },
+      "url": {
+        "path": "url",
+        "transform": ["trim", "strip_tracking"]
+      },
+      "snippet": {
+        "path": "content",
+        "transform": ["strip_html", "trim", "collapse_ws"]
+      },
+      "site": {
+        "path": "engine",
+        "transform": ["trim"]
+      },
+      "published": {
+        "path": "publishedDate",
+        "transform": ["to_date"]
+      }
+    },
+    "errorWhen": [
+      { "path": "error", "exists": true }
+    ]
+  },
+  "paging": {
+    "style": "page",
+    "pageParam": "pageno",
+    "pageBase": 1,
+    "pageSize": 10,
+    "maxResults": 50
+  },
+  "limits": {
+    "maxResults": 50,
+    "minIntervalMs": 1000,
+    "maxPageSize": 10,
+    "requiresApiKey": false
+  },
+  "defaults": {
+    "locale": "ja",
+    "region": "jp"
+  }
+}

@@ -37,6 +37,8 @@ pub struct HistoryQuery {
 
 /// 履歴の追記・参照。
 pub trait HistoryStore: Send + Sync {
+    /// 次の履歴識別子（`H<n>`）を返す。
+    fn next_id(&self) -> Result<String, AppError>;
     fn append(&self, entry: &HistoryEntry) -> Result<(), AppError>;
     fn query(&self, q: &HistoryQuery) -> Result<Vec<HistoryEntry>, AppError>;
     fn clear(&self, before: Option<&str>) -> Result<usize, AppError>;

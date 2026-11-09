@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "id": "duckduckgo",
+  "name": "DuckDuckGo (HTML)",
+  "description": "HTML の結果ページを CSS セレクタで読む既定エンジン。API キー不要。",
+  "enabled": true,
+  "tags": ["general", "no-key"],
+  "network": "default",
+  "request": {
+    "method": "GET",
+    "url": "https://html.duckduckgo.com/html/",
+    "query": {
+      "q": "{{query}}",
+      "s": "{{offset}}",
+      "kl": "jp-jp"
+    },
+    "headers": {
+      "Accept": "text/html,application/xhtml+xml",
+      "Accept-Language": "ja,en;q=0.8"
+    },
+    "encoding": "utf-8"
+  },
+  "response": {
+    "kind": "html",
+    "items": {
+      "selector": "div.result:not(.result--ad)"
+    },
+    "fields": {
+      "title": {
+        "selector": "a.result__a",
+        "transform": ["collapse_ws", "decode_entities"]
+      },
+      "url": {
+        "selector": "a.result__a",
+        "attr": "href",
+        "transform": ["trim", "unwrap_redirect", "strip_tracking", "absolutize"]
+      },
+      "snippet": {
+        "selector": ".result__snippet",
+        "transform": ["strip_html", "collapse_ws", "decode_entities"]
+      }
+    }
+  },
+  "paging": {
+    "style": "offset",
+    "offsetParam": "s",
+    "pageSize": 10,
+    "maxResults": 50,
+    "offsetStep": 10
+  },
+  "limits": {
+    "maxResults": 50,
+    "minIntervalMs": 2000,
+    "maxPageSize": 10,
+    "requiresApiKey": false
+  },
+  "defaults": {
+    "locale": "ja",
+    "region": "jp"
+  }
+}
