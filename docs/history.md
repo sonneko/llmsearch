@@ -139,3 +139,13 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
 - リリースワークフローはタグ push で Build → Package → Smoke test（`--version` / `engines list` / `config show`）→ Upload を実行し、すべて成功した。
 - M3 の残項目だった容量管理・保持期間・E2E を実装し、`tests/e2e.rs` を追加した（実ネットワークは `LLMSEARCH_E2E_LIVE=1` のときだけ。ユーザー指示により今回は未実施）。
 - 教訓: サンドボックス再起動で `/home/user/build` が消えると `cargo` も消える。`git` の参照も巻き戻る場合があるため、作業前に `git fetch` してから `git reset --hard origin/<branch>` で合わせる（今回は退避したコミットを `cherry-pick` で載せ直した）。
+
+### [HIST:SPEC-FIX:F004] 2026-11-09 検索結果 URL がエンジンのリダイレクト URL のままになる問題を修正
+[HIST-TAG: category=SPEC-FIX id=F004 topics=redirect,extract,search,fetch,url]
+
+- 症状: 検索結果の URL が `//<engine>/l/?uddg=<実 URL>` のようなエンジン側のリダイレクト URL のまま出て、`read` しても検索結果の中身を読めなかった。
+- 原因 1: `unwrap_redirect` が生の `href` を `url::parse` していたため、プロトコル相対（`//host/...`）の URL を解釈できず、変換が黙って無効化されていた。`Transform::UnwrapRedirect` が基準 URL（`base_url`）を受け取るようにし、相対・プロトコル相対を絶対化してから解釈するようにした。値の二重エンコードと、リダイレクトがリダイレクトを包む入れ子（2 段）も解く。
+- 原因 2: エンジン定義の書き漏らし（`unwrap_redirect` の指定漏れ）があると、抽出段階では防げなかった。`core/search.rs` の `unwrap_redirects` で全結果 URL を正規化時に再検査し、展開した場合は `W4006` を出す。判定は `core/url.rs` の `target_of_redirect`（既定キー）。
+- 原因 3: 取得時、中継ページが HTTP の 3xx ではなく `<meta http-equiv="refresh">` やスクリプトの location 遷移で返ると、`read` が中継ページを「記事」として読んでいた。`adapters/extract` が `html_redirect_target` で検出し、`maxRedirects` を上限にたどり直す。
+- 仕様: `REF:docs/specifications/engine-definitions.md` §4.7（リダイレクト URL の展開）を追加し、`W4006` を `REF:docs/specifications/errors.md` の警告一覧へ追加した。
+- 検査: プロトコル相対・入れ子・二重エンコードの展開（`src/core/extract.rs`）、`W4006` の発行元（`tests/architecture.rs`）、中継ページの追従（`tests/integration.rs`）、同梱 HTML エンジンが `unwrap_redirect` を持つこと（`tests/contract.rs`）。

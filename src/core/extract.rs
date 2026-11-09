@@ -399,7 +399,7 @@ fn apply_transforms(
                 Ok(u) => u.to_string(),
                 Err(_) => value,
             },
-            Transform::UnwrapRedirect => unwrap_redirect(&value, &args.keys),
+            Transform::UnwrapRedirect => unwrap_redirect(&value, &args.keys, base_url),
             Transform::StripTracking => match url::parse(&value) {
                 Ok(u) => url::normalize(&u, tracking).to_string(),
                 Err(_) => value,
@@ -437,10 +437,18 @@ fn strip_html(s: &str) -> String {
     text::decode_entities(&out)
 }
 
-fn unwrap_redirect(value: &str, keys: &[String]) -> String {
-    let Ok(parsed) = url::parse(value) else {
-        return value.to_string();
-    };
+/// リダイレクト用 URL から実 URL を取り出す。
+///
+/// 検索エンジンは結果リンクを自前のホスト（`//relay.example/l/?uddg=...` など）へ
+/// 包んで返す。そのまま取得するとエンジン側のページしか読めないため、
+/// クエリの参照キーから実 URL を取り出す。
+///
+/// - プロトコル相対（`//host/path`）・相対パスは `base_url` で絶対化してから解釈する。
+/// - 値は 1 段だけでなく、2 段まで入れ子に復号できるようにする
+///   （エンジンのリダイレクトが別のリダイレクトを包む場合がある）。
+/// - 候補キーは既定の一覧に加えて `keys` で指定できる。
+fn unwrap_redirect(value: &str, keys: &[String], base_url: &url::Url) -> String {
+    const MAX_DEPTH: usize = 2;
     let default_keys = [
         "uddg",
         "url",
@@ -449,20 +457,94 @@ fn unwrap_redirect(value: &str, keys: &[String]) -> String {
         "target",
         "redirect",
         "redirect_url",
+        "dest",
+        "destination",
+        "to",
+        "link",
+        "href",
     ];
-    let candidates: Vec<String> = if keys.is_empty() {
-        default_keys.iter().map(|s| s.to_string()).collect()
+    let candidates: Vec<&str> = if keys.is_empty() {
+        default_keys.to_vec()
     } else {
-        keys.to_vec()
+        keys.iter().map(String::as_str).collect()
     };
-    for (k, v) in parsed.query_pairs() {
-        if candidates.iter().any(|c| c == &k)
-            && (v.starts_with("http://") || v.starts_with("https://"))
-        {
-            return v.to_string();
+
+    // 相対・プロトコル相対でも解釈できるよう、基準 URL で絶対化してから解析する
+    let absolute = |s: &str| -> Option<url::Url> {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if let Ok(parsed) = url::Url::parse(trimmed) {
+            return Some(parsed);
+        }
+        base_url.join(trimmed).ok()
+    };
+
+    let mut current = match absolute(value) {
+        Some(u) => u,
+        None => return value.to_string(),
+    };
+    let mut result = value.to_string();
+    for _ in 0..MAX_DEPTH {
+        let Some(next) = extract_target(&current, &candidates).and_then(|v| absolute(&v)) else {
+            break;
+        };
+        result = next.to_string();
+        if next == current {
+            break;
+        }
+        current = next;
+    }
+    result
+}
+
+/// クエリから参照キーの値（`http` / `https` の実 URL）を取り出す。
+///
+/// 値はパーセントエンコードされている場合と、素の URL がそのまま入っている
+/// 場合があるため、復号してから再度判定する。
+fn extract_target(url: &url::Url, candidates: &[&str]) -> Option<String> {
+    for (key, value) in url.query_pairs() {
+        if !candidates.iter().any(|c| key.eq_ignore_ascii_case(c)) {
+            continue;
+        }
+        let decoded = value.trim().to_string();
+        // 二重エンコード（`%253A`）にも 1 段だけ対応する
+        let once = percent_decode(&decoded);
+        for candidate in [decoded.as_str(), once.as_str()] {
+            let candidate = candidate.trim();
+            if candidate.starts_with("http://") || candidate.starts_with("https://") {
+                return Some(candidate.to_string());
+            }
+            // エンジンが値をさらにリダイレクト URL で包んでいる場合
+            if let Ok(inner) = url::Url::parse(candidate)
+                && let Some(found) = extract_target(&inner, candidates)
+            {
+                return Some(found);
+            }
         }
     }
-    value.to_string()
+    None
+}
+
+/// `%XX` を復号する（不正な並びはそのまま残す）。
+fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = &input[i + 1..i + 3];
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
 }
 
 fn normalize_date(value: &str, formats: &[String]) -> String {
@@ -627,6 +709,71 @@ mod tests {
         let body = r#"{"r":[{"t":"x","u":"https://example.com/p?utm_source=a&id=2"}]}"#;
         let out = extract(&d.response, body, &base(), &[]).unwrap();
         assert_eq!(out.hits[0].url, "https://example.com/p?id=2");
+    }
+
+    /// 実データ相当: 結果リンクは `//relay.example/l/?uddg=<実 URL>` のような
+    /// プロトコル相対のリダイレクト URL で返ることがある。`unwrap_redirect` が
+    /// これを解けないと、取得時にエンジン側のページしか読めない。
+    #[test]
+    fn unwraps_protocol_relative_redirect() {
+        let d = def(serde_json::json!({
+            "schemaVersion": 1,
+            "id": "t",
+            "request": {"url": "https://relay.example/html/"},
+            "response": {
+                "kind": "html",
+                "items": {"selector": "div.result"},
+                "fields": {
+                    "title": {"selector": "a.hit", "transform": ["collapse_ws"]},
+                    "url": {
+                        "selector": "a.hit",
+                        "attr": "href",
+                        "transform": ["trim", "unwrap_redirect", "strip_tracking", "absolutize"]
+                    }
+                }
+            }
+        }));
+        let body = r#"<html><body>
+            <div class="result">
+              <a class="hit" href="//relay.example/l/?uddg=https%3A%2F%2Fexample.jp%2Farticle%2F1%3Fx%3D1&amp;rut=abc">Title A</a>
+            </div>
+            <div class="result">
+              <a class="hit" href="https://relay.example/l/?uddg=https%3A%2F%2Fexample.jp%2Farticle%2F2">Title B</a>
+            </div>
+        </body></html>"#;
+        let out = extract(&d.response, body, &base(), &[]).unwrap();
+        assert_eq!(out.hits.len(), 2);
+        assert_eq!(out.hits[0].url, "https://example.jp/article/1?x=1");
+        assert_eq!(out.hits[1].url, "https://example.jp/article/2");
+    }
+
+    /// 入れ子のリダイレクト（エンジンが別のリダイレクト URL を包む）も解く。
+    #[test]
+    fn unwraps_nested_and_double_encoded_redirects() {
+        let d = def(serde_json::json!({
+            "schemaVersion": 1,
+            "id": "t",
+            "request": {"url": "https://example.com/search"},
+            "response": {
+                "kind": "html",
+                "items": {"selector": "li"},
+                "fields": {
+                    "title": {"selector": "a"},
+                    "url": {"selector": "a", "attr": "href", "transform": ["unwrap_redirect"]}
+                }
+            }
+        }));
+        // 1 段: 素の URL がクエリに入る / 2 段: リダイレクトがリダイレクトを包む
+        let body = r#"<html><body><ul>
+          <li><a href="https://relay.example/out?url=https%3A%2F%2Fexample.jp%2Fa">A</a></li>
+          <li><a href="https://relay.example/out?url=https%3A%2F%2Frelay2.example%2Fgo%3Fu%3Dhttps%253A%252F%252Fexample.jp%252Fb">B</a></li>
+          <li><a href="/local/page">C</a></li>
+        </ul></body></html>"#;
+        let out = extract(&d.response, body, &base(), &[]).unwrap();
+        assert_eq!(out.hits[0].url, "https://example.jp/a");
+        assert_eq!(out.hits[1].url, "https://example.jp/b");
+        // リダイレクトを含まない相対リンクは基準 URL で絶対化するだけ
+        assert_eq!(out.hits[2].url, "https://example.com/local/page");
     }
 
     #[test]

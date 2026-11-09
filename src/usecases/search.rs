@@ -81,6 +81,20 @@ pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppEr
                     ));
                 }
 
+                // 抽出でリダイレクトを解けなかった結果をここで解く（取得時に
+                // エンジン側のページを読んでしまうのを防ぐ）
+                let (hits, unwrapped, example) = search_core::unwrap_redirects(hits);
+                if unwrapped > 0 {
+                    warnings.push(Diagnostic::new(
+                        WarningCode::W4006,
+                        match &example {
+                            Some(first) => format!(
+                                "エンジンのリダイレクト URL を {unwrapped} 件展開した（例: {first}）"
+                            ),
+                            None => format!("エンジンのリダイレクト URL を {unwrapped} 件展開した"),
+                        },
+                    ));
+                }
                 let (deduped, removed) = search_core::dedup(hits);
                 let raw_hits = deduped;
                 if removed > 0 {

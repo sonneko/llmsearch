@@ -206,3 +206,38 @@ fn seed(id: u32, title: &str, url: &str) -> SearchHit {
         language: None,
     }
 }
+
+/// 同梱の HTML エンジンは、結果 URL からリダイレクトを解く変換を必ず持つ。
+///
+/// これが抜けると「検索結果を開いたらエンジンのページだった」状態になる。
+#[test]
+fn bundled_html_engines_unwrap_redirects() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/engines");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).expect("assets/engines") {
+        let path = entry.expect("entry").path();
+        if path.extension().map(|e| e != "json").unwrap_or(true) {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).expect("読み込み");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("JSON");
+        if value["response"]["kind"] != "html" {
+            continue;
+        }
+        let transforms: Vec<String> = value["response"]["fields"]["url"]["transform"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|t| t.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            transforms.iter().any(|t| t == "unwrap_redirect"),
+            "{} の url 変換に unwrap_redirect が無い: {transforms:?}",
+            path.display()
+        );
+        checked += 1;
+    }
+    assert!(checked >= 1, "HTML エンジンが 1 つも無い");
+}

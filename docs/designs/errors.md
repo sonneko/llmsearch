@@ -80,7 +80,8 @@
 | `W4002` | `adapters/engine/loader.rs` |
 | `W4003` | `usecases/search/fallback.rs` |
 | `W4004` | `adapters/engine/eval.rs` |
-| `W4005` | `core/search/merge.rs` |
+| `W4005` | `REF:src/core/search.rs` |
+| `W4006` | `REF:src/core/search.rs`, `REF:src/usecases/search.rs` |
 | `W5001` | `adapters/state/session_store.rs`, `counters_store.rs` |
 | `W5002` | `usecases/state/cleanup.rs` |
 | `W5004` | `adapters/state/history_jsonl.rs` |
@@ -126,7 +127,7 @@
 
 状態: 実装完了（REF:src/core/errors.rs）
 
-`src/usecases/doctor/checks/` に 1 項目 1 ファイルで `trait Check { fn name(&self) -> &'static str; async fn run(&self, ctx: &DoctorCtx<'_>) -> Diagnostic }` を実装し、`run.rs` が順に実行する。各チェックは 3 秒でタイムアウトし、失敗しても後続を継続する。
+`src/usecases/doctor.rs` に 1 項目 1 関数で実装し、`doctor()` が順に実行する。各チェックは 3 秒でタイムアウトし、失敗しても後続を継続する。
 
 ### 5.2 結果の表示
 

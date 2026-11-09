@@ -92,6 +92,128 @@ pub fn dedup_key(url: &Url) -> String {
     u.to_string()
 }
 
+/// リダイレクト URL のクエリに含まれる実 URL を取り出す（設定に依存しない既定キー）。
+///
+/// 値はパーセントエンコードされている場合があるため、復号してから `http` /
+/// `https` で始まるものを採る。入れ子（リダイレクトがリダイレクトを包む）は
+/// 2 段まで辿る。
+pub fn target_of_redirect(url: &Url) -> Option<String> {
+    const KEYS: &[&str] = &[
+        "uddg",
+        "url",
+        "u",
+        "q",
+        "target",
+        "redirect",
+        "redirect_url",
+        "dest",
+        "destination",
+        "to",
+        "link",
+        "href",
+    ];
+    const MAX_DEPTH: usize = 2;
+    fn target(url: &Url) -> Option<String> {
+        for (key, value) in url.query_pairs() {
+            if !KEYS.iter().any(|k| key.eq_ignore_ascii_case(k)) {
+                continue;
+            }
+            let raw = value.trim().to_string();
+            for candidate in [raw.clone(), percent_decode(&raw)] {
+                let candidate = candidate.trim();
+                if candidate.starts_with("http://") || candidate.starts_with("https://") {
+                    return Some(candidate.to_string());
+                }
+                if let Ok(inner) = Url::parse(candidate)
+                    && let Some(found) = target(&inner)
+                {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    let mut current = url.clone();
+    let mut found = None;
+    for _ in 0..MAX_DEPTH {
+        let Some(next) = target(&current) else { break };
+        let Ok(parsed) = Url::parse(&next) else { break };
+        if parsed == current {
+            break;
+        }
+        current = parsed;
+        found = Some(current.to_string());
+    }
+    found
+}
+
+/// `%XX` を復号する（不正な並びはそのまま残す）。
+pub fn percent_decode(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(byte) = u8::from_str_radix(&input[i + 1..i + 3], 16)
+        {
+            out.push(byte);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+/// HTML に書かれたリダイレクト先を取り出す（`<meta http-equiv="refresh">` と
+/// `location.href = "..."` / `location.replace("...")`）。
+///
+/// エンジンのリダイレクトは HTTP の 302 ではなく、HTML の中継ページで
+/// 返ることがある。その場合 HTTP 層では追えないため、本文から拾って
+/// たどり直す必要がある。
+pub fn html_redirect_target(body: &str, base: &Url) -> Option<Url> {
+    let lower = body.to_ascii_lowercase();
+
+    // <meta http-equiv="refresh" content="0; url=/next">
+    if let Some(pos) = lower.find("http-equiv")
+        && lower[pos..].starts_with("http-equiv")
+        && lower[pos..].find("refresh").is_some_and(|d| d < 200)
+        && let Some(content_pos) = lower[pos..].find("content").map(|i| pos + i)
+    {
+        let slice = &body[content_pos..];
+        let quote_start = slice.find(['"', '\'']).map(|i| content_pos + i)?;
+        let quote = body[quote_start..].chars().next()?;
+        let rest = &body[quote_start + 1..];
+        let quote_end = rest.find(quote).map(|i| quote_start + 1 + i)?;
+        let content = &body[quote_start + 1..quote_end];
+        let target = content
+            .split("url=")
+            .nth(1)
+            .or_else(|| content.split("URL=").nth(1))?;
+        return base.join(target.trim().trim_matches(['"', '\'', ' '])).ok();
+    }
+
+    // location.href = "..." / location.replace("...") / window.location = "..."
+    for marker in ["location.href", "location.replace", "location.assign"] {
+        if let Some(pos) = lower.find(marker) {
+            let rest = &body[pos + marker.len()..];
+            let rest = rest.trim_start().trim_start_matches('(').trim_start();
+            let rest = rest.trim_start_matches('=').trim_start();
+            let quote = rest.chars().next()?;
+            if quote != '"' && quote != '\'' {
+                continue;
+            }
+            let inner = &rest[1..];
+            let end = inner.find(quote)?;
+            return base.join(inner[..end].trim()).ok();
+        }
+    }
+    None
+}
+
 /// 表示用に秘匿パラメータを伏字化した文字列を返す。
 pub fn redact(url: &Url, secrets: &[String]) -> String {
     let mut out = url.clone();
@@ -191,6 +313,40 @@ mod tests {
         let out = redact(&u, &[]);
         assert!(out.contains("token=***"));
         assert!(out.contains("q=ok"));
+    }
+
+    #[test]
+    fn finds_target_behind_redirect() {
+        let u =
+            Url::parse("https://relay.example/l/?uddg=https%3A%2F%2Fexample.jp%2Fa%3Fx%3D1&rut=z")
+                .unwrap();
+        assert_eq!(
+            target_of_redirect(&u).as_deref(),
+            Some("https://example.jp/a?x=1")
+        );
+        let plain = Url::parse("https://example.jp/a").unwrap();
+        assert_eq!(target_of_redirect(&plain), None);
+    }
+
+    #[test]
+    fn reads_redirect_from_html() {
+        let base = Url::parse("https://relay.example/out?x=1").unwrap();
+        let meta =
+            r#"<html><head><meta http-equiv="refresh" content="0; url=/real/page"></head></html>"#;
+        assert_eq!(
+            html_redirect_target(meta, &base)
+                .map(|u| u.to_string())
+                .as_deref(),
+            Some("https://relay.example/real/page")
+        );
+        let js = r#"<script>window.location.replace("https://example.jp/a");</script>"#;
+        assert_eq!(
+            html_redirect_target(js, &base)
+                .map(|u| u.to_string())
+                .as_deref(),
+            Some("https://example.jp/a")
+        );
+        assert_eq!(html_redirect_target("<p>no redirect</p>", &base), None);
     }
 
     #[test]
