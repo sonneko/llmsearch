@@ -13,7 +13,7 @@
 | 仕様策定（M1） | 改訂中 | Rust・全 JSON 設定・エンジン非依存への仕様改訂（v2） | `REF:docs/specifications/engine-definitions.md` |
 | 実装（M2） | 完了 | ポート・`core`・アダプタ・ユースケース・UI・同梱アセット | `REF:docs/plans.md#m2-implement` |
 | 品質強化（M3） | 完了 | アーキテクチャ検査・契約テスト・結合テスト・容量管理 | `REF:docs/plans.md#m3-hardening` |
-| リリース準備（M4） | 未着手 | README・CI 差し替え・タグ付け | `REF:docs/plans.md#m4-release` |
+| リリース準備（M4） | 完了 | README・開発者ガイド・CI・v0.1.0 のタグ付けとリリース | `REF:docs/plans.md#m4-release` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -78,7 +78,7 @@
 - [x] CI（lint / test / build）を実際のコマンドへ差し替え
 - [x] リリース用ワークフロー（`REF:.github/workflows/release.yml`。Linux x86_64 の 1 バイナリをタグで添付）
 - [x] 設計書の `状態:` 行を実装完了へ更新し、`REF:src/...` 参照へ切り替え（エージェント連携は未実装のまま）
-- [ ] `v0.1.0` のタグ付けとリリースノート作成（ワークフローは準備済み。タグ push で実行される）
+- [x] `v0.1.0` のタグ付けとリリースノート作成（`REF:.github/workflows/release.yml` が Linux x86_64 の 1 バイナリを添付）
 
 ---
 

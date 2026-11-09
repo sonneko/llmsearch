@@ -14,7 +14,7 @@
 | 仕様策定（M1） | 改訂中 | Rust・全 JSON 設定・エンジン非依存への仕様改訂（v2） | `REF:docs/specifications/engine-definitions.md` |
 | 実装（M2） | 完了 | ポート・`core`・アダプタ・ユースケース・UI・同梱アセット | `REF:docs/plans.md#m2-implement` |
 | 品質強化（M3） | 完了 | アーキテクチャ検査・契約テスト・結合テスト・容量管理 | `REF:docs/plans.md#m3-hardening` |
-| リリース準備（M4） | 未着手 | README・CI 差し替え・タグ付け | `REF:docs/plans.md#m4-release` |
+| リリース準備（M4） | 完了 | README・開発者ガイド・CI・v0.1.0 のタグ付けとリリース | `REF:docs/plans.md#m4-release` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -22,8 +22,9 @@
 ## 2. 現在のブランチ・PR・直近の作業状態
 
 - **現在のブランチ**: `arena/7d587114-llmsearch`
-- **PR**: #1（`arena/7d587114-llmsearch` → `main`、CI 緑）
-- **現在の状態**: M2（実装）・M3（品質強化）とも完了。残るは M4（リリース準備）と E2E（実端末・`LLMSEARCH_E2E_LIVE=1`）のみ。
+- **PR**: #1（`main` へマージ済み）
+- **リリース**: `v0.1.0`（Linux x86_64 の単一バイナリ + SHA256）
+- **現在の状態**: M2（実装）・M3（品質強化）・M4（リリース準備）すべて完了。`v0.1.0` を公開済み。実ネットワーク E2E（`LLMSEARCH_E2E_LIVE=1`）はユーザー指示により未実施。
 - **検証**: `cargo fmt --all --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`（すべて `--locked --offline`）が通過。`python3 docs/script/verify-docs.py` も通過。
 - **テスト数**: lib 114 / architecture 14 / assets 4 / contract 8 / integration 13。
 - **直近の作業**: 警告コードの発行元を仕様どおりに固定、`core` からの I/O・非決定性の除去、`config explain <key>` の実装、履歴の保持期間・上限件数、文書キャッシュの容量削除、README の利用手順。

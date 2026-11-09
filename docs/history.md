@@ -131,3 +131,11 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
 - リリースは `REF:.github/workflows/release.yml` がタグ push（`v*`）で実行し、`llmsearch-<version>-x86_64-unknown-linux-gnu.tar.gz` と SHA256 を添付する。リリースノートは GitHub が自動生成する。
 - 却下案: 複数 OS・複数アーキテクチャのマトリクスビルドは、現時点で必要とされていないため見送った。追加する場合は同じワークフローに `strategy.matrix` を足すだけで済む。
 - 削除: 用途のない Pages デプロイ用ワークフロー（旧 `deploy.yml`）は誤って走る余地があるため削除した。
+
+### [HIST:MILESTONE:M003] 2026-11-09 M3・M4 完了と v0.1.0 の公開
+[HIST-TAG: category=MILESTONE id=M003 topics=release,m3,m4,merge,tag,v0.1.0]
+
+- PR #1 を `main` へマージし、`v0.1.0` をタグ付けして公開した。成果物は `llmsearch-v0.1.0-x86_64-unknown-linux-gnu.tar.gz`（3.9 MiB）と SHA256。
+- リリースワークフローはタグ push で Build → Package → Smoke test（`--version` / `engines list` / `config show`）→ Upload を実行し、すべて成功した。
+- M3 の残項目だった容量管理・保持期間・E2E を実装し、`tests/e2e.rs` を追加した（実ネットワークは `LLMSEARCH_E2E_LIVE=1` のときだけ。ユーザー指示により今回は未実施）。
+- 教訓: サンドボックス再起動で `/home/user/build` が消えると `cargo` も消える。`git` の参照も巻き戻る場合があるため、作業前に `git fetch` してから `git reset --hard origin/<branch>` で合わせる（今回は退避したコミットを `cherry-pick` で載せ直した）。
