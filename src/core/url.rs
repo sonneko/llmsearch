@@ -1,6 +1,6 @@
 //! URL の正規化・検証・追跡パラメータ除去。
 
-use url::Url;
+pub use url::Url;
 
 use crate::core::errors::{AppError, ErrorCode};
 

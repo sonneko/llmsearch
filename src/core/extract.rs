@@ -70,9 +70,9 @@ fn extract_html(
         .fields
         .iter()
         .filter_map(|(name, f)| match f {
-            FieldSpec::Selector { selector, .. } => selector_of(selector)
-                .ok()
-                .map(|s| (name.as_str(), s)),
+            FieldSpec::Selector { selector, .. } => {
+                selector_of(selector).ok().map(|s| (name.as_str(), s))
+            }
             _ => None,
         })
         .collect();
@@ -120,12 +120,11 @@ fn trigger_contains(spec: &ResponseSpec, doc: &Html, body: &str) -> Option<Strin
                 }
             }
             ErrorCond::FieldEmpty { field } => {
-                if let Some(FieldSpec::Selector { selector, .. }) = spec.fields.get(field) {
-                    if let Ok(sel) = Selector::parse(selector) {
-                        if doc.select(&sel).next().is_none() {
-                            return Some(format!("errorWhen.fieldEmpty: {field}"));
-                        }
-                    }
+                if let Some(FieldSpec::Selector { selector, .. }) = spec.fields.get(field)
+                    && let Ok(sel) = Selector::parse(selector)
+                    && doc.select(&sel).next().is_none()
+                {
+                    return Some(format!("errorWhen.fieldEmpty: {field}"));
                 }
             }
             ErrorCond::PathExists { .. } | ErrorCond::Status { .. } => {}
@@ -144,15 +143,17 @@ fn extract_json(
     base_url: &url::Url,
     tracking: &[String],
 ) -> Result<ExtractOutcome, AppError> {
-    let value: serde_json::Value = serde_json::from_str(body).map_err(|e| {
-        AppError::with_detail(ErrorCode::E4004, format!("JSON の解析に失敗: {e}"))
-    })?;
+    let value: serde_json::Value = serde_json::from_str(body)
+        .map_err(|e| AppError::with_detail(ErrorCode::E4004, format!("JSON の解析に失敗: {e}")))?;
     let mut out = ExtractOutcome::default();
 
     for cond in &spec.error_when {
         match cond {
             ErrorCond::PathExists { path } => {
-                if json_path(&value, path).map(|v| !v.is_null()).unwrap_or(false) {
+                if json_path(&value, path)
+                    .map(|v| !v.is_null())
+                    .unwrap_or(false)
+                {
                     out.no_results = true;
                     out.warnings.push(format!("errorWhen.pathExists: {path}"));
                     return Ok(out);
@@ -182,9 +183,9 @@ fn extract_json(
         let mut values: BTreeMap<String, String> = BTreeMap::new();
         for (name, field) in &spec.fields {
             let raw = match field {
-                FieldSpec::Path { path, .. } => json_path(item, path)
-                    .map(json_scalar)
-                    .unwrap_or_default(),
+                FieldSpec::Path { path, .. } => {
+                    json_path(item, path).map(json_scalar).unwrap_or_default()
+                }
                 FieldSpec::Const { value } => value.clone(),
                 _ => String::new(),
             };
@@ -226,11 +227,7 @@ pub fn json_path<'a>(root: &'a serde_json::Value, path: &str) -> Option<&'a serd
                  index: Option<usize>,
                  all: bool|
      -> Option<&'a serde_json::Value> {
-        let mut node = if key.is_empty() {
-            cur
-        } else {
-            cur.get(key)?
-        };
+        let mut node = if key.is_empty() { cur } else { cur.get(key)? };
         if all {
             return None; // 呼び出し側で配列展開する
         }
@@ -300,7 +297,9 @@ fn finish_hit(
                     let src = values.get(from).cloned().unwrap_or_default();
                     values.insert(name.clone(), src);
                 }
-                FieldSpec::Join { join, separator, .. } => {
+                FieldSpec::Join {
+                    join, separator, ..
+                } => {
                     let sep = separator.as_deref().unwrap_or(" ");
                     let joined = join
                         .iter()
@@ -425,17 +424,25 @@ fn unwrap_redirect(value: &str, keys: &[String]) -> String {
     let Ok(parsed) = url::parse(value) else {
         return value.to_string();
     };
-    let default_keys = ["uddg", "url", "u", "q", "target", "redirect", "redirect_url"];
+    let default_keys = [
+        "uddg",
+        "url",
+        "u",
+        "q",
+        "target",
+        "redirect",
+        "redirect_url",
+    ];
     let candidates: Vec<String> = if keys.is_empty() {
         default_keys.iter().map(|s| s.to_string()).collect()
     } else {
         keys.to_vec()
     };
     for (k, v) in parsed.query_pairs() {
-        if candidates.iter().any(|c| c == &k) {
-            if v.starts_with("http://") || v.starts_with("https://") {
-                return v.to_string();
-            }
+        if candidates.iter().any(|c| c == &k)
+            && (v.starts_with("http://") || v.starts_with("https://"))
+        {
+            return v.to_string();
         }
     }
     value.to_string()
@@ -475,7 +482,8 @@ fn normalize_date(value: &str, formats: &[String]) -> String {
         }
     }
     // 先頭 10 文字が YYYY-MM-DD なら採用
-    if trimmed.len() >= 10 && chrono::NaiveDate::parse_from_str(&trimmed[..10], "%Y-%m-%d").is_ok() {
+    if trimmed.len() >= 10 && chrono::NaiveDate::parse_from_str(&trimmed[..10], "%Y-%m-%d").is_ok()
+    {
         return trimmed[..10].to_string();
     }
     trimmed.to_string()
