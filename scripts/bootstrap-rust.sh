@@ -72,8 +72,12 @@ if [ "${REGENERATE_ONLY:-0}" != 1 ]; then
         || die "ダウンロードに失敗した。ブランチ $BRANCH が存在するか確認すること。"
     say "ダウンロード完了: $(du -h tc.tgz | cut -f1)"
 
-    # リポジトリ名に依存しないよう、tarball の先頭エントリから展開先を決める
-    work="$(tar tzf tc.tgz | head -1 | cut -d/ -f1)"
+    # リポジトリ名に依存しないよう、tarball の先頭エントリから展開先を決める。
+    # `tar tzf | head -1` は head が先に終了して tar が SIGPIPE(141) で落ち、
+    # `set -o pipefail` によりスクリプトごと停止するため、一度ファイルへ書く。
+    tar tzf tc.tgz > tc.list
+    work="$(head -1 tc.list | cut -d/ -f1)"
+    rm -f tc.list
     [ -n "$work" ] || die "tarball の中に展開先ディレクトリが見つからない"
     rm -rf "./$work"
     tar xzf tc.tgz
@@ -88,7 +92,9 @@ if [ "${REGENERATE_ONLY:-0}" != 1 ]; then
     fi
 
     say "sysroot を展開"
-    if [ -f chunks/sysroot.tar.gz.* ]; then
+    # `[ -f chunks/x.* ]` は展開結果が複数語になり `too many arguments` になるため、
+    # チャンクの有無は compgen で判定する。
+    if compgen -G "chunks/sysroot.tar.gz.*" >/dev/null; then
         cat chunks/sysroot.tar.gz.* > sysroot.tar.gz
     elif [ -f sysroot.tar.gz ]; then
         : # 既に単一ファイル
@@ -99,7 +105,7 @@ if [ "${REGENERATE_ONLY:-0}" != 1 ]; then
 
     say "vendor を展開"
     rm -rf "$BUILD_DIR/vendor-src"
-    if [ -f chunks/vendor.tar.gz.* ]; then
+    if compgen -G "chunks/vendor.tar.gz.*" >/dev/null; then
         cat chunks/vendor.tar.gz.* > vendor.tar.gz
     elif [ -f vendor.tar.gz ]; then
         : # 既に単一ファイル
