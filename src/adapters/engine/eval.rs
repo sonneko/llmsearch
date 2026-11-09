@@ -21,6 +21,7 @@ pub struct EngineCall {
 
 /// エンジンを 1 回呼び出し、結果を抽出する。
 pub fn evaluate(
+    clock: &dyn crate::ports::Clock,
     client: &dyn HttpClient,
     profile: &NetworkProfile,
     def: &EngineDef,
@@ -46,9 +47,9 @@ pub fn evaluate(
         .map(|s| s.to_string())
         .collect();
 
-    let started = std::time::Instant::now();
+    let started = clock.monotonic_ns();
     let response: HttpResponse = client.send_blocking(profile, &request)?;
-    let elapsed_ms = started.elapsed().as_millis();
+    let elapsed_ms = clock.monotonic_ns().saturating_sub(started) as u128 / 1_000_000;
 
     let (body, _had_errors) = decode(&response, def);
     let mut outcome = extract::extract(&def.response, &body, &response.final_url, tracking)?;
@@ -161,6 +162,7 @@ mod tests {
             ..Default::default()
         };
         let call = evaluate(
+            &crate::ports::system::SystemClock::new(),
             &client,
             &NetworkProfile::default(),
             &def(),
@@ -181,6 +183,7 @@ mod tests {
             status: 200,
         };
         let err = evaluate(
+            &crate::ports::system::SystemClock::new(),
             &client,
             &NetworkProfile::default(),
             &def(),

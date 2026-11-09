@@ -1,7 +1,7 @@
 //! 履歴（追記専用 JSON Lines）。
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::adapters::state::StatePaths;
 use crate::core::errors::{AppError, ErrorCode};
@@ -130,6 +130,26 @@ impl HistoryStore for JsonlHistory {
     fn skipped_lines(&self) -> usize {
         self.skipped.load(std::sync::atomic::Ordering::Relaxed)
     }
+}
+
+/// 書き出した JSON Lines を読み戻す（`history` の退避・移行で使う）。
+///
+/// 引数は読み込み元のパスで、戻り値は読めた件数。壊れた行は数えずに飛ばし、
+/// 飛ばした件数を返り値の 2 要素目で知らせる（`W5004` の対象）。
+pub fn import_lines(path: &Path, sink: &mut Vec<HistoryEntry>) -> std::io::Result<usize> {
+    let text = std::fs::read_to_string(path)?;
+    let mut skipped = 0usize;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<HistoryEntry>(line) {
+            Ok(entry) => sink.push(entry),
+            Err(_) => skipped += 1,
+        }
+    }
+    Ok(skipped)
 }
 
 #[cfg(test)]

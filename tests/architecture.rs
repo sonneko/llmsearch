@@ -289,3 +289,149 @@ fn extract_outcome_carries_typed_diagnostics() {
         "ExtractOutcome に文字列の警告が残っている"
     );
 }
+
+/// テスト以外で `unwrap` / `expect` / `panic!` を使わない（失敗は `AppError` で返す）。
+///
+/// 例外は「起動時に一度だけ組み立てる静的パターン」と「ランタイム生成」で、
+/// 失敗しても回復できないものに限る。例外は下の一覧に明示し、増やすときは
+/// ここへ追記する（黙って増えることを防ぐため）。
+#[test]
+fn no_panics_outside_tests() {
+    const ALLOWED: &[(&str, &str)] = &[
+        ("src/adapters/http.rs", "tokio ランタイムの生成に失敗"),
+        ("src/core/convert.rs", "静的セレクタ"),
+        ("src/core/markdown.rs", "link regex"),
+        ("src/core/select.rs", "静的パターン"),
+    ];
+
+    let mut violations = Vec::new();
+    for file in rust_files(&root().join("src")) {
+        let rel = file
+            .strip_prefix(root())
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let text = read(&file);
+        // `#[cfg(test)]` 以降はテストコード
+        let body = match text.find("#[cfg(test)]") {
+            Some(i) => &text[..i],
+            None => text.as_str(),
+        };
+        for (i, line) in body.lines().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") || trimmed.starts_with('*') {
+                continue;
+            }
+            let hit = [".unwrap()", "panic!(", "todo!(", "unimplemented!("]
+                .iter()
+                .find(|p| line.contains(**p));
+            if hit.is_some() {
+                violations.push(format!("{rel}:{}", i + 1));
+            }
+            if line.contains(".expect(")
+                && !ALLOWED
+                    .iter()
+                    .any(|(f, needle)| *f == rel && line.contains(needle))
+            {
+                violations.push(format!("{rel}:{}", i + 1));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "テスト外で panic しうる呼び出しがある: {violations:?}"
+    );
+}
+
+/// 出力を揺らす呼び出し（現在時刻・乱数・環境変数の直読み）を `src` に置かない。
+///
+/// 時刻・乱数・環境変数はポート（`Clock` / `IdGen` / `Env`）経由でのみ取得し、
+/// テストでは差し替えられるようにする。
+#[test]
+fn no_nondeterministic_calls_in_src() {
+    const FORBIDDEN: &[&str] = &[
+        "SystemTime::now",
+        "Instant::now",
+        "rand::random",
+        "thread_rng",
+        "std::env::var",
+        "std::env::vars",
+        "chrono::Utc::now",
+        "chrono::Local::now",
+        "Local::now()",
+    ];
+    let mut violations = Vec::new();
+    for file in rust_files(&root().join("src")) {
+        let rel = file
+            .strip_prefix(root())
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let text = read(&file);
+        let body = match text.find("#[cfg(test)]") {
+            Some(i) => &text[..i],
+            None => text.as_str(),
+        };
+        for (i, line) in body.lines().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            for needle in FORBIDDEN {
+                if line.contains(needle) {
+                    violations.push(format!("{rel}:{} {needle}", i + 1));
+                }
+            }
+        }
+    }
+    // 時刻・環境変数の実装（ポートのアダプタ）だけは直接呼んでよい
+    let allowed_prefixes = ["src/ports/system.rs", "src/adapters/state/mod.rs"];
+    violations.retain(|v| {
+        let path = v.split(':').next().unwrap_or_default();
+        !allowed_prefixes.contains(&path)
+    });
+    assert!(
+        violations.is_empty(),
+        "時刻・乱数・環境変数を直接読んでいる: {violations:?}"
+    );
+}
+
+/// `core` は I/O を持たない（`std::fs` / `std::net` / `std::process` を参照しない）。
+#[test]
+fn core_is_pure() {
+    let mut violations = Vec::new();
+    for file in rust_files(&root().join("src/core")) {
+        let text = read(&file);
+        let body = match text.find("#[cfg(test)]") {
+            Some(i) => &text[..i],
+            None => text.as_str(),
+        };
+        for needle in ["std::fs", "std::net", "std::process", "std::io"] {
+            if body.contains(needle) {
+                violations.push(format!("{}: {needle}", file.display()));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "core が I/O を持っている: {violations:?}"
+    );
+}
+
+/// 履歴の読み戻しは壊れた行を飛ばし、件数を返す（`W5004` の前提）。
+#[test]
+fn history_import_skips_broken_lines() {
+    use llmsearch::adapters::state::history_jsonl::import_lines;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("history.jsonl");
+    std::fs::write(
+        &path,
+        "{\"id\":\"H1\",\"at\":\"2026-01-01T00:00:00Z\",\"session\":\"S1\",\"type\":\"search\",\"payload\":{}}\n\
+         not json\n\
+         \n\
+         {\"id\":\"H2\",\"at\":\"2026-01-01T00:01:00Z\",\"session\":\"S1\",\"type\":\"fetch\",\"payload\":{}}\n",
+    )
+    .unwrap();
+    let mut sink = Vec::new();
+    let skipped = import_lines(&path, &mut sink).unwrap();
+    assert_eq!(sink.len(), 2);
+    assert_eq!(skipped, 1);
+}

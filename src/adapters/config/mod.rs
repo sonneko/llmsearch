@@ -45,6 +45,7 @@ pub fn load(env: &dyn Env, options: &LoadOptions) -> Result<LoadedSettings, AppE
             &mut value,
             path.parent().unwrap_or(Path::new(".")),
             &mut std::collections::HashSet::new(),
+            &read_json,
         )?;
         merge_json(&mut merged, value);
         sources.push(path.clone());

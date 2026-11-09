@@ -13,15 +13,13 @@ use crate::ports::state::{CounterStore, DocumentStore, SessionStore};
 /// セッション JSON の保存・読み込み。
 pub struct FsSessionStore {
     paths: StatePaths,
-    now: Box<dyn Fn() -> chrono::DateTime<chrono::Utc> + Send + Sync>,
+    now: std::sync::Arc<dyn crate::ports::Clock>,
 }
 
 impl FsSessionStore {
-    pub fn new(paths: StatePaths) -> Self {
-        Self {
-            paths,
-            now: Box::new(chrono::Utc::now),
-        }
+    /// 退避ファイル名に使う時刻は `Clock` から取る（テストで固定できるようにするため）。
+    pub fn new(paths: StatePaths, clock: std::sync::Arc<dyn crate::ports::Clock>) -> Self {
+        Self { paths, now: clock }
     }
 
     fn file(&self, id: &str) -> PathBuf {
@@ -41,7 +39,7 @@ impl SessionStore for FsSessionStore {
         match serde_json::from_str::<SessionState>(&text) {
             Ok(session) => Ok(Some(session)),
             Err(e) => {
-                let stamp = (self.now)().format("%Y%m%d%H%M%S").to_string();
+                let stamp = self.now.now_utc().format("%Y%m%d%H%M%S").to_string();
                 let moved = quarantine(&path, &stamp);
                 Err(AppError::with_detail(
                     ErrorCode::E5001,
@@ -174,11 +172,12 @@ impl DocumentStore for FsDocumentStore {
 /// クォータカウンタのファイル実装。
 pub struct FsCounters {
     paths: StatePaths,
+    now: std::sync::Arc<dyn crate::ports::Clock>,
 }
 
 impl FsCounters {
-    pub fn new(paths: StatePaths) -> Self {
-        Self { paths }
+    pub fn new(paths: StatePaths, clock: std::sync::Arc<dyn crate::ports::Clock>) -> Self {
+        Self { paths, now: clock }
     }
 }
 
@@ -194,7 +193,7 @@ impl CounterStore for FsCounters {
         match serde_json::from_str(&text) {
             Ok(c) => Ok(c),
             Err(_) => {
-                let stamp = chrono::Utc::now().format("%Y%m%d%H%M%S").to_string();
+                let stamp = self.now.now_utc().format("%Y%m%d%H%M%S").to_string();
                 let _ = quarantine(&path, &stamp);
                 Ok(Counters::default())
             }
@@ -234,7 +233,10 @@ mod tests {
     fn session_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let paths = StatePaths::new(dir.path());
-        let store = FsSessionStore::new(paths.clone());
+        let store = FsSessionStore::new(
+            paths.clone(),
+            std::sync::Arc::new(crate::ports::system::SystemClock::new()),
+        );
         let session = SessionState::new("20261107-000000-abcd", chrono::Utc::now());
         store.save(&session).unwrap();
         let loaded = store.load(&session.session_id).unwrap().unwrap();
@@ -251,7 +253,10 @@ mod tests {
         paths.ensure().unwrap();
         let file = paths.sessions().join("bad.json");
         std::fs::write(&file, "{not json").unwrap();
-        let store = FsSessionStore::new(paths.clone());
+        let store = FsSessionStore::new(
+            paths.clone(),
+            std::sync::Arc::new(crate::ports::system::SystemClock::new()),
+        );
         assert!(store.load("bad").is_err());
         let leftovers: Vec<_> = std::fs::read_dir(paths.sessions())
             .unwrap()

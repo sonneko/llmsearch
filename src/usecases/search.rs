@@ -225,6 +225,7 @@ fn call_engine(
     let secrets: Secrets = app.secrets.clone();
     let profile = engine_profile(app, def);
     crate::adapters::engine::evaluate(
+        app.clock.as_ref(),
         app.http.as_ref(),
         &profile,
         def,

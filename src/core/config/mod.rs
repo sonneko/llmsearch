@@ -47,11 +47,18 @@ pub fn merge_json(base: &mut serde_json::Value, over: serde_json::Value) {
     }
 }
 
+/// 参照先を読み込む関数。I/O は `core` に置かないため、呼び出し側から渡す。
+pub type ReadJson =
+    dyn Fn(&std::path::Path) -> Result<serde_json::Value, crate::core::errors::AppError>;
+
 /// `{"$ref": "./x.json"}` を解決する。
+///
+/// パス解決と循環検出のみを担い、ファイル読み込みは `read` に委ねる。
 pub fn resolve_refs(
     value: &mut serde_json::Value,
     base_dir: &std::path::Path,
     visited: &mut std::collections::HashSet<std::path::PathBuf>,
+    read: &ReadJson,
 ) -> Result<(), crate::core::errors::AppError> {
     use crate::core::errors::{AppError, ErrorCode};
     use serde_json::Value;
@@ -72,28 +79,20 @@ pub fn resolve_refs(
                         format!("$ref の循環参照: {}", path.display()),
                     ));
                 }
-                let text = std::fs::read_to_string(&path).map_err(|e| {
-                    AppError::with_detail(ErrorCode::E1003, format!("{}: {e}", path.display()))
-                })?;
-                let mut loaded: Value = serde_json::from_str(&text).map_err(|e| {
-                    AppError::with_detail(
-                        ErrorCode::E1003,
-                        format!("{}: 行 {} 桁 {}: {e}", path.display(), e.line(), e.column()),
-                    )
-                })?;
+                let mut loaded: Value = read(&path)?;
                 let dir = path.parent().unwrap_or(base_dir).to_path_buf();
-                resolve_refs(&mut loaded, &dir, visited)?;
+                resolve_refs(&mut loaded, &dir, visited, read)?;
                 *value = loaded;
                 return Ok(());
             }
             for (_, v) in map.iter_mut() {
-                resolve_refs(v, base_dir, visited)?;
+                resolve_refs(v, base_dir, visited, read)?;
             }
             Ok(())
         }
         Value::Array(items) => {
             for v in items.iter_mut() {
-                resolve_refs(v, base_dir, visited)?;
+                resolve_refs(v, base_dir, visited, read)?;
             }
             Ok(())
         }

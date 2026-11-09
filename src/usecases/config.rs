@@ -174,12 +174,13 @@ pub fn build(
         ids,
         reporter: Arc::clone(&reporter),
         http: Arc::new(
-            crate::adapters::http::ReqwestClient::new(clock).with_reporter(Arc::clone(&reporter)),
+            crate::adapters::http::ReqwestClient::new(Arc::clone(&clock))
+                .with_reporter(Arc::clone(&reporter)),
         ),
-        sessions: Arc::new(FsSessionStore::new(paths.clone())),
+        sessions: Arc::new(FsSessionStore::new(paths.clone(), Arc::clone(&clock))),
         documents: Arc::new(FsDocumentStore::new(paths.clone())),
         history: Arc::new(JsonlHistory::new(paths.clone())),
-        counters: Arc::new(FsCounters::new(paths.clone())),
+        counters: Arc::new(FsCounters::new(paths.clone(), Arc::clone(&clock))),
         engines: loaded_engines.registry,
         no_filter: bootstrap.no_filter,
         no_cache: bootstrap.no_cache,
