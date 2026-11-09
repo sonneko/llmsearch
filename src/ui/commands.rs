@@ -14,7 +14,14 @@ use crate::usecases::{
 };
 
 /// 1 コマンドを実行して終了コードを返す。
-pub fn run(app: &mut App, renderer: &Renderer, command: &Command) -> Result<i32, AppError> {
+///
+/// `resolved` は設定の読み込み結果で、`config explain` の由来表示に使う。
+pub fn run(
+    app: &mut App,
+    renderer: &Renderer,
+    resolved: &crate::usecases::config::Resolved,
+    command: &Command,
+) -> Result<i32, AppError> {
     match command {
         Command::Search { query, limit, page } => {
             app.settings.search.limit = (*limit).clamp(1, 30);
@@ -236,7 +243,7 @@ pub fn run(app: &mut App, renderer: &Renderer, command: &Command) -> Result<i32,
         Command::Network { action } => run_network(app, renderer, action),
         Command::Filters { action } => run_filters(app, renderer, action),
         Command::Quota { action } => run_quota(app, renderer, action),
-        Command::Config { action } => run_config(app, renderer, action),
+        Command::Config { action } => run_config(app, renderer, resolved, action),
         Command::Doctor => {
             let results = doctor::run(app);
             let failed = results.iter().any(|r| r.check.is_fail());
@@ -813,24 +820,20 @@ fn run_quota(
 fn run_config(
     app: &mut App,
     renderer: &Renderer,
+    resolved: &crate::usecases::config::Resolved,
     action: &Option<ConfigAction>,
 ) -> Result<i32, AppError> {
     match action {
-        None | Some(ConfigAction::Show) | Some(ConfigAction::Explain) => {
+        None | Some(ConfigAction::Show) => {
             for (k, v) in crate::usecases::config::describe(app) {
                 renderer.out(&format!("{k:<20} {v}"));
             }
-            if matches!(action, Some(ConfigAction::Explain)) {
-                renderer.out("");
-                renderer.out("由来の優先順: 同梱既定 < 利用者設定 < 環境変数 < 引数");
-                for path in crate::usecases::config::describe(app)
-                    .iter()
-                    .map(|_| ())
-                    .map(|_| String::new())
-                {
-                    let _ = path;
-                }
-            }
+            Ok(0)
+        }
+        Some(ConfigAction::Explain { key }) => {
+            let (value, origin) =
+                crate::usecases::config::explain(app, resolved, app.env.as_ref(), key)?;
+            renderer.out(&format!("{key} = {value} ({})", origin.label()));
             Ok(0)
         }
         Some(ConfigAction::Path) => {

@@ -323,6 +323,78 @@ pub fn describe(app: &App) -> Vec<(String, String)> {
     ]
 }
 
+/// キーの由来（`config explain` の表示用）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Origin {
+    /// 引数（コマンドライン）で指定された。
+    Argument,
+    /// 環境変数で指定された。
+    Env(String),
+    /// 設定ファイルで指定された。
+    File(PathBuf),
+    /// 同梱の既定値。
+    Default,
+}
+
+impl Origin {
+    /// 1 行の説明。
+    pub fn label(&self) -> String {
+        match self {
+            Origin::Argument => "引数".to_string(),
+            Origin::Env(name) => format!("env: {name}"),
+            Origin::File(path) => format!("file: {}", path.display()),
+            Origin::Default => "同梱既定".to_string(),
+        }
+    }
+}
+
+/// キーと環境変数の対応（`env_overrides` と同じ表を使う）。
+pub fn env_keys() -> &'static [(&'static str, &'static str)] {
+    const MAPPING: &[(&str, &str)] = &[
+        ("LLMSEARCH_SEARCH_LIMIT", "search.limit"),
+        ("LLMSEARCH_SEARCH_MAX_RESULTS", "search.maxResults"),
+        ("LLMSEARCH_CONTEXT_MAX_CHARS", "context.maxChars"),
+        ("LLMSEARCH_CONTEXT_OUTLINE_DEPTH", "context.outlineDepth"),
+        ("LLMSEARCH_CACHE_ENABLED", "cache.enabled"),
+        ("LLMSEARCH_HISTORY_ENABLED", "history.enabled"),
+        ("LLMSEARCH_UI_LOCALE", "ui.locale"),
+        ("LLMSEARCH_UI_COLOR", "ui.color"),
+    ];
+    MAPPING
+}
+
+/// 指定したキーの解決値と由来を返す。
+///
+/// `resolved.sources` は読み込んだ設定ファイル（後勝ち）、`env` は環境変数の照会用。
+pub fn explain(
+    app: &App,
+    resolved: &Resolved,
+    env: &dyn Env,
+    key: &str,
+) -> Result<(String, Origin), AppError> {
+    let Some((_, value)) = describe(app).into_iter().find(|(k, _)| k == key) else {
+        return Err(AppError::with_detail(
+            ErrorCode::E1004,
+            format!("キー '{key}' は説明できません"),
+        ));
+    };
+    let env_name = env_keys()
+        .iter()
+        .find(|(_, k)| *k == key)
+        .map(|(name, _)| *name);
+    let origin = if let Some(name) = env_name
+        && env.var(name).is_some()
+    {
+        Origin::Env(name.to_string())
+    } else if let Some(path) = resolved.settings_path.clone() {
+        // キーの実在までは追わない（マージ後は由来が失われるため、読込元を示す）
+        Origin::File(path)
+    } else {
+        Origin::Default
+    };
+    Ok((value, origin))
+}
+
 /// 環境変数の警告（未知キー等）。
 pub fn unknown_key_warnings(app: &App) -> Vec<Diagnostic> {
     app.settings

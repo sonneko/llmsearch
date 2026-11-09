@@ -273,7 +273,10 @@ pub enum ConfigAction {
         force: bool,
     },
     Validate,
-    Explain,
+    /// 個別のキーについて、解決後の値と由来を説明する。
+    Explain {
+        key: String,
+    },
 }
 
 #[cfg(test)]

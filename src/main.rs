@@ -87,7 +87,7 @@ fn main() {
     let code = match &cli.command {
         Some(command) => {
             let mut app = app;
-            match commands::run(&mut app, &renderer, command) {
+            match commands::run(&mut app, &renderer, &resolved, command) {
                 Ok(code) => code,
                 Err(err) => {
                     renderer.error(&err);

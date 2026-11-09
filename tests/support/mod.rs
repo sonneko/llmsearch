@@ -212,6 +212,8 @@ impl HttpClient for FakeHttp {
 /// テスト用のアプリ一式。
 pub struct Harness {
     pub app: App,
+    /// 設定の読み込み結果（`config explain` の由来表示に使う）。
+    pub resolved: llmsearch::usecases::config::Resolved,
     pub http: Arc<FakeHttp>,
     pub dir: tempfile::TempDir,
 }
@@ -239,7 +241,7 @@ pub fn harness(extra_engines: Option<&str>) -> Harness {
         quiet: true,
         ..Bootstrap::default()
     };
-    let (app, _resolved) =
+    let (app, resolved) =
         build(&bootstrap, clock, env, Arc::new(SeqIds), reporter).expect("アプリの組み立てに失敗");
 
     let http = Arc::new(FakeHttp::new());
@@ -248,7 +250,12 @@ pub fn harness(extra_engines: Option<&str>) -> Harness {
     app.session_id.lock().unwrap().clear();
     // 既定エンジンは偽 HTTP の応答を使って検証するため duckduckgo を使う
     app.default_engine = "duckduckgo".to_string();
-    Harness { app, http, dir }
+    Harness {
+        app,
+        resolved,
+        http,
+        dir,
+    }
 }
 
 /// 検索結果 1 ページ分の HTML を組み立てる。

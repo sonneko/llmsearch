@@ -435,3 +435,32 @@ fn history_import_skips_broken_lines() {
     assert_eq!(sink.len(), 2);
     assert_eq!(skipped, 1);
 }
+
+mod support;
+
+/// `config explain <key>` は仕様どおり「値 + 由来」を返し、未知キーは `E1004`。
+#[test]
+fn config_explain_reports_value_and_origin() {
+    let h = support::harness(None);
+    let (value, origin) = llmsearch::usecases::config::explain(
+        &h.app,
+        &h.resolved,
+        h.app.env.as_ref(),
+        "search.limit",
+    )
+    .unwrap();
+    assert_eq!(value, "7");
+    assert!(matches!(
+        origin,
+        llmsearch::usecases::config::Origin::Default
+    ));
+
+    let missing = llmsearch::usecases::config::explain(
+        &h.app,
+        &h.resolved,
+        h.app.env.as_ref(),
+        "no.such.key",
+    )
+    .unwrap_err();
+    assert_eq!(missing.code, llmsearch::core::errors::ErrorCode::E1004);
+}
