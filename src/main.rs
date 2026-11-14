@@ -24,6 +24,7 @@ fn main() {
         llmsearch::core::errors::Locale::Ja,
         cli.global.quiet,
         deps.1.terminal_width(),
+        std::sync::Arc::clone(&deps.0),
     ));
     let reporter = std::sync::Arc::new(StdReporter::new(
         std::sync::Arc::clone(&renderer),
@@ -83,13 +84,20 @@ fn main() {
     for warning in &resolved.warnings {
         renderer.warn(warning);
     }
+    if let Some(id) = cli.global.session.clone() {
+        renderer.set_session(id);
+    }
 
     let code = match &cli.command {
         Some(command) => {
             let mut app = app;
+            if let Some(id) = &cli.global.session {
+                app.set_session(id);
+            }
             match commands::run(&mut app, &renderer, &resolved, command) {
                 Ok(code) => code,
                 Err(err) => {
+                    renderer.set_session(app.current_session_id());
                     renderer.error(&err);
                     err.exit_code()
                 }
@@ -118,7 +126,10 @@ fn run_interactive(
         app.set_session(id);
     }
     match app.ensure_session() {
-        Ok(id) => app.set_session(id),
+        Ok(id) => {
+            app.set_session(&id);
+            renderer.set_session(id);
+        }
         Err(err) => {
             renderer.error(&err);
             return err.exit_code();

@@ -14,6 +14,7 @@
 | 実装（M2） | 完了 | ポート・`core`・アダプタ・ユースケース・UI・同梱アセット | `REF:docs/plans.md#m2-implement` |
 | 品質強化（M3） | 完了 | アーキテクチャ検査・契約テスト・結合テスト・容量管理 | `REF:docs/plans.md#m3-hardening` |
 | リリース準備（M4） | 完了 | README・開発者ガイド・CI・v0.1.0 のタグ付けとリリース | `REF:docs/plans.md#m4-release` |
+| 使いやすさ・安全性（M5） | 実装中 | Issue 洗い出し・CLI/JSON/信頼境界・プロキシ・配布互換性 | `REF:docs/plans.md#m5-usability-safety` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -79,6 +80,21 @@
 - [x] リリース用ワークフロー（`REF:.github/workflows/release.yml`。Linux x86_64 の 1 バイナリをタグで添付）
 - [x] 設計書の `状態:` 行を実装完了へ更新し、`REF:src/...` 参照へ切り替え（エージェント連携は未実装のまま）
 - [x] `v0.1.0` のタグ付けとリリースノート作成（`REF:.github/workflows/release.yml` が Linux x86_64 の 1 バイナリを添付）
+
+<a id="m5-usability-safety"></a>
+### M5: 使いやすさと安全性
+
+- [x] Rust 搬入、build/test、doctor、エンジン dry-run による現状確認（実検索なし）
+- [x] 仕様・設計・コードの照合を GitHub Issues #4〜#25 と #27 に記録
+- [x] 主要 JSON の共通フィールド、document、warnings、quota.metrics を修正（#4 一部）
+- [x] CLI の limit/depth 設定値・子節除外・refine 履歴・--session を修正（#6/#7 一部/#8/#24）
+- [x] 未知エンジン・method/encoding 検証と本文マーカー無害化（#10/#16）
+- [x] プロキシ適用・認証・noProxy のローカル回帰試験（#14）
+- [x] Ubuntu 22.04 基準ビルドと glibc 互換性ゲートの実装（#25。実起動は PR CI で確認）
+- [x] 全ローカル検証、develop 向け Ready PR #26 を作成（マージしない。最新 CI とマージ可否は PR を参照）
+- [x] 隔離試験で見つけた assets 梱包・ビルド元パス依存を修正（#27）
+
+JSON 全コマンド統一・robots・クォータ計測変更・リダイレクト・設定探索順など、未対応や仕様間矛盾は Issues に残す。仕様の機能削除・安全方針の変更は行わない。#9 は対象不存在時の E5001 とエラーカタログの E1006 が矛盾するため未修正。#7 の検索結果別スロット保存は未対応。#22 の merge 統合は未対応であることをコードで再確認済み。
 
 ---
 

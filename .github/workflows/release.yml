@@ -30,7 +30,7 @@ env:
 jobs:
   build:
     name: Build & Release (Linux x86_64)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -41,11 +41,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.90.0"
+          targets: x86_64-unknown-linux-gnu
 
       - uses: Swatinem/rust-cache@v2
 
       - name: Build
-        run: cargo build --locked --profile release-dist
+        run: cargo build --locked --profile release-dist --target "$TARGET"
 
       - name: Package
         run: |
@@ -56,19 +57,22 @@ jobs:
           fi
           name="${BIN}-${version}-${TARGET}"
           mkdir -p "dist/${name}"
-          cp "target/release-dist/${BIN}" "dist/${name}/"
+          cp "target/${TARGET}/release-dist/${BIN}" "dist/${name}/"
           cp README.md LICENSE "dist/${name}/"
+          cp -R assets "dist/${name}/assets"
           ( cd dist && tar -czf "${name}.tar.gz" "${name}" )
           ( cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256" )
           echo "ARTIFACT=dist/${name}.tar.gz" >> "$GITHUB_ENV"
           echo "CHECKSUM=dist/${name}.tar.gz.sha256" >> "$GITHUB_ENV"
 
-      - name: Smoke test
+      # アーカイブに入った実ファイルを検証してから公開する。
+      - name: Compatibility gate (glibc 2.35, Ubuntu 22.04 and 24.04)
         run: |
           set -euo pipefail
-          ./target/release-dist/llmsearch --version
-          ./target/release-dist/llmsearch engines list > /dev/null
-          ./target/release-dist/llmsearch config show > /dev/null
+          mkdir -p target/release-smoke
+          tar -xzf "$ARTIFACT" -C target/release-smoke
+          binary="$(find target/release-smoke -type f -name "$BIN")"
+          bash scripts/check-release.sh "$binary" --containers
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2

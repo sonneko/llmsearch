@@ -41,6 +41,10 @@ pub trait Env: Send + Sync {
     fn home_dir(&self) -> Option<PathBuf>;
     fn state_home(&self) -> Option<PathBuf>;
     fn config_home(&self) -> Option<PathBuf>;
+    /// 実行ファイルの配置先（配布物に同梱したリソースの解決用）。
+    fn executable_dir(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 /// 進行・警告の通知。

@@ -28,9 +28,9 @@
 
 ### 1.4 クォータの可視性
 
-状態: 未実装・実装計画済み（REF:src/ui/render.rs, REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
+状態: 実装中（REF:src/ui/commands.rs, REF:src/ui/render.rs）
 
-`SearchEvent` / `NextEvent` / `DocumentEvent` / `ContentEvent` は `quota: QuotaView` を必須フィールドとして持つ（`Option` にしない）。`QuotaView` は `usecases::guard::quota::remaining` の結果から `From` 実装で生成する。テストでは「消費を伴うイベントに `quota` が存在する」ことを `tests/contract/json_contract.rs` で検証する。
+検索・次ページ・本文に `quota: {metrics: [...]}` を付与する。`outline` / `read` では取得後に `document` イベントを先行出力し、URL・タイトル・警告・クォータを提示する。検索系イベントにはユースケースが返した警告を `{code, message}` の配列で載せる。レポータだけに送られる警告など、全警告の集約と管理系コマンドの JSON 統一は Issue #4 / #5 に残す。
 
 ---
 
@@ -40,9 +40,9 @@
 
 ### 2.1 共通フィールド
 
-状態: 未実装・実装計画済み（REF:src/ui/render.rs, REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
+状態: 実装中（REF:src/ui/render.rs, REF:src/ui/commands.rs）
 
-`#[serde(flatten)] base: BaseEvent { v: u32, event: EventKind, session: String, at: String }` を各イベント構造体に持たせる。`SCHEMA_VERSION: u32 = 1`。`at` は `Clock` から取得し `%Y-%m-%dT%H:%M:%SZ` で整形する。
+`Renderer` が注入された `Clock` から UTC 秒精度・Z 終端の日時を作る。`done` / `error` にも `session` / `at` を付与する。検索・参照成功時とエラー処理時に現行セッションを Renderer に反映する。セッション作成前は空文字を使う。コマンド間の `--session` 引き継ぎとイベント形式は `REF:tests/m5.rs` で実プロセス検証する。
 
 ### 2.2 イベント種別
 

@@ -24,10 +24,14 @@ pub fn run(
 ) -> Result<i32, AppError> {
     match command {
         Command::Search { query, limit, page } => {
-            app.settings.search.limit = (*limit).clamp(1, 30);
+            // `--limit` が指定された場合のみ設定を上書きする（省略時は設定値）
+            if let Some(limit) = limit {
+                app.settings.search.limit = (*limit).clamp(1, 30);
+            }
             let outcome = search_uc::run(app, query, *page)?;
             let session = search_uc::apply_to_session(app, &outcome, query)?;
             app.set_session(&session.session_id);
+            renderer.set_session(&session.session_id);
             for warning in &outcome.warnings {
                 renderer.warn(warning);
             }
@@ -36,13 +40,14 @@ pub fn run(
                     "v": 1,
                     "event": "search",
                     "session": session.session_id,
-                    "at": app.clock.now_utc().to_rfc3339(),
-                    "query": query,
+                    "at": renderer.at(),
+                    "query": outcome.query,
                     "engine": outcome.engine,
                     "page": outcome.page.page,
                     "hasMore": outcome.has_more,
                     "filtered": filtered_json(&outcome.filtered, outcome.truncated_by_limit),
                     "results": hits_json(&outcome.hits),
+                    "warnings": crate::ui::render::warnings_json(&outcome.warnings),
                     "quota": quota_json(app),
                 }));
             } else {
@@ -78,17 +83,22 @@ pub fn run(
                 .ok_or_else(|| AppError::with_detail(ErrorCode::E1002, "検索語が不明"))?;
             let outcome = search_uc::next(app, &query, &session.page)?;
             let session = search_uc::apply_to_session(app, &outcome, &query)?;
+            renderer.set_session(&session.session_id);
+            for warning in &outcome.warnings {
+                renderer.warn(warning);
+            }
             if renderer.json {
                 renderer.event(&json!({
                     "v": 1,
                     "event": "next",
                     "session": session.session_id,
-                    "at": app.clock.now_utc().to_rfc3339(),
+                    "at": renderer.at(),
                     "page": outcome.page.page,
                     "hasMore": outcome.has_more,
                     "terminated": !outcome.has_more,
                     "filtered": filtered_json(&outcome.filtered, outcome.truncated_by_limit),
                     "results": hits_json(&outcome.hits),
+                    "warnings": crate::ui::render::warnings_json(&outcome.warnings),
                     "quota": quota_json(app),
                 }));
             } else {
@@ -105,20 +115,31 @@ pub fn run(
             Ok(0)
         }
         Command::Refine { query, previous } => {
-            let previous = previous
-                .clone()
-                .unwrap_or_else(|| app.settings.search.engine.clone().unwrap_or_default());
-            let outcome = search_uc::run(app, query, 1)?;
+            let previous = match previous {
+                Some(query) => query.clone(),
+                None => app
+                    .sessions
+                    .load(&app.current_session_id())?
+                    .map(|s| s.last_query)
+                    .filter(|q| !q.is_empty())
+                    .ok_or_else(|| AppError::new(ErrorCode::E5001))?,
+            };
+            let outcome = search_uc::refine(app, &previous, query)?;
             let session = search_uc::apply_to_session(app, &outcome, query)?;
-            let _ = previous;
+            renderer.set_session(&session.session_id);
+            for warning in &outcome.warnings {
+                renderer.warn(warning);
+            }
             if renderer.json {
                 renderer.event(&json!({
                     "v": 1,
                     "event": "refine",
                     "session": session.session_id,
-                    "at": app.clock.now_utc().to_rfc3339(),
-                    "query": query,
+                    "at": renderer.at(),
+                    "query": outcome.query,
+                    "previousQuery": previous,
                     "results": hits_json(&outcome.hits),
+                    "warnings": crate::ui::render::warnings_json(&outcome.warnings),
                     "quota": quota_json(app),
                 }));
                 done(renderer, "refine", format!("{} 件", outcome.hits.len()));
@@ -132,17 +153,25 @@ pub fn run(
         Command::Outline { target: t, depth } => {
             let (session, url) = resolve_target(app, t)?;
             let fetched = document::fetch(app, &url)?;
+            renderer.set_session(&session);
+            if renderer.json {
+                document_event(app, renderer, &fetched);
+            }
             for warning in &fetched.warnings {
                 renderer.warn(warning);
             }
-            let view = document::outline(app, &fetched.document, (*depth).clamp(2, 4))?;
+            let depth = depth
+                .unwrap_or(app.settings.context.outline_depth)
+                .clamp(2, 4);
+            let view = document::outline(app, &fetched.document, depth)?;
             if renderer.json {
                 renderer.event(&json!({
                     "v": 1,
                     "event": "outline",
                     "session": session,
-                    "at": app.clock.now_utc().to_rfc3339(),
+                    "at": renderer.at(),
                     "documentId": view.document.id,
+                    "warnings": crate::ui::render::warnings_json(&fetched.warnings),
                     "depth": view.depth,
                     "totalChars": view.total_chars,
                     "hidden": view.hidden,
@@ -169,24 +198,32 @@ pub fn run(
         Command::Read {
             target: t,
             sections,
-            children,
+            children: _,
+            no_children,
             max_chars,
         } => {
             let (session, url) = resolve_target(app, t)?;
             let fetched = document::fetch(app, &url)?;
+            renderer.set_session(&session);
+            if renderer.json {
+                document_event(app, renderer, &fetched);
+            }
+            for warning in &fetched.warnings {
+                renderer.warn(warning);
+            }
             let doc = fetched.document.clone();
             if let Some(max) = max_chars {
                 app.settings.context.max_chars = (*max).clamp(500, 100_000);
             }
             let ids = parse_sections(&doc, sections)?;
-            let outcome = document::read(app, &doc, &ids, *children)?;
+            let outcome = document::read(app, &doc, &ids, !no_children)?;
             if renderer.json {
                 for body in &outcome.sections {
                     renderer.event(&json!({
                         "v": 1,
                         "event": "content",
                         "session": session,
-                        "at": app.clock.now_utc().to_rfc3339(),
+                        "at": renderer.at(),
                         "documentId": doc.id,
                         "sectionId": body.heading_id,
                         "heading": body.heading,
@@ -252,7 +289,7 @@ pub fn run(
                     "v": 1,
                     "event": "diagnostics",
                     "session": app.current_session_id(),
-                    "at": app.clock.now_utc().to_rfc3339(),
+                    "at": renderer.at(),
                     "checks": results.iter().map(|r| json!({
                         "name": r.name,
                         "status": r.check.label(),
@@ -358,7 +395,7 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                     "v": 1,
                     "event": "history",
                     "session": app.current_session_id(),
-                    "at": app.clock.now_utc().to_rfc3339(),
+                    "at": renderer.at(),
                     "entries": entries.iter().map(entry_json).collect::<Vec<_>>(),
                     "total": entries.len(),
                 }));
@@ -381,7 +418,7 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                     "v": 1,
                     "event": "history",
                     "session": app.current_session_id(),
-                    "at": app.clock.now_utc().to_rfc3339(),
+                    "at": renderer.at(),
                     "entries": [entry_json(&entry)],
                     "total": 1,
                 }));
@@ -450,7 +487,7 @@ fn run_engines(
                     "v": 1,
                     "event": "engines",
                     "session": app.current_session_id(),
-                    "at": app.clock.now_utc().to_rfc3339(),
+                    "at": renderer.at(),
                     "policy": "先勝ち（後から見つかった重複は警告）",
                     "engines": rows.iter().map(|r| json!({
                         "id": r.id,
@@ -501,7 +538,7 @@ fn run_engines(
                     "v": 1,
                     "event": "diagnostics",
                     "session": app.current_session_id(),
-                    "at": app.clock.now_utc().to_rfc3339(),
+                    "at": renderer.at(),
                     "checks": results.iter().flat_map(|(id, checks)| {
                         checks.iter().map(move |c| json!({
                             "name": id,
@@ -755,7 +792,7 @@ fn run_quota(
                     "v": 1,
                     "event": "quota",
                     "session": app.current_session_id(),
-                    "at": app.clock.now_utc().to_rfc3339(),
+                    "at": renderer.at(),
                     "policy": app.quota.id,
                     "metrics": metrics.iter().map(|m| json!({
                         "name": m.name,
@@ -920,26 +957,40 @@ fn filtered_json(
 
 fn quota_json(app: &App) -> serde_json::Value {
     match app.guard() {
-        Ok(guard) => json!(
-            guard
-                .metrics()
-                .iter()
-                .map(|m| json!({
-                    "name": m.name,
-                    "used": m.used,
-                    "limit": m.limit,
-                    "resetsAt": m.resets_at,
-                }))
-                .collect::<Vec<_>>()
-        ),
-        Err(_) => json!([]),
+        Ok(guard) => json!({"metrics": guard.metrics().iter().map(|m| json!({
+            "name": m.name,
+            "used": m.used,
+            "limit": m.limit,
+            "resetsAt": m.resets_at,
+        })).collect::<Vec<_>>()}),
+        Err(_) => json!({"metrics": []}),
     }
+}
+
+fn document_event(app: &App, renderer: &Renderer, fetched: &document::Fetched) {
+    let doc = &fetched.document;
+    renderer.event(&json!({
+        "v": 1,
+        "event": "document",
+        "session": app.current_session_id(),
+        "at": renderer.at(),
+        "documentId": doc.id,
+        "url": doc.url,
+        "finalUrl": doc.final_url,
+        "title": doc.title,
+        "site": url::Url::parse(&doc.final_url).ok().and_then(|u| u.host_str().map(str::to_owned)),
+        "chars": doc.chars,
+        "warnings": crate::ui::render::warnings_json(&fetched.warnings),
+        "quota": quota_json(app),
+    }));
 }
 
 fn done(renderer: &Renderer, command: &str, summary: String) {
     renderer.event(&json!({
         "v": 1,
         "event": "done",
+        "session": renderer.session_id(),
+        "at": renderer.at(),
         "command": command,
         "summary": summary,
     }));

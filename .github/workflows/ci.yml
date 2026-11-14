@@ -16,11 +16,13 @@ on:
     branches:
       - main
       - master
+      - develop
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches:
       - main
       - master
+      - develop
   workflow_dispatch:
 
 permissions:
@@ -131,11 +133,11 @@ jobs:
         run: cargo test --locked --all-targets --no-fail-fast
 
   build:
-    name: Build Check
+    name: Build & Distribution Compatibility
     needs: docs
     if: needs.docs.outputs.code_changed == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -144,8 +146,37 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.90.0"
+          targets: x86_64-unknown-linux-gnu
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: cargo build
-        run: cargo build --locked --release
+      - name: Check glibc gate regression cases
+        run: bash scripts/test-check-release.sh
+
+      - name: Build distribution binary (glibc 2.35 baseline)
+        run: cargo build --locked --profile release-dist --target x86_64-unknown-linux-gnu
+
+      - name: Stage portable distribution
+        run: |
+          mkdir -p target/compatibility-package
+          cp target/x86_64-unknown-linux-gnu/release-dist/llmsearch target/compatibility-package/
+          cp -R assets target/compatibility-package/assets
+
+      - name: Compatibility gate (Ubuntu 22.04 and 24.04)
+        run: |
+          if bash scripts/check-release.sh target/compatibility-package/llmsearch --containers > target/compatibility.log 2>&1; then
+            cat target/compatibility.log
+          else
+            cat target/compatibility.log
+            # annotations はログダウンロード不可の環境でも GitHub API から読める。
+            details="$(tail -c 10000 target/compatibility.log | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            echo "::error title=Distribution compatibility::$details"
+            exit 1
+          fi
+
+      - name: Retain verified distribution binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: llmsearch-linux-gnu-compatibility
+          path: target/compatibility-package/
+          retention-days: 7

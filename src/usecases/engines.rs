@@ -88,15 +88,24 @@ pub fn get(app: &App, selector: &str) -> Result<EngineDef, AppError> {
 
 /// 検証。
 pub fn validate(app: &App, selectors: &[String]) -> Vec<(String, Vec<Check>)> {
+    let mut out = Vec::new();
     let targets: Vec<EngineDef> = if selectors.is_empty() {
         app.engines.all().cloned().collect()
     } else {
         selectors
             .iter()
-            .filter_map(|s| app.engines.get(s).cloned())
+            .filter_map(|s| match app.engines.get(s) {
+                Some(def) => Some(def.clone()),
+                None => {
+                    out.push((
+                        s.clone(),
+                        vec![Check::Fail(format!("E4002: エンジン '{s}' が見つからない"))],
+                    ));
+                    None
+                }
+            })
             .collect()
     };
-    let mut out = Vec::new();
     for def in targets {
         let mut checks = def.validate();
         for env in collect_envs(&def) {
