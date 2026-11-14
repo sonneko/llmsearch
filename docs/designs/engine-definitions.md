@@ -209,6 +209,8 @@
 
 検証は `src/usecases/engines.rs` に 6 種類のチェック関数を置き、`Vec<Diagnostic>` を返す。セレクタ構文の検査は `scraper::Selector::parse`、JSON パスの検査は `core/extract/jsonpath.rs` のパーサを試す。失敗が 1 件でもあれば終了コード `1`。
 
+明示指定された未知の識別子を黙殺せず、`E4002` を含む失敗チェックとして返す。`EngineDef::validate` は `request.method` の GET/POST と、`REF:src/core/template.rs` の `query_encoding` が対応する文字符号化も検査する。`ensure_valid` 経由のロード時にも同じ検証を行う。回帰テストは `REF:tests/m5.rs` と `REF:src/core/engine.rs`。
+
 ### 8.4 `engines test <id[@variant]> --query <q>`
 
 状態: 実装完了（REF:src/ui/render.rs）
