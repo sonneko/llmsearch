@@ -59,6 +59,7 @@ jobs:
           mkdir -p "dist/${name}"
           cp "target/${TARGET}/release-dist/${BIN}" "dist/${name}/"
           cp README.md LICENSE "dist/${name}/"
+          cp -R assets "dist/${name}/assets"
           ( cd dist && tar -czf "${name}.tar.gz" "${name}" )
           ( cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256" )
           echo "ARTIFACT=dist/${name}.tar.gz" >> "$GITHUB_ENV"

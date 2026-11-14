@@ -214,3 +214,39 @@ fn cli_errors_include_session_and_catalog_hint() {
     assert_eq!(events[0]["session"], "missing-session");
     assert!(!events[0]["hint"].as_str().unwrap().is_empty());
 }
+
+#[test]
+fn relocated_binary_uses_adjacent_assets_not_build_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = dir.path().join("llmsearch");
+    std::fs::copy(env!("CARGO_BIN_EXE_llmsearch"), &bin).unwrap();
+    for (kind, data) in [
+        ("network", include_str!("../assets/network/default.json")),
+        ("filters", include_str!("../assets/filters/default.json")),
+        ("quotas", include_str!("../assets/quotas/default.json")),
+    ] {
+        let path = dir.path().join("assets").join(kind);
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("default.json"), data).unwrap();
+    }
+    let engines = dir.path().join("assets/engines");
+    std::fs::create_dir_all(&engines).unwrap();
+    let mut definition: Value =
+        serde_json::from_str(include_str!("../assets/engines/duckduckgo.json")).unwrap();
+    definition["id"] = json!("portable");
+    std::fs::write(engines.join("portable.json"), definition.to_string()).unwrap();
+    let output = std::process::Command::new(bin)
+        .args(["engines", "list", "--engine", "portable", "--state-dir"])
+        .arg(dir.path().join("state"))
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("portable"));
+    assert!(!stdout.contains("duckduckgo"));
+}

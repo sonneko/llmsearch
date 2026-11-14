@@ -23,17 +23,20 @@
 ## 2. 現在のブランチ・PR・直近の作業状態
 
 - **ブランチ**: `arena/71d83094-llmsearch`（base: develop）
-- **PR**: 未作成。develop 向けに作成し、マージしない。
-- **状態**: M5 実装中。課題は GitHub Issues #4〜#25。実装済み・残項目は `REF:docs/plans.md#m5-usability-safety`。
+- **PR**: #26（develop 向け、Ready for review）。マージは進行役が行う。
+- **状態**: M5 実装中。課題は GitHub Issues #4〜#25 と #27。実装済み・残項目は `REF:docs/plans.md#m5-usability-safety`。
 - **基準検証**: build/test 成功。doctor は BRAVE_API_KEY 未設定とネットワーク到達不可を検出。duckduckgo dry-run 成功。ライブ検索は行わない。
-- **作業中検証**: 回帰テスト `REF:tests/m5.rs` を追加。第一まとまりは verify --quick（docs/fmt/clippy/test）成功、89567f6 を push 済み。プロキシ実ソケット回帰 8 件も成功。配布互換性は CI 待ち。
+- **作業中検証**: 回帰テスト `REF:tests/m5.rs` を追加。`REF:scripts/verify.sh` で docs/fmt/clippy/test/release build 成功。M5 実プロセスを含む回帰 7 件、プロキシ実ソケット回帰 9 件も成功。glibc ゲートの拒否試験とローカル ELF（要求 GLIBC 2.34）の起動検査が成功。Ubuntu 22.04/24.04 の実行結果は PR #26 の最新 CI を参照。
 - **ツールチェーン**: `/home/user/build/env.sh`。再起動時は `REF:docs/developers.md` §2.2 に従い復旧する。未コミット作業を破棄する reset --hard は行わない。
 
 ## 3. 次の作業
 
-1. プロキシ #14 と配布互換性 #25 の差分を全検証。
-2. `REF:scripts/verify.sh`、差分レビュー、コミット・push。
-3. develop 向け PR の Ready / conflict-free / CI green を確認して報告。
+1. PR #26 のレビュー・マージは進行役が行う（エージェントは行わない）。
+2. 既存 v0.1.0 添付物は未変更。配布には新しいタグで `REF:.github/workflows/release.yml` を実行する。既存タグの再実行では修正前のソースをビルドする点に注意。
+3. ライブ検索と公開 HTTPS 宛てのプロキシ通信は進行役が確認する。サンドボックス側の HTTPS 検証はローカル CONNECT まで。
+4. #4/#5/#7/#9/#12/#13/#15/#17〜#23 などの残項目・仕様間矛盾は `REF:docs/plans.md#m5-usability-safety` と Issues を参照。安全性の方針を独断で変更しない。
+
+配布互換性の隔離試験で、ビルド元絶対パスの assets を参照する問題 #27 も発見した。配布アーカイブへの assets 同梱と実行ファイル隣からの解決を追加し、開発元の JSON を誤って使わないことを実プロセステストで検証する。CI は配布物だけをコンテナにマウントし、ビルド元のパスを見せない。
 
 ## 4. コマンド所要時間（サンドボックス）
 

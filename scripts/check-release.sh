@@ -29,7 +29,7 @@ if [ "${2:-}" = --containers ]; then
     for image in ubuntu:22.04 ubuntu:24.04; do
         echo "Runtime smoke: $image"
         docker run --rm --network none --read-only --tmpfs /tmp:rw,mode=1777 \
-            -e HOME=/tmp -v "$binary:/llmsearch:ro" "$image" \
-            bash -c "$smoke" _ /llmsearch
+            -e HOME=/tmp -v "$(dirname "$binary"):/opt/llmsearch:ro" "$image" \
+            bash -c "$smoke" _ "/opt/llmsearch/$(basename "$binary")"
     done
 fi

@@ -29,7 +29,7 @@ cargo build --release
 
 ### Linux 配布物の互換性
 
-次回配布から GNU Linux x86_64 バイナリは Ubuntu 22.04（glibc 2.35）を基準にビルドし、Ubuntu 22.04 / 24.04 上で起動検証する。検証は `REF:scripts/check-release.sh`、配布設定は `REF:.github/workflows/release.yml`。musl 静的リンクではない。
+次回配布から GNU Linux x86_64 バイナリは Ubuntu 22.04（glibc 2.35）を基準にビルドし、Ubuntu 22.04 / 24.04 上で起動検証する。検証は `REF:scripts/check-release.sh`、配布設定は `REF:.github/workflows/release.yml`。musl 静的リンクではない。同梱の `assets/` は実行ファイルと同じディレクトリに置き、バイナリだけを別の場所へ移動しない。
 
 **既存の v0.1.0 配布物**には新しい glibc を要求して起動しない問題が報告されている（Issue #25）。`GLIBC_2.43 not found` が出る場合は、上記のソースビルドを利用する。システムの libc を置き換えない。この変更だけで既存リリースの添付ファイルは更新されない。
 
@@ -63,8 +63,8 @@ llmsearch search "気候変動 適応策"        # 1 ページ 7 件を検索
 llmsearch outline https://example.jp/doc  # 見出し一覧（本文は出さない）
 llmsearch read https://example.jp/doc --section D1:S3   # 節だけを読む
 llmsearch read https://example.jp/doc --section D1:S3-D2:S1 --max-chars 4000
-llmsearch next                             # 同じクエリの次ページ
-llmsearch refine "気候変動 適応策 自治体"  # 検索語を変えて再検索
+llmsearch next --session <searchで得たID>     # 同じクエリの次ページ
+llmsearch refine "気候変動 適応策 自治体" --session <searchで得たID>  # 検索語を修正
 ```
 
 引数なしで起動すると対話モードになり、番号を選ぶだけで検索 → 選択 → 取得 → 節読みを進められる（`1)終了 2)検索結果の選択（複数可） 3)8 件目以降を見る 4)検索ワードを修正する`）。
