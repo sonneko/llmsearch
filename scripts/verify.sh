@@ -67,6 +67,7 @@ if [ "$FIX" = 1 ]; then
 fi
 
 run docs      python3 "$ROOT/docs/script/verify-docs.py"
+run release-gate bash "$ROOT/scripts/test-check-release.sh"
 
 # --- プロジェクト固有の lint / test / build ---
 if [ "$HAVE_CARGO" = 1 ]; then

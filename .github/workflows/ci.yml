@@ -133,11 +133,11 @@ jobs:
         run: cargo test --locked --all-targets --no-fail-fast
 
   build:
-    name: Build Check
+    name: Build & Distribution Compatibility
     needs: docs
     if: needs.docs.outputs.code_changed == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -146,8 +146,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.90.0"
+          targets: x86_64-unknown-linux-gnu
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: cargo build
-        run: cargo build --locked --release
+      - name: Check glibc gate regression cases
+        run: bash scripts/test-check-release.sh
+
+      - name: Build distribution binary (glibc 2.35 baseline)
+        run: cargo build --locked --profile release-dist --target x86_64-unknown-linux-gnu
+
+      - name: Compatibility gate (Ubuntu 22.04 and 24.04)
+        run: bash scripts/check-release.sh target/x86_64-unknown-linux-gnu/release-dist/llmsearch --containers
+
+      - name: Retain verified distribution binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: llmsearch-linux-gnu-compatibility
+          path: target/x86_64-unknown-linux-gnu/release-dist/llmsearch
+          retention-days: 7

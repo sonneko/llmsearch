@@ -27,6 +27,22 @@ cargo build --release
 
 `doctor` は設定・同梱アセット・環境変数・ネットワークの状態を点検し、問題があれば `[warn]` / `[fail]` を出す。
 
+### Linux 配布物の互換性
+
+次回配布から GNU Linux x86_64 バイナリは Ubuntu 22.04（glibc 2.35）を基準にビルドし、Ubuntu 22.04 / 24.04 上で起動検証する。検証は `REF:scripts/check-release.sh`、配布設定は `REF:.github/workflows/release.yml`。musl 静的リンクではない。
+
+**既存の v0.1.0 配布物**には新しい glibc を要求して起動しない問題が報告されている（Issue #25）。`GLIBC_2.43 not found` が出る場合は、上記のソースビルドを利用する。システムの libc を置き換えない。この変更だけで既存リリースの添付ファイルは更新されない。
+
+### プロキシ環境
+
+プロファイルに `proxy` が無い場合、HTTP URL は `HTTP_PROXY`、HTTPS URL は `HTTPS_PROXY` を使う（小文字名も可）。`NO_PROXY` はホスト完全一致・先頭ドットの接尾辞一致・`*` に対応する。明示の `proxy` は環境変数より優先し、詳細形式では `noProxy` に除外先を指定する。
+
+```json
+{"proxy":{"url":"http://user@proxy.example:8080","noProxy":["localhost",".internal"],"auth":{"value_env":"PROXY_PASS"}}}
+```
+
+この例では `PROXY_PASS` をパスワード、URL の `user` をユーザー名として使う。認証値は設定に直接書かず環境変数に保存する。`proxy.auth.value_env` が未設定なら E1004 で停止する。
+
 ## 初期設定
 
 初回は同梱の既定値だけで動く。ユーザー設定を作る場合は次のいずれか。
@@ -84,7 +100,7 @@ API キーは JSON に書かず `value_env` で環境変数名を参照する。
 
 ## 制限と注意
 
-- クォータ既定: セッション 50 検索 / 600 秒あたり 120 検索 / 日次 500 検索。超過すると `E5005` で停止する（`llmsearch quota show` で残量確認）。
+- クォータ既定: セッション 50 検索 / 60 分あたり 120 検索 / 日次 500 検索。超過すると `E5005` で停止する（`llmsearch quota show` で残量確認）。
 - 取得は http/https のみ、5 MiB 上限、リダイレクト 5 回まで、タイムアウト 5 秒 / 20 秒。
 - 抽出した本文は `[untrusted] <url>` を付けて出し、指示文として解釈しない。
 

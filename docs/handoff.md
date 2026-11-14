@@ -26,12 +26,12 @@
 - **PR**: 未作成。develop 向けに作成し、マージしない。
 - **状態**: M5 実装中。課題は GitHub Issues #4〜#25。実装済み・残項目は `REF:docs/plans.md#m5-usability-safety`。
 - **基準検証**: build/test 成功。doctor は BRAVE_API_KEY 未設定とネットワーク到達不可を検出。duckduckgo dry-run 成功。ライブ検索は行わない。
-- **作業中検証**: 回帰テスト `REF:tests/m5.rs` を追加。直前の verify は中断されたため完了扱いにしない。
+- **作業中検証**: 回帰テスト `REF:tests/m5.rs` を追加。第一まとまりは verify --quick（docs/fmt/clippy/test）成功、89567f6 を push 済み。プロキシ実ソケット回帰 8 件も成功。配布互換性は CI 待ち。
 - **ツールチェーン**: `/home/user/build/env.sh`。再起動時は `REF:docs/developers.md` §2.2 に従い復旧する。未コミット作業を破棄する reset --hard は行わない。
 
 ## 3. 次の作業
 
-1. プロキシ #14 と配布互換性 #25 の修正・ローカル試験。
+1. プロキシ #14 と配布互換性 #25 の差分を全検証。
 2. `REF:scripts/verify.sh`、差分レビュー、コミット・push。
 3. develop 向け PR の Ready / conflict-free / CI green を確認して報告。
 
