@@ -10,13 +10,13 @@ use crate::core::config::NetworkProfile;
 use crate::core::config::network::RedirectPolicy;
 use crate::core::errors::{AppError, Diagnostic, ErrorCode, WarningCode};
 use crate::ports::http::{HttpRequest, HttpResponse};
-use crate::ports::system::{SystemEnv, in_no_proxy};
+use crate::ports::system::{SystemEnv, in_no_proxy, proxy_password, proxy_url_for_scheme};
 use crate::ports::{Clock, Env, HttpClient, Reporter};
 
 /// `reqwest` を使うクライアント。
 pub struct ReqwestClient {
     clock: std::sync::Arc<dyn Clock>,
-    env: SystemEnv,
+    env: std::sync::Arc<dyn Env>,
     /// 待機などの通知先（省略時は何も出さない）。
     reporter: Option<std::sync::Arc<dyn Reporter>>,
     runtime: tokio::runtime::Runtime,
@@ -33,7 +33,7 @@ impl ReqwestClient {
             .expect("tokio ランタイムの生成に失敗");
         Self {
             clock,
-            env: SystemEnv::new(),
+            env: std::sync::Arc::new(SystemEnv::new()),
             reporter: None,
             runtime,
             last: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -43,6 +43,12 @@ impl ReqwestClient {
     /// 通知先を設定する（レート制限の待機を `W2001` として知らせるため）。
     pub fn with_reporter(mut self, reporter: std::sync::Arc<dyn Reporter>) -> Self {
         self.reporter = Some(reporter);
+        self
+    }
+
+    /// 環境依存を差し替える（プロキシ設定の決定論的な検証用）。
+    pub fn with_env(mut self, env: std::sync::Arc<dyn Env>) -> Self {
+        self.env = env;
         self
     }
 
@@ -59,7 +65,26 @@ impl ReqwestClient {
             .gzip(profile.compression.iter().any(|c| c == "gzip"))
             .deflate(profile.compression.iter().any(|c| c == "deflate"))
             .brotli(profile.compression.iter().any(|c| c == "br"))
-            .pool_max_idle_per_host(profile.max_concurrency);
+            .pool_max_idle_per_host(profile.max_concurrency)
+            // reqwest の暗黙の環境探索を止め、下の明示的な規則に一本化する。
+            .no_proxy();
+
+        let http_proxy = resolve_proxy(profile, "http", self.env.as_ref())?;
+        let https_proxy = resolve_proxy(profile, "https", self.env.as_ref())?;
+        if http_proxy.is_some() || https_proxy.is_some() {
+            let profile = profile.clone();
+            let env = std::sync::Arc::clone(&self.env);
+            builder = builder.proxy(reqwest::Proxy::custom(move |url| {
+                if in_no_proxy(&profile, url.host_str().unwrap_or_default(), env.as_ref()) {
+                    return None;
+                }
+                match url.scheme() {
+                    "http" => http_proxy.clone(),
+                    "https" => https_proxy.clone(),
+                    _ => None,
+                }
+            }));
+        }
 
         if let Some(pem) = read_ca(&profile.tls.ca_file) {
             let cert = reqwest::Certificate::from_pem(&pem)
@@ -135,7 +160,7 @@ impl ReqwestClient {
         let response = builder
             .send()
             .await
-            .map_err(|e| map_reqwest_error(&e, request))?;
+            .map_err(|e| map_reqwest_error(e, request))?;
         let status = response.status().as_u16();
         let final_url = response.url().clone();
         let headers: Vec<(String, String)> = response
@@ -188,7 +213,7 @@ impl ReqwestClient {
                 Err(e) => {
                     return Err(AppError::with_detail(
                         ErrorCode::E2002,
-                        format!("本文の読み込みに失敗: {e}"),
+                        format!("本文の読み込みに失敗: {}", e.without_url()),
                     ));
                 }
             }
@@ -205,6 +230,36 @@ impl ReqwestClient {
     }
 }
 
+/// エラーに URL や認証値を含めず、プロキシ設定を解決する。
+fn resolve_proxy(
+    profile: &NetworkProfile,
+    scheme: &str,
+    env: &dyn Env,
+) -> Result<Option<Url>, AppError> {
+    let Some(raw) = proxy_url_for_scheme(profile, scheme, env) else {
+        return Ok(None);
+    };
+    let invalid = || {
+        AppError::with_detail(
+            ErrorCode::E1004,
+            "proxy.url は有効な HTTP(S) プロキシ URL が必要",
+        )
+    };
+    let mut url = Url::parse(&raw).map_err(|_| invalid())?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(invalid());
+    }
+    if let Some(crate::core::config::network::ProxySpec::Detailed(detail)) = &profile.proxy
+        && detail.auth.is_some()
+    {
+        let password = proxy_password(profile, env).ok_or_else(|| {
+            AppError::with_detail(ErrorCode::E1004, "proxy.auth.value_env の環境変数が未設定")
+        })?;
+        url.set_password(Some(&password)).map_err(|_| invalid())?;
+    }
+    Ok(Some(url))
+}
+
 fn read_ca(path: &str) -> Option<Vec<u8>> {
     if path.trim().is_empty() {
         None
@@ -213,7 +268,8 @@ fn read_ca(path: &str) -> Option<Vec<u8>> {
     }
 }
 
-fn map_reqwest_error(err: &reqwest::Error, request: &HttpRequest) -> AppError {
+fn map_reqwest_error(err: reqwest::Error, request: &HttpRequest) -> AppError {
+    let err = err.without_url();
     let host = request.url.host_str().unwrap_or("(unknown)");
     if err.is_timeout() {
         return AppError::with_detail(ErrorCode::E2002, format!("{host}: {err}"));
@@ -256,20 +312,8 @@ impl HttpClient for ReqwestClient {
         crate::core::url::validate_scheme(&request.url)?;
         let host = request.url.host_str().unwrap_or_default().to_string();
 
-        // プロキシの可否はプロファイルと環境変数で決まる（コードに固定値を持たない）
-        let mut profile = profile.clone();
-        if !in_no_proxy(&profile, &host, &self.env) {
-            profile.proxy = profile.proxy.clone().or_else(|| {
-                self.env
-                    .var("HTTPS_PROXY")
-                    .or_else(|| self.env.var("https_proxy"))
-                    .map(crate::core::config::network::ProxySpec::Url)
-            });
-        } else {
-            profile.proxy = None;
-        }
-
-        let client = self.build_client(&profile)?;
+        // リダイレクト先にも同じプロキシ選択・除外規則を適用する。
+        let client = self.build_client(profile)?;
         let attempts = profile.retry.max_attempts.max(1);
         let mut last_error: Option<AppError> = None;
 
@@ -281,15 +325,15 @@ impl HttpClient for ReqwestClient {
                     self.clock.sleep(Duration::from_millis(wait));
                 }
             }
-            self.wait_interval(&profile, &host);
+            self.wait_interval(profile, &host);
 
             let outcome = self
                 .runtime
-                .block_on(Self::send_once(&client, &profile, request));
+                .block_on(Self::send_once(&client, profile, request));
             match outcome {
                 Ok(response) => return Ok(response),
                 Err(err) => {
-                    let retryable = retryable(&profile, &err);
+                    let retryable = retryable(profile, &err);
                     if !retryable {
                         return Err(err);
                     }

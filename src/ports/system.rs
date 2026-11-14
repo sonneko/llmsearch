@@ -151,16 +151,25 @@ pub fn proxy_password(profile: &NetworkProfile, env: &dyn Env) -> Option<String>
     }
 }
 
-/// プロキシ URL を取り出す（未設定時は環境変数）。
+/// プロキシ URL を取り出す（HTTPS 向け。未設定時は環境変数）。
 pub fn proxy_url(profile: &NetworkProfile, env: &dyn Env) -> Option<String> {
+    proxy_url_for_scheme(profile, "https", env)
+}
+
+/// 明示設定を優先し、未設定時だけ URL のスキームに対応する環境変数を使う。
+pub fn proxy_url_for_scheme(
+    profile: &NetworkProfile,
+    scheme: &str,
+    env: &dyn Env,
+) -> Option<String> {
     match &profile.proxy {
         Some(ProxySpec::Url(u)) => Some(u.clone()),
         Some(ProxySpec::Detailed(d)) => Some(d.url.clone()),
-        None => env
-            .var("HTTPS_PROXY")
-            .or_else(|| env.var("https_proxy"))
-            .or_else(|| env.var("HTTP_PROXY"))
-            .or_else(|| env.var("http_proxy")),
+        None => match scheme {
+            "http" => env.var("HTTP_PROXY").or_else(|| env.var("http_proxy")),
+            "https" => env.var("HTTPS_PROXY").or_else(|| env.var("https_proxy")),
+            _ => None,
+        },
     }
 }
 
@@ -168,7 +177,8 @@ pub fn proxy_url(profile: &NetworkProfile, env: &dyn Env) -> Option<String> {
 pub fn in_no_proxy(profile: &NetworkProfile, host: &str, env: &dyn Env) -> bool {
     let entries: Vec<String> = match &profile.proxy {
         Some(ProxySpec::Detailed(d)) => d.no_proxy.clone(),
-        _ => env
+        Some(ProxySpec::Url(_)) => Vec::new(),
+        None => env
             .var("NO_PROXY")
             .or_else(|| env.var("no_proxy"))
             .map(|v| v.split(',').map(|s| s.trim().to_string()).collect())
@@ -178,7 +188,13 @@ pub fn in_no_proxy(profile: &NetworkProfile, host: &str, env: &dyn Env) -> bool 
         if entry == "*" {
             return true;
         }
-        crate::core::url::suffix_match(host, entry)
+        let host = host.to_ascii_lowercase();
+        let entry = entry.to_ascii_lowercase();
+        if entry.starts_with('.') {
+            host.ends_with(&entry)
+        } else {
+            host == entry
+        }
     })
 }
 

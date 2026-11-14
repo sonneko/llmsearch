@@ -64,7 +64,9 @@
 
 状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
-`ProxySpec` は `Url(String)` か `Detailed { url, no_proxy, auth }` の列挙。`reqwest::Proxy::custom` に `no_proxy` の判定関数を渡し、判定ロジックは `core::net::proxy::matches_no_proxy(host, patterns)` として純粋関数に切り出す。認証は `reqwest::Proxy::basic_auth` に `value_env` 解決済みの値（`SecretString`）を渡す。
+`REF:src/adapters/http.rs` の `build_client` は reqwest の暗黙プロキシ探索を `no_proxy()` で停止し、`Proxy::custom` を明示適用する。`REF:src/ports/system.rs` が HTTP/HTTPS 別の環境変数を解決し、プロファイル指定時は環境変数（NO_PROXY を含む）より優先する。判定は送信先ごとに行い、リダイレクトでも noProxy を再評価する。noProxy は完全一致・先頭ドットの接尾辞一致・`*` を扱う。
+
+詳細設定の `auth` は既存の `proxy_password` で環境変数または直接値を解決し、プロキシ URL の password に設定する。ユーザー名は URL 側の値を用いる。環境変数欠落・不正 URL は認証なし接続や直接接続へフォールバックせず E1004 にする。エラーには認証値や生のプロキシ URL を載せない。`with_env` による環境注入と実ローカル擬似プロキシの回帰テストは `REF:tests/proxy.rs`。
 
 ---
 
