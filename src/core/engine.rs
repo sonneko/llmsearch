@@ -593,6 +593,17 @@ impl EngineDef {
                 "request.url は http(s) で始まる必要がある".into(),
             ));
         }
+        if !matches!(self.request.method.as_str(), "GET" | "POST") {
+            out.push(Check::Fail(
+                "request.method は GET または POST が必要".into(),
+            ));
+        }
+        if crate::core::template::query_encoding(&self.request.encoding).is_none() {
+            out.push(Check::Fail(format!(
+                "request.encoding が未対応: {}",
+                self.request.encoding
+            )));
+        }
         // テンプレート変数
         let mut tmpls: Vec<&str> = vec![&self.request.url];
         for v in self
@@ -801,6 +812,29 @@ mod tests {
         let mut def = sample();
         def.request.url = "https://example.com/s?x={{nope}}".into();
         assert!(def.has_fail());
+    }
+
+    #[test]
+    fn rejects_unsupported_method_and_encoding() {
+        let mut def = sample();
+        for method in ["DELETE", "GTE", "get", ""] {
+            def.request.method = method.into();
+            assert!(def.has_fail(), "method: {method}");
+        }
+        for method in ["GET", "POST"] {
+            def.request.method = method.into();
+            for encoding in ["utf-8", "UTF8", "euc-jp", "sjis", "gbk", "big5", "euc-kr"] {
+                def.request.encoding = encoding.into();
+                assert!(
+                    !def.has_fail(),
+                    "{method} / {encoding}: {:?}",
+                    def.validate()
+                );
+            }
+        }
+        def.request.encoding = "utf-9".into();
+        assert!(def.has_fail());
+        assert!(def.ensure_valid().is_err());
     }
 
     #[test]

@@ -44,7 +44,14 @@ pub struct Resolved {
 }
 
 /// 同梱リソースのディレクトリ。
-pub fn bundled_root() -> PathBuf {
+pub fn bundled_root(env: &dyn Env) -> PathBuf {
+    if let Some(dir) = env.executable_dir() {
+        let assets = dir.join("assets");
+        if assets.is_dir() {
+            return assets;
+        }
+    }
+    // ソースからの開発実行では従来の配置を使う。
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
 }
 
@@ -56,7 +63,7 @@ pub fn build(
     ids: Arc<dyn IdGen>,
     reporter: Arc<dyn Reporter>,
 ) -> Result<(App, Resolved), AppError> {
-    let bundled = bundled_root();
+    let bundled = bundled_root(env.as_ref());
     let loaded = cfg::load(
         env.as_ref(),
         &LoadOptions {

@@ -10,18 +10,21 @@ use crate::core::config::NetworkProfile;
 use crate::core::config::network::RedirectPolicy;
 use crate::core::errors::{AppError, Diagnostic, ErrorCode, WarningCode};
 use crate::ports::http::{HttpRequest, HttpResponse};
-use crate::ports::system::{SystemEnv, in_no_proxy};
+use crate::ports::system::{SystemEnv, in_no_proxy, proxy_password, proxy_url_for_scheme};
 use crate::ports::{Clock, Env, HttpClient, Reporter};
 
 /// `reqwest` を使うクライアント。
 pub struct ReqwestClient {
     clock: std::sync::Arc<dyn Clock>,
-    env: SystemEnv,
+    env: std::sync::Arc<dyn Env>,
     /// 待機などの通知先（省略時は何も出さない）。
     reporter: Option<std::sync::Arc<dyn Reporter>>,
     runtime: tokio::runtime::Runtime,
     /// 直近の送信時刻（ホストごとのレート制限）。
     last: std::sync::Mutex<std::collections::HashMap<String, u64>>,
+    /// 追加で信頼するルート証明書のキャッシュ（キーは解決に使った入力）。
+    /// クライアントを作り直すたびにシステムストアを読み直さないためのもの。
+    roots: std::sync::Mutex<Option<(String, Vec<reqwest::Certificate>)>>,
 }
 
 impl ReqwestClient {
@@ -33,16 +36,23 @@ impl ReqwestClient {
             .expect("tokio ランタイムの生成に失敗");
         Self {
             clock,
-            env: SystemEnv::new(),
+            env: std::sync::Arc::new(SystemEnv::new()),
             reporter: None,
             runtime,
             last: std::sync::Mutex::new(std::collections::HashMap::new()),
+            roots: std::sync::Mutex::new(None),
         }
     }
 
     /// 通知先を設定する（レート制限の待機を `W2001` として知らせるため）。
     pub fn with_reporter(mut self, reporter: std::sync::Arc<dyn Reporter>) -> Self {
         self.reporter = Some(reporter);
+        self
+    }
+
+    /// 環境依存を差し替える（プロキシ設定の決定論的な検証用）。
+    pub fn with_env(mut self, env: std::sync::Arc<dyn Env>) -> Self {
+        self.env = env;
         self
     }
 
@@ -59,12 +69,32 @@ impl ReqwestClient {
             .gzip(profile.compression.iter().any(|c| c == "gzip"))
             .deflate(profile.compression.iter().any(|c| c == "deflate"))
             .brotli(profile.compression.iter().any(|c| c == "br"))
-            .pool_max_idle_per_host(profile.max_concurrency);
+            .pool_max_idle_per_host(profile.max_concurrency)
+            // reqwest の暗黙の環境探索を止め、下の明示的な規則に一本化する。
+            .no_proxy();
 
-        if let Some(pem) = read_ca(&profile.tls.ca_file) {
-            let cert = reqwest::Certificate::from_pem(&pem)
-                .map_err(|e| AppError::with_detail(ErrorCode::E2008, format!("CA 読込: {e}")))?;
-            builder = builder.add_root_certificate(cert);
+        let http_proxy = resolve_proxy(profile, "http", self.env.as_ref())?;
+        let https_proxy = resolve_proxy(profile, "https", self.env.as_ref())?;
+        if http_proxy.is_some() || https_proxy.is_some() {
+            let profile = profile.clone();
+            let env = std::sync::Arc::clone(&self.env);
+            builder = builder.proxy(reqwest::Proxy::custom(move |url| {
+                if in_no_proxy(&profile, url.host_str().unwrap_or_default(), env.as_ref()) {
+                    return None;
+                }
+                match url.scheme() {
+                    "http" => http_proxy.clone(),
+                    "https" => https_proxy.clone(),
+                    _ => None,
+                }
+            }));
+        }
+
+        // 検証しない設定ではルート証明書を読まない（読んでも使わない）。
+        if profile.tls.verify {
+            for cert in self.root_certificates(&profile.tls.ca_file)? {
+                builder = builder.add_root_certificate(cert);
+            }
         }
         if profile.http_version == "1.1" {
             builder = builder.http1_only();
@@ -74,6 +104,36 @@ impl ReqwestClient {
         builder
             .build()
             .map_err(|e| AppError::with_detail(ErrorCode::E2001, format!("クライアント生成: {e}")))
+    }
+
+    /// `tls.caFile` とシステムルートストアを合わせた追加のルート証明書。
+    ///
+    /// システムストアの読み込みは送信ごとに繰り返さないよう保持する。
+    /// 保持のキーには解決に使った入力（設定値と環境変数）を含め、差し替えを
+    /// 反映できるようにする。
+    pub fn root_certificates(&self, ca_file: &str) -> Result<Vec<reqwest::Certificate>, AppError> {
+        let key = root_cache_key(ca_file, self.env.as_ref());
+        if let Ok(guard) = self.roots.lock()
+            && let Some((cached_key, certs)) = guard.as_ref()
+            && *cached_key == key
+        {
+            return Ok(certs.clone());
+        }
+        let roots = crate::adapters::tls::load(self.env.as_ref(), ca_file)?;
+        if let Some(reporter) = &self.reporter
+            && !roots.sources.is_empty()
+        {
+            reporter.verbose(&format!(
+                "TLS ルート証明書を追加した: {}（{} 件）",
+                roots.sources.join("; "),
+                roots.len()
+            ));
+        }
+        let certs = roots.certs().to_vec();
+        if let Ok(mut guard) = self.roots.lock() {
+            *guard = Some((key, certs.clone()));
+        }
+        Ok(certs)
     }
 
     fn wait_interval(&self, profile: &NetworkProfile, host: &str) {
@@ -135,7 +195,7 @@ impl ReqwestClient {
         let response = builder
             .send()
             .await
-            .map_err(|e| map_reqwest_error(&e, request))?;
+            .map_err(|e| map_reqwest_error(e, request))?;
         let status = response.status().as_u16();
         let final_url = response.url().clone();
         let headers: Vec<(String, String)> = response
@@ -188,7 +248,7 @@ impl ReqwestClient {
                 Err(e) => {
                     return Err(AppError::with_detail(
                         ErrorCode::E2002,
-                        format!("本文の読み込みに失敗: {e}"),
+                        format!("本文の読み込みに失敗: {}", e.without_url()),
                     ));
                 }
             }
@@ -205,30 +265,75 @@ impl ReqwestClient {
     }
 }
 
-fn read_ca(path: &str) -> Option<Vec<u8>> {
-    if path.trim().is_empty() {
-        None
-    } else {
-        std::fs::read(path).ok()
+/// エラーに URL や認証値を含めず、プロキシ設定を解決する。
+fn resolve_proxy(
+    profile: &NetworkProfile,
+    scheme: &str,
+    env: &dyn Env,
+) -> Result<Option<Url>, AppError> {
+    let Some(raw) = proxy_url_for_scheme(profile, scheme, env) else {
+        return Ok(None);
+    };
+    let invalid = || {
+        AppError::with_detail(
+            ErrorCode::E1004,
+            "proxy.url は有効な HTTP(S) プロキシ URL が必要",
+        )
+    };
+    let mut url = Url::parse(&raw).map_err(|_| invalid())?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(invalid());
     }
+    if let Some(crate::core::config::network::ProxySpec::Detailed(detail)) = &profile.proxy
+        && detail.auth.is_some()
+    {
+        let password = proxy_password(profile, env).ok_or_else(|| {
+            AppError::with_detail(ErrorCode::E1004, "proxy.auth.value_env の環境変数が未設定")
+        })?;
+        url.set_password(Some(&password)).map_err(|_| invalid())?;
+    }
+    Ok(Some(url))
 }
 
-fn map_reqwest_error(err: &reqwest::Error, request: &HttpRequest) -> AppError {
+/// ルート証明書キャッシュのキー（`tls.caFile` と参照した環境変数の値）。
+fn root_cache_key(ca_file: &str, env: &dyn Env) -> String {
+    let mut key = String::from(ca_file.trim());
+    for name in crate::adapters::tls::BUNDLE_ENV_VARS
+        .iter()
+        .chain(crate::adapters::tls::DIR_ENV_VARS.iter())
+    {
+        key.push('\u{1f}');
+        key.push_str(name);
+        key.push('=');
+        key.push_str(env.var(name).unwrap_or_default().trim());
+    }
+    key
+}
+
+fn map_reqwest_error(err: reqwest::Error, request: &HttpRequest) -> AppError {
+    let err = err.without_url();
     let host = request.url.host_str().unwrap_or("(unknown)");
+    // 送信エラーの文字列には URL や認証値が混ざることがあるため伏字化してから使う。
+    let text = crate::core::secret::redact_text(&err.to_string(), &request.secrets);
     if err.is_timeout() {
-        return AppError::with_detail(ErrorCode::E2002, format!("{host}: {err}"));
+        return AppError::with_detail(ErrorCode::E2002, format!("{host}: {text}"));
     }
     if err.is_connect() {
-        return AppError::with_detail(ErrorCode::E2001, format!("{host}: {err}"));
+        // TLS を含む接続失敗は、原因の切り分けに CA の確認が要る旨を必ず添える。
+        return AppError::with_detail(ErrorCode::E2001, format!("{host}: {text}")).hint(
+            "接続先・プロキシの設定を確認する。TLS の検証が原因なら `tls.caFile` か \
+             システムの CA ストア（`SSL_CERT_FILE`）を確認する",
+        );
     }
     if err.is_redirect() {
-        return AppError::with_detail(ErrorCode::E2004, format!("{host}: {err}"));
+        return AppError::with_detail(ErrorCode::E2004, format!("{host}: {text}"));
     }
-    let text = err.to_string().to_lowercase();
-    if text.contains("certificate") || text.contains("tls") {
-        return AppError::with_detail(ErrorCode::E2008, host.to_string());
+    let lower = text.to_lowercase();
+    if lower.contains("certificate") || lower.contains("tls") {
+        return AppError::with_detail(ErrorCode::E2008, host.to_string())
+            .hint("`tls.caFile` に CA 証明書（PEM）を指定するか、システムの CA ストアを確認する");
     }
-    AppError::with_detail(ErrorCode::E2001, format!("{host}: {err}"))
+    AppError::with_detail(ErrorCode::E2001, format!("{host}: {text}"))
 }
 
 fn http_status_error(status: u16, headers: &[(String, String)]) -> AppError {
@@ -256,20 +361,8 @@ impl HttpClient for ReqwestClient {
         crate::core::url::validate_scheme(&request.url)?;
         let host = request.url.host_str().unwrap_or_default().to_string();
 
-        // プロキシの可否はプロファイルと環境変数で決まる（コードに固定値を持たない）
-        let mut profile = profile.clone();
-        if !in_no_proxy(&profile, &host, &self.env) {
-            profile.proxy = profile.proxy.clone().or_else(|| {
-                self.env
-                    .var("HTTPS_PROXY")
-                    .or_else(|| self.env.var("https_proxy"))
-                    .map(crate::core::config::network::ProxySpec::Url)
-            });
-        } else {
-            profile.proxy = None;
-        }
-
-        let client = self.build_client(&profile)?;
+        // リダイレクト先にも同じプロキシ選択・除外規則を適用する。
+        let client = self.build_client(profile)?;
         let attempts = profile.retry.max_attempts.max(1);
         let mut last_error: Option<AppError> = None;
 
@@ -281,15 +374,15 @@ impl HttpClient for ReqwestClient {
                     self.clock.sleep(Duration::from_millis(wait));
                 }
             }
-            self.wait_interval(&profile, &host);
+            self.wait_interval(profile, &host);
 
             let outcome = self
                 .runtime
-                .block_on(Self::send_once(&client, &profile, request));
+                .block_on(Self::send_once(&client, profile, request));
             match outcome {
                 Ok(response) => return Ok(response),
                 Err(err) => {
-                    let retryable = retryable(&profile, &err);
+                    let retryable = retryable(profile, &err);
                     if !retryable {
                         return Err(err);
                     }

@@ -15,6 +15,8 @@ use crate::usecases::App;
 /// 1 回の検索結果。
 #[derive(Debug, Clone)]
 pub struct SearchOutcome {
+    /// 正規化済みの検索語（JSON の `query` に使う）。
+    pub query: String,
     pub hits: Vec<SearchHit>,
     pub engine: String,
     pub fallback_from: Option<String>,
@@ -165,6 +167,7 @@ pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppEr
                 warnings.extend(engine_call.outcome.warnings.iter().cloned());
 
                 return Ok(SearchOutcome {
+                    query: query.clone(),
                     hits: page_hits,
                     engine: def.selector(),
                     fallback_from: used_fallback,

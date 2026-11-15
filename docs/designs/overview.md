@@ -189,6 +189,8 @@ ui/cli（対話・サブコマンド）
 
 `core::engine::EngineDef` のフィールド以外に、エンジン固有の知識をコードへ置かない。禁止パターン（特定ドメインの文字列リテラル、エンジン ID による分岐）を `tests/architecture.rs` で検出する。組み込み既定エンジンも `engines/*.json` として同梱し、コードへ埋め込まない。
 
+配布時はバイナリに加え JSON データの `assets/` を隣に同梱する。`REF:src/usecases/config.rs` の `bundled_root` が `Env::executable_dir` 経由の隣接ディレクトリを優先し、開発時のみビルド元の配置にフォールバックする。定義の読み込み・検証は既存のローダを通す。`REF:.github/workflows/release.yml` で梱包し、`REF:scripts/check-release.sh` がビルド元をマウントしないコンテナで検証する（Issue #27）。
+
 ### 6.3 状態の保持単位
 
 状態: 実装完了（REF:src/lib.rs, REF:src/main.rs）

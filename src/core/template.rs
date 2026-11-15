@@ -72,20 +72,25 @@ pub fn expand(tmpl: &str, ctx: &TmplCtx) -> Result<String, AppError> {
     Ok(out)
 }
 
-/// 指定した文字符号化でクエリ文字列をパーセントエンコードする。
-pub fn encode_query(s: &str, encoding: &str) -> String {
-    let encoding = encoding.to_ascii_lowercase();
-    if encoding == "utf-8" || encoding == "utf8" {
-        return url::form_urlencoded::byte_serialize(s.as_bytes()).collect();
-    }
-    let enc = match encoding.as_str() {
+/// クエリの文字符号化名を解決する。未知の名前は拒否する。
+pub fn query_encoding(encoding: &str) -> Option<&'static encoding_rs::Encoding> {
+    Some(match encoding.to_ascii_lowercase().as_str() {
+        "utf-8" | "utf8" => encoding_rs::UTF_8,
         "euc-jp" | "eucjp" => encoding_rs::EUC_JP,
         "shift_jis" | "shift-jis" | "sjis" => encoding_rs::SHIFT_JIS,
         "gbk" => encoding_rs::GBK,
         "big5" => encoding_rs::BIG5,
         "euc-kr" | "euckr" => encoding_rs::EUC_KR,
-        _ => encoding_rs::UTF_8,
-    };
+        _ => return None,
+    })
+}
+
+/// 検索語を指定の文字符号化で URL エンコードする。
+pub fn encode_query(s: &str, encoding: &str) -> String {
+    let enc = query_encoding(encoding).unwrap_or(encoding_rs::UTF_8);
+    if enc == encoding_rs::UTF_8 {
+        return url::form_urlencoded::byte_serialize(s.as_bytes()).collect();
+    }
     let (bytes, _, _) = enc.encode(s);
     bytes
         .iter()

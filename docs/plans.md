@@ -14,6 +14,8 @@
 | 実装（M2） | 完了 | ポート・`core`・アダプタ・ユースケース・UI・同梱アセット | `REF:docs/plans.md#m2-implement` |
 | 品質強化（M3） | 完了 | アーキテクチャ検査・契約テスト・結合テスト・容量管理 | `REF:docs/plans.md#m3-hardening` |
 | リリース準備（M4） | 完了 | README・開発者ガイド・CI・v0.1.0 のタグ付けとリリース | `REF:docs/plans.md#m4-release` |
+| 使いやすさ・安全性（M5） | 完了 | Issue 洗い出し・CLI/JSON/信頼境界・プロキシ・配布互換性 | `REF:docs/plans.md#m5-usability-safety` |
+| 実運用と仕様同期（M6） | 実装中 | システム CA ルート・E4004 耐性・M5 残 Issue の解消・ドキュメント同期 | `REF:docs/plans.md#m6-dogfood-sync` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -79,6 +81,38 @@
 - [x] リリース用ワークフロー（`REF:.github/workflows/release.yml`。Linux x86_64 の 1 バイナリをタグで添付）
 - [x] 設計書の `状態:` 行を実装完了へ更新し、`REF:src/...` 参照へ切り替え（エージェント連携は未実装のまま）
 - [x] `v0.1.0` のタグ付けとリリースノート作成（`REF:.github/workflows/release.yml` が Linux x86_64 の 1 バイナリを添付）
+
+<a id="m5-usability-safety"></a>
+### M5: 使いやすさと安全性
+
+- [x] Rust 搬入、build/test、doctor、エンジン dry-run による現状確認（実検索なし）
+- [x] 仕様・設計・コードの照合を GitHub Issues #4〜#25 と #27 に記録
+- [x] 主要 JSON の共通フィールド、document、warnings、quota.metrics を修正（#4 一部）
+- [x] CLI の limit/depth 設定値・子節除外・refine 履歴・--session を修正（#6/#7 一部/#8/#24）
+- [x] 未知エンジン・method/encoding 検証と本文マーカー無害化（#10/#16）
+- [x] プロキシ適用・認証・noProxy のローカル回帰試験（#14）
+- [x] Ubuntu 22.04 基準ビルドと glibc 互換性ゲートの実装（#25。実起動は PR CI で確認）
+- [x] 全ローカル検証、develop 向け Ready PR #26 を作成（マージしない。最新 CI とマージ可否は PR を参照）
+- [x] 隔離試験で見つけた assets 梱包・ビルド元パス依存を修正（#27）
+
+JSON 全コマンド統一・robots・クォータ計測変更・リダイレクト・設定探索順など、未対応や仕様間矛盾は Issues に残す。仕様の機能削除・安全方針の変更は行わない。#9 は対象不存在時の E5001 とエラーカタログの E1006 が矛盾するため未修正。#7 の検索結果別スロット保存は未対応。#22 の merge 統合は未対応であることをコードで再確認済み。
+
+<a id="m6-dogfood-sync"></a>
+### M6: 実運用と仕様同期
+
+- [x] PR #26（M5）で `Closes` した Issue #6 / #8 / #10 / #14 / #16 / #24 / #25 / #27 を develop 上で実機確認し、手動でクローズ
+- [x] システム CA ルートの参照（`REF:src/adapters/tls.rs`。`tls.caFile` が最優先。TLS を検証するときだけ読む）
+- [x] 抽出結果 0 件の応答に対する再試行と `W4004` / `E4004` の整備（`REF:src/adapters/engine/eval.rs`）
+- [x] プロファイルに `proxy` を文字列で指定したときに環境変数 `NO_PROXY` を参照しない件を仕様・設計に明記（挙動は変更しない）
+- [x] #4 / #5: `--json` イベントの共通枠と全サブコマンドの JSON 化（`REF:src/ui/render.rs` の `envelope`）
+- [x] #7: `refine` の `previousQuery` と履歴記録（M5 で対応済み。仕様へ `--previous` を追記）
+- [x] #9: セッション不在時の識別子解決を `E5001` に統一（`REF:src/ui/commands.rs` の `resolve_target`）
+- [x] #12: 秘匿情報の伏字化（送信エラー文字列・`engines show` の定義値・検索結果の表示 URL）
+- [x] #21: README のテンプレート残骸の除去、クォータ既定値の仕様同期、設計書の `状態:` 更新、未実装機能の plans.md への移動
+- [x] #23: `AppError::hint` の活用、`message()` のロケール反映、`E2007` の扱いを仕様に明記
+- [x] 仕様・設計・README と実装の突き合わせ（M6 時点）
+
+未対応: #11 / #13 / #15 / #17〜#20 / #22（M5 の棚卸しで起票されたまま。M6 の範囲外）。
 
 ---
 
@@ -160,6 +194,10 @@
 - 節本文の自動要約と回答生成
 - 複数文書の横断比較・差分表示
 - PDF・Office 文書の取り込み
+- 設定プロファイル（`--profile` / `profile` キー）による設定集合の切り替え（M5 の棚卸しで未実装と判明し、仕様から移動）
+- `read --heading <正規表現>` による見出し名での節指定（同上）
+- `--no-filter=all`（既定の除去要素まで無効化する指定。安全性のため提供しない方針。同上）
+- `history export --with-body`（履歴書き出しへの本文同梱。同上）
 - 認証・Cookie を伴うページの取得
 - サイト内クローリングとサイトマップ探索
 - XML（RSS / Atom）応答の抽出器

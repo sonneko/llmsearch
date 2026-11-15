@@ -149,3 +149,35 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
 - 原因 3: 取得時、中継ページが HTTP の 3xx ではなく `<meta http-equiv="refresh">` やスクリプトの location 遷移で返ると、`read` が中継ページを「記事」として読んでいた。`adapters/extract` が `html_redirect_target` で検出し、`maxRedirects` を上限にたどり直す。
 - 仕様: `REF:docs/specifications/engine-definitions.md` §4.7（リダイレクト URL の展開）を追加し、`W4006` を `REF:docs/specifications/errors.md` の警告一覧へ追加した。
 - 検査: プロトコル相対・入れ子・二重エンコードの展開（`src/core/extract.rs`）、`W4006` の発行元（`tests/architecture.rs`）、中継ページの追従（`tests/integration.rs`）、同梱 HTML エンジンが `unwrap_redirect` を持つこと（`tests/contract.rs`）。
+
+### [HIST:DECISION:D008] 2026-11-14 HTTPS の検証にシステムの CA ストアを使う
+[HIST-TAG: category=DECISION id=D008 topics=tls,ca,network,https,security]
+
+- 症状: 実運用環境（Muse）で `tls.caFile` を指定しない限り、すべての HTTPS 取得が `E2001` になった。原因は実装ではなく環境で、その VM は TLS を MITM しており、curl は `CURL_CA_BUNDLE` / `SSL_CERT_FILE` でその CA を信頼しているのに、llmsearch の reqwest（`rustls-tls`）は同梱の webpki-roots しか見ていなかった。`main` でも同じ挙動で、M5 の不具合ではない。
+- 対応: `REF:src/adapters/tls.rs` を追加し、`tls.verify` が真のときだけシステムのルート証明書を読んで reqwest に追加する。参照順は `tls.caFile` → `SSL_CERT_FILE` / `CURL_CA_BUNDLE` / `REQUESTS_CA_BUNDLE` → 代表的なシステムバンドル（`/etc/ssl/certs/ca-certificates.crt` 等）→ システムの証明書ディレクトリ（`SSL_CERT_DIR` / `/etc/ssl/certs`）。
+- 設計判断: `rustls-native-certs` は vendored 依存に無く（サンドボックスは crates.io へ到達できない）、追加できないため PEM / DER の読み込みを自前で実装した。読んだ証明書はプロファイルと設定値をキーにキャッシュし、送信のたびに再読込しない。
+- 設計判断: `tls.caFile` は従来どおり最優先とし、読めない場合は `E2008` で停止する（黙って検証を緩めない）。システムストアの読み取り失敗は環境差が大きいため警告にとどめ、従来どおり webpki-roots で検証する。
+- 設計判断: `tls.verify = false` のときはシステムストアを読まない（検証しない設定でわざわざ信頼点を増やさない）。
+- 検査: ローカルのプライベート CA を使う HTTPS サーバに対する `REF:tests/tls.rs`（7 件）と、実バイナリでの 7 ケース（信頼・拒否・`caFile` 優先・`E2008`・キャッシュ・`verify=false`）。
+
+### [HIST:SPEC-FIX:F005] 2026-11-14 抽出結果が 0 件の応答を再試行する
+[HIST-TAG: category=SPEC-FIX id=F005 topics=retry,extract,e4004,w4004,spec,drift]
+
+- 症状: `--json search` が一度だけ `E4004`（抽出規則に一致する要素が 1 件も無い）を出し、直後のテキスト再実行では成功した。
+- 判断: 送出側の一時的な揺れ（中継ページ・版面の一部違い）として扱い、`REF:src/adapters/engine/eval.rs` の `evaluate` が同じ送信を `retry.maxAttempts` まで繰り返す。HTTP 層の再試行とは別系統で、応答は成功している場合にだけ動く。範囲は仕様 `network.md` §3 の `maxAttempts`（1〜5）に合わせた。
+- 再試行のたびに `W4004` を記録し、成功時は結果の警告に、失敗時は `E4004` の `warnings` に含める（警告が最終的なエラーに吸われて消えないようにするため）。
+- 失敗時の `detail` には応答の先頭 200 文字だけを入れ、本文全体は出さない。
+- 仕様: `REF:docs/specifications/network.md` §3、`REF:docs/specifications/agent-integration.md` §3.3。
+- 検査: `REF:tests/m6.rs`（「応答が揺れる」偽 HTTP で試行回数・成功時の警告・失敗時の `E4004`・`enabled=false` で再試行しないことを確認）。
+
+### [HIST:SPEC-FIX:F006] 2026-11-14 `--json` の全コマンド統一と秘匿情報の伏字化
+[HIST-TAG: category=SPEC-FIX id=F006 topics=json,cli,secret,errors,e5001,drift]
+
+- `Renderer::envelope()`（`REF:src/ui/render.rs`）を追加し、全イベントの共通枠（`v` / `event` / `session` / `at`）を 1 か所で付与するようにした。従来はハンドラごとに書いており、書き漏らしが起きていた（`REF:docs/specifications/agent-integration.md` §2.1）。
+- `engines` / `engine` / `network` / `filters` / `config` / `quota` / `history` の各サブコマンドが `--json` でイベントを出すようにした。生の設定 JSON を出していた `network show` / `filters show` / `history export` も封筒に入れる（`REF:docs/specifications/agent-integration.md` §2.2）。
+- `error` イベントに `warnings` を追加。`AppError` が警告を持てるようにし、失敗に至る過程の警告を失わないようにした。
+- 秘匿情報: 送信エラーの文字列（`E2001` / `E2002` / `E2004` の `details`）、`engines show` の定義値（`TmplValue::Explicit` と URL の秘匿パラメータ）、検索結果の表示 URL を伏せるようにした（`REF:src/core/secret.rs`）。`--dry-run` のヘッダも認証・Cookie 類を伏せる。取得用の URL はセッション内の実体をそのまま保持し、表示だけを伏せる。
+- セッション不在時の識別子解決を `E5001` に統一した（`REF:src/ui/commands.rs` の `resolve_target`）。従来は暗黙にセッションを作ってから `E1006` を返していた。URL を直接指定した場合は従来どおり取得できる。
+- `AppError::hint` を実際に表示に使い、`AppError::message()` が `ui.locale` を反映するようにした。
+- `E2007` は初期リリースでは発行しないことを `REF:docs/specifications/errors.md` §2.2 に明記した（応答サイズ超過は打ち切り + `W3003`）。
+- 検査: `REF:tests/m6.rs`（9 件）。

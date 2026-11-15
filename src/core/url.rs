@@ -218,6 +218,7 @@ pub fn html_redirect_target(body: &str, base: &Url) -> Option<Url> {
 pub fn redact(url: &Url, secrets: &[String]) -> String {
     let mut out = url.clone();
     if url.query().is_some() {
+        let mut hidden_any = false;
         let pairs: Vec<(String, String)> = url
             .query_pairs()
             .map(|(k, v)| {
@@ -227,9 +228,14 @@ pub fn redact(url: &Url, secrets: &[String]) -> String {
                     || secrets
                         .iter()
                         .any(|s| !s.is_empty() && val.contains(s.as_str()));
+                hidden_any |= hidden;
                 (key, if hidden { "***".to_string() } else { val })
             })
             .collect();
+        // 伏せる対象が無いときは元の文字列をそのまま返す（再エンコードで見た目を変えない）。
+        if !hidden_any {
+            return url.to_string();
+        }
         let mut ser = out.query_pairs_mut();
         ser.clear();
         for (k, v) in &pairs {

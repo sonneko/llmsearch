@@ -47,13 +47,16 @@ JSON の本文フィールドは `context.maxChars` に従う。1 コマンド�
 | `document` | `documentId`, `url`, `finalUrl`, `title`, `site`, `chars`, `warnings[]`, `quota` |
 | `outline` | `documentId`, `depth`, `sections[]`, `totalChars`, `hidden` |
 | `content` | `documentId`, `sectionId`, `heading`, `level`, `text`, `chars`, `truncated`, `nextSectionId`, `url`, `quota` |
-| `engines` | `engines[]`, `policy`（`engines list`） |
-| `engine` | `id`, `variant`, `definition`（`engines show`） |
-| `diagnostics` | `checks[]`（`engines validate`, `config validate`, `doctor`） |
-| `quota` | `metrics[]`, `policy`, `resetsAt[]` |
+| `engines` | `engines[]`, `policy`（`engines list`。`policy` は `first-wins` などの安定した識別子） |
+| `engine` | `id`, `variant`, `kind`, `definition`（`engines show`） |
+| `network` | `ids[]`, `active`（一覧）／`id`, `path`, `definition`（`network show`） |
+| `filters` | `ids[]`, `active`（一覧）／`id`, `path`, `definition`（`filters show`） |
+| `config` | `values[]`（`config show`）／`key`, `value`, `origin`（`config explain`）／`paths[]`（`config path`） |
+| `diagnostics` | `checks[]`（`engines validate`, `engines test`, `network validate`, `filters validate`, `config validate`, `doctor`） |
+| `quota` | `metrics[]`, `policy`, `resetsAt[]`, `kind`, `amount`, `allowed`（`quota check`） |
 | `history` | `entries[]`, `total` |
 | `done` | `command`, `summary` |
-| `error` | `code`, `message`, `hint`, `details` |
+| `error` | `code`, `message`, `hint`, `details`, `warnings[]` |
 
 ### 2.3 結果オブジェクト
 
@@ -73,7 +76,9 @@ JSON の本文フィールドは `context.maxChars` に従う。1 コマンド�
 
 ### 2.7 エラーオブジェクト
 
-`error` は `code`（`E` + 4 桁）, `message`（利用者向けの 1 文）, `hint`（次の操作の提案）, `details`（任意の補足）を持つ。終了コードはエラー分類に対応する。
+`error` は `code`（`E` + 4 桁）, `message`（利用者向けの 1 文）, `hint`（次の操作の提案）, `details`（任意の補足）, `warnings[]`（失敗に至る過程で出た警告）を持つ。終了コードはエラー分類に対応する。
+
+エラーを返す場合も、最後に `error` を出して終了する。警告のみで成功した操作は、対象イベントの `warnings` と `done` を出す。
 
 ---
 

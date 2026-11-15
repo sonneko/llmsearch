@@ -47,38 +47,80 @@ pub fn evaluate(
         .map(|s| s.to_string())
         .collect();
 
-    let started = clock.monotonic_ns();
-    let response: HttpResponse = client.send_blocking(profile, &request)?;
-    let elapsed_ms = clock.monotonic_ns().saturating_sub(started) as u128 / 1_000_000;
+    // 応答は得られたが抽出規則に 1 件も一致しない場合は、送出側の一時的な揺れ
+    // （中継ページ・版面の一部違い）としてプロファイルの再試行方針に従い再送する。
+    // 既定の maxAttempts=2 なので、揺れは 1 回のやり直しで吸収される。
+    // 試行回数の範囲は仕様 network.md §3 の `maxAttempts`（1〜5）に合わせる。
+    let attempts = if profile.retry.enabled {
+        profile.retry.max_attempts.clamp(1, 5)
+    } else {
+        1
+    };
+    let mut last_error: Option<AppError> = None;
+    // 再試行で出た警告は、成功・失敗のどちらでも失わずに呼び出し側へ渡す。
+    let mut carried: Vec<Diagnostic> = Vec::new();
 
-    let (body, _had_errors) = decode(&response, def);
-    let mut outcome = extract::extract(&def.response, &body, &response.final_url, tracking)?;
-    if response.truncated {
-        outcome.warnings.push(Diagnostic::new(
-            WarningCode::W3003,
-            "応答サイズの上限で打ち切った",
-        ));
-    }
-    if outcome.hits.is_empty() && outcome.items_seen == 0 && !body.trim().is_empty() {
-        // 抽出規則が合っていない可能性（先頭 2048 文字のみ示す。本文は出さない）
-        let head: String = body.chars().take(2048).collect();
-        outcome.warnings.push(Diagnostic::new(
-            WarningCode::W4004,
-            format!("応答が想定形式と異なる可能性: {}", head.replace('\n', " ")),
-        ));
-        return Err(AppError::with_detail(
-            ErrorCode::E4004,
-            "抽出規則に一致する要素が 1 件も無かった".to_string(),
-        ));
+    for attempt in 0..attempts {
+        if attempt > 0 {
+            let wait = profile.retry.backoff(attempt, clock.monotonic_ns());
+            if wait > 0 {
+                clock.sleep(std::time::Duration::from_millis(wait));
+            }
+        }
+
+        let started = clock.monotonic_ns();
+        let response: HttpResponse = client.send_blocking(profile, &request)?;
+        let elapsed_ms = clock.monotonic_ns().saturating_sub(started) as u128 / 1_000_000;
+
+        let (body, _had_errors) = decode(&response, def);
+        let mut outcome = extract::extract(&def.response, &body, &response.final_url, tracking)?;
+        if response.truncated {
+            outcome.warnings.push(Diagnostic::new(
+                WarningCode::W3003,
+                "応答サイズの上限で打ち切った",
+            ));
+        }
+        if outcome.hits.is_empty() && outcome.items_seen == 0 && !body.trim().is_empty() {
+            // 抽出規則が合っていない可能性（先頭 2048 文字のみ示す。本文は出さない）
+            let head: String = body.chars().take(2048).collect();
+            carried.push(Diagnostic::new(
+                WarningCode::W4004,
+                format!("応答が想定形式と異なる可能性: {}", head.replace('\n', " ")),
+            ));
+            last_error = Some(unmatched_response_error(&body).warnings(carried.clone()));
+            continue;
+        }
+
+        // やり直しで得た警告を先頭に並べる（発生順）。
+        if !carried.is_empty() {
+            let mut warnings = std::mem::take(&mut carried);
+            warnings.extend(std::mem::take(&mut outcome.warnings));
+            outcome.warnings = warnings;
+        }
+
+        return Ok(EngineCall {
+            outcome,
+            request_url: prepared.url,
+            status: response.status,
+            truncated: response.truncated,
+            elapsed_ms,
+        });
     }
 
-    Ok(EngineCall {
-        outcome,
-        request_url: prepared.url,
-        status: response.status,
-        truncated: response.truncated,
-        elapsed_ms,
-    })
+    Err(last_error.unwrap_or_else(|| AppError::new(ErrorCode::E4004)))
+}
+
+/// 抽出規則に一致しなかった応答のエラー（本文の先頭だけを detail に含める）。
+fn unmatched_response_error(body: &str) -> AppError {
+    let short: String = body.chars().take(200).collect();
+    AppError::with_detail(
+        ErrorCode::E4004,
+        format!(
+            "抽出規則に一致する要素が 1 件も無かった（応答先頭: {}）",
+            short.replace(['\n', '\r'], " ")
+        ),
+    )
+    .hint("`engines test` で抽出規則を確認するか、時間を置いて再実行する")
 }
 
 fn decode(response: &HttpResponse, def: &EngineDef) -> (String, bool) {

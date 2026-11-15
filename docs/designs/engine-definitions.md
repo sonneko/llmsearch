@@ -43,6 +43,8 @@
 
 `EngineDef` は仕様の表のキーをそのまま持つ。`schemaVersion` は `u32` で受け、`SUPPORTED_SCHEMA_VERSION: u32 = 1` 以外は `E1004`。`id` は `Regex`（`^[a-z0-9][a-z0-9._-]*$`）で検証する。`variant` は省略時 `"default"`。
 
+`network` はエンジン定義が優先する。検索の実行時に `REF:src/usecases/search.rs` が「エンジン定義の `network` → 起動引数 `--network` → 設定 `network`」の順で解決するため、`--network` はエンジン固有の指定を持たないエンジンにだけ効く（仕様 engine-definitions.md §2.1 と cli-interface.md §1 の優先順を実装で確定させたもの。挙動の変更ではない）。
+
 ### 2.2 未知キーの扱い
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
@@ -208,6 +210,8 @@
 状態: 実装完了（REF:src/usecases/engines.rs）
 
 検証は `src/usecases/engines.rs` に 6 種類のチェック関数を置き、`Vec<Diagnostic>` を返す。セレクタ構文の検査は `scraper::Selector::parse`、JSON パスの検査は `core/extract/jsonpath.rs` のパーサを試す。失敗が 1 件でもあれば終了コード `1`。
+
+明示指定された未知の識別子を黙殺せず、`E4002` を含む失敗チェックとして返す。`EngineDef::validate` は `request.method` の GET/POST と、`REF:src/core/template.rs` の `query_encoding` が対応する文字符号化も検査する。`ensure_valid` 経由のロード時にも同じ検証を行う。回帰テストは `REF:tests/m5.rs` と `REF:src/core/engine.rs`。
 
 ### 8.4 `engines test <id[@variant]> --query <q>`
 

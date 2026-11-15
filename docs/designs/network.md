@@ -57,6 +57,8 @@
 - `Retry-After` は秒数と HTTP-date の両方を解釈する（`chrono` 使用）。
 - `maxBackoffMs` を超える `Retry-After` は再試行を打ち切る。
 - 待機は `Clock::sleep` を呼ぶ。テストでは仮想時計で待機時間を検証する。
+- 抽出結果が 0 件の応答に対する再試行は `REF:src/adapters/engine/eval.rs` の `evaluate` が行う（HTTP 層の再試行とは別系統）。`retry.enabled` が偽なら 1 回で打ち切り、再試行ごとに `W4004` を記録する。最終的に失敗した場合は応答の先頭 200 文字を `E4004` の `detail` に含める（本文全体は出さない）。
+- `E4004` は `REF:src/ports/mod.rs` の `classify` で `FallbackClass::RetryOtherEngine` に分類し、フォールバック先が設定されていればそこでも試す。
 
 ---
 
@@ -64,7 +66,11 @@
 
 状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
-`ProxySpec` は `Url(String)` か `Detailed { url, no_proxy, auth }` の列挙。`reqwest::Proxy::custom` に `no_proxy` の判定関数を渡し、判定ロジックは `core::net::proxy::matches_no_proxy(host, patterns)` として純粋関数に切り出す。認証は `reqwest::Proxy::basic_auth` に `value_env` 解決済みの値（`SecretString`）を渡す。
+`REF:src/adapters/http.rs` の `build_client` は reqwest の暗黙プロキシ探索を `no_proxy()` で停止し、`Proxy::custom` を明示適用する。`REF:src/ports/system.rs` が HTTP/HTTPS 別の環境変数を解決し、プロファイル指定時は環境変数（NO_PROXY を含む）より優先する。判定は送信先ごとに行い、リダイレクトでも noProxy を再評価する。noProxy は完全一致・先頭ドットの接尾辞一致・`*` を扱う。
+
+プロファイルに `proxy` がある場合は `in_no_proxy` が環境変数 `NO_PROXY` を読まない（`REF:src/ports/system.rs`）。文字列形式（`ProxySpec::Url`）は除外項目を持たないため空として扱い、除外はオブジェクト形式の `noProxy` だけで指定できる。これは「プロファイルの指定が環境変数より優先される」という仕様 §4 の帰結であり、意図した挙動である。
+
+詳細設定の `auth` は既存の `proxy_password` で環境変数または直接値を解決し、プロキシ URL の password に設定する。ユーザー名は URL 側の値を用いる。環境変数欠落・不正 URL は認証なし接続や直接接続へフォールバックせず E1004 にする。エラーには認証値や生のプロキシ URL を載せない。`with_env` による環境注入と実ローカル擬似プロキシの回帰テストは `REF:tests/proxy.rs`。
 
 ---
 
@@ -72,7 +78,17 @@
 
 状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
-`reqwest` の `rustls-tls` フィーチャを使用する。`verify=false` は `danger_accept_invalid_certs(true)`、`caFile` は `Certificate::from_pem` を `add_root_certificate` で追加する。`verify=false` の警告 `W1005` は `build_client` の戻り値に `Diagnostic` を含める形で返し、呼び出し側が 1 回だけ表示する。
+`reqwest` の `rustls-tls` フィーチャを使用する。`verify=false` は `danger_accept_invalid_certs(true)` とし、その場合はルート証明書を一切読み込まない。
+
+ルート証明書の読み込みは `REF:src/adapters/tls.rs` に閉じる。
+
+- `caFile` は最優先。`Certificate::from_pem_bundle` で全証明書を取り出し、`add_root_certificate` で追加する。読み込み・解析の失敗は黙って無視せず `E2008` として返す。
+- システムルートストアは `candidate_bundles()`（環境変数 `SSL_CERT_FILE` / `CURL_CA_BUNDLE` / `REQUESTS_CA_BUNDLE`、次に OS 既定の証明書束）から先勝ちで 1 か所、得られなければ `candidate_dirs()`（環境変数 `SSL_CERT_DIR`、次に OS 既定のディレクトリ）から読み込む。
+- 環境変数はポート `Env` 経由で読み（テストで差し替え可能）、`std::env` を直接読まない。
+- 解析できない証明書は 1 件ずつ切り捨て、束全体を失敗にしない。
+- 読み込んだ証明書は `ReqwestClient` の `roots` に（由来・設定値をキーにして）保持し、`build_client` の呼び出しごとの再読み込みを避ける。
+
+`verify=false` の警告 `W1005` は `build_client` の戻り値に `Diagnostic` を含める形で返し、呼び出し側が 1 回だけ表示する。
 
 ---
 

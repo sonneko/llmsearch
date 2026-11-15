@@ -92,9 +92,9 @@ pub enum Command {
     /// 検索して結果一覧を出力する。
     Search {
         query: String,
-        /// 1 ページの件数。
-        #[arg(long, default_value_t = 7)]
-        limit: usize,
+        /// 1 ページの件数（省略時は設定 `search.limit`）。
+        #[arg(long)]
+        limit: Option<usize>,
         /// ページ番号（1 始まり）。
         #[arg(long, default_value_t = 1)]
         page: u32,
@@ -113,9 +113,9 @@ pub enum Command {
     /// 文書を取得・変換し、見出し一覧を出力する。
     Outline {
         target: String,
-        /// 表示深度（2〜4）。
-        #[arg(long, default_value_t = 3)]
-        depth: u8,
+        /// 表示深度（2〜4。省略時は設定 `context.outlineDepth`）。
+        #[arg(long)]
+        depth: Option<u8>,
     },
     /// 節本文を出力する。
     Read {
@@ -123,9 +123,12 @@ pub enum Command {
         /// 節（`D1:S3` / `S3` / `0` で全文）。複数指定可。
         #[arg(long = "section", value_name = "ID")]
         sections: Vec<String>,
-        /// 子見出しの本文を含める。
-        #[arg(long, default_value_t = true)]
+        /// 子見出しの本文を含める（既定）。`--no-children` で除外する。
+        #[arg(long)]
         children: bool,
+        /// 子見出しの本文を含めない。
+        #[arg(long = "no-children", conflicts_with = "children")]
+        no_children: bool,
         /// 出力の上限文字数。
         #[arg(long, value_name = "N")]
         max_chars: Option<usize>,
@@ -301,8 +304,41 @@ mod tests {
         match cli.command {
             Some(Command::Search { query, limit, page }) => {
                 assert_eq!(query, "気候変動");
-                assert_eq!(limit, 7);
+                assert_eq!(limit, Some(7));
                 assert_eq!(page, 1);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn search_limit_defaults_to_none() {
+        let cli = Cli::try_parse_from(["llmsearch", "search", "気候変動"]).unwrap();
+        match cli.command {
+            Some(Command::Search { limit, .. }) => assert_eq!(limit, None),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_no_children_flag() {
+        let cli = Cli::try_parse_from([
+            "llmsearch",
+            "read",
+            "D1",
+            "--section",
+            "D1:S3",
+            "--no-children",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(Command::Read {
+                no_children,
+                children,
+                ..
+            }) => {
+                assert!(no_children);
+                assert!(!children);
             }
             other => panic!("unexpected: {other:?}"),
         }

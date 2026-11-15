@@ -24,7 +24,7 @@
 | `--network <id>` | 設定値 | ネットワークプロファイルを一時的に切り替える |
 | `--filters <id>` | 設定値 | フィルタ集合を一時的に切り替える |
 | `--quota <id>` | 設定値 | クォータポリシーを一時的に切り替える |
-| `--no-filter` | 無効 | 結果・本文フィルタを無効化する（`all` を付すと既定の除去要素も無効） |
+| `--no-filter` | 無効 | 結果・本文フィルタを無効化する（既定の除去要素は維持する） |
 | `--no-cache` | 無効 | キャッシュの読み書きを行わない |
 | `--refresh` | 無効 | キャッシュを無視して再取得する |
 | `--config <path>` | 既定の探索順 | 設定ファイルを明示指定する |
@@ -133,9 +133,9 @@ Q: 気候変動 適応策            engine: duckduckgo   表示: 1-7 件目
 |---|---|---|
 | `search <query>` | 検索して結果一覧を出力する | `--limit`, `--page`, `--engine` |
 | `next` | 同一クエリの次ページを取得する | `--session` |
-| `refine <query>` | 検索語を変更して再検索する | `--session` |
+| `refine <query>` | 検索語を変更して再検索する | `--session`, `--previous` |
 | `outline <target>` | 文書を取得・変換し、見出し一覧を出力する | `--depth`, `--refresh` |
-| `read <target>` | 節本文を出力する | `--section`, `--heading`, `--max-chars`, `--no-children` |
+| `read <target>` | 節本文を出力する | `--section`, `--max-chars`, `--no-children` |
 | `history [list\|show\|grep\|export\|clear]` | 履歴の参照・出力・削除 | `--limit`, `--format`, `--before` |
 | `engines [list\|show\|validate\|test]` | エンジン定義の参照・検証・試行 | `--query`, `--dry-run`, `--raw` |
 | `network [list\|show\|validate]` | ネットワークプロファイルの参照・検証 | `--raw` |

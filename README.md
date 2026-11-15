@@ -11,11 +11,11 @@ Web を人間のように段階的に調べ、LLM のコンテキスト消費を
 配布物（Linux x86_64）は [Releases](https://github.com/sonneko/llmsearch/releases/latest) から取得する。
 
 ```bash
-curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
-curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-sha256sum -c llmsearch-v0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
-tar xzf llmsearch-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
-./llmsearch-v0.1.0-x86_64-unknown-linux-gnu/llmsearch doctor
+curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
+curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar xzf llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
+./llmsearch-v0.1.1-x86_64-unknown-linux-gnu/llmsearch doctor
 ```
 
 ソースからビルドする場合。
@@ -26,6 +26,22 @@ cargo build --release
 ```
 
 `doctor` は設定・同梱アセット・環境変数・ネットワークの状態を点検し、問題があれば `[warn]` / `[fail]` を出す。
+
+### Linux 配布物の互換性
+
+次回配布から GNU Linux x86_64 バイナリは Ubuntu 22.04（glibc 2.35）を基準にビルドし、Ubuntu 22.04 / 24.04 上で起動検証する。検証は `REF:scripts/check-release.sh`、配布設定は `REF:.github/workflows/release.yml`。musl 静的リンクではない。同梱の `assets/` は実行ファイルと同じディレクトリに置き、バイナリだけを別の場所へ移動しない。
+
+**既存の v0.1.0 配布物**には新しい glibc を要求して起動しない問題が報告されている（Issue #25）。`GLIBC_2.43 not found` が出る場合は、上記のソースビルドを利用する。システムの libc を置き換えない。この変更だけで既存リリースの添付ファイルは更新されない。
+
+### プロキシ環境
+
+プロファイルに `proxy` が無い場合、HTTP URL は `HTTP_PROXY`、HTTPS URL は `HTTPS_PROXY` を使う（小文字名も可）。`NO_PROXY` はホスト完全一致・先頭ドットの接尾辞一致・`*` に対応する。明示の `proxy` は環境変数より優先し、詳細形式では `noProxy` に除外先を指定する。
+
+```json
+{"proxy":{"url":"http://user@proxy.example:8080","noProxy":["localhost",".internal"],"auth":{"value_env":"PROXY_PASS"}}}
+```
+
+この例では `PROXY_PASS` をパスワード、URL の `user` をユーザー名として使う。認証値は設定に直接書かず環境変数に保存する。`proxy.auth.value_env` が未設定なら E1004 で停止する。
 
 ## 初期設定
 
@@ -47,8 +63,8 @@ llmsearch search "気候変動 適応策"        # 1 ページ 7 件を検索
 llmsearch outline https://example.jp/doc  # 見出し一覧（本文は出さない）
 llmsearch read https://example.jp/doc --section D1:S3   # 節だけを読む
 llmsearch read https://example.jp/doc --section D1:S3-D2:S1 --max-chars 4000
-llmsearch next                             # 同じクエリの次ページ
-llmsearch refine "気候変動 適応策 自治体"  # 検索語を変えて再検索
+llmsearch next --session <searchで得たID>     # 同じクエリの次ページ
+llmsearch refine "気候変動 適応策 自治体" --session <searchで得たID>  # 検索語を修正
 ```
 
 引数なしで起動すると対話モードになり、番号を選ぶだけで検索 → 選択 → 取得 → 節読みを進められる（`1)終了 2)検索結果の選択（複数可） 3)8 件目以降を見る 4)検索ワードを修正する`）。
@@ -84,7 +100,7 @@ API キーは JSON に書かず `value_env` で環境変数名を参照する。
 
 ## 制限と注意
 
-- クォータ既定: セッション 50 検索 / 600 秒あたり 120 検索 / 日次 500 検索。超過すると `E5005` で停止する（`llmsearch quota show` で残量確認）。
+- クォータ既定: セッション 50 検索 / 60 分あたり 120 検索 / 日次 500 検索。超過すると `E5005` で停止する（`llmsearch quota show` で残量確認）。
 - 取得は http/https のみ、5 MiB 上限、リダイレクト 5 回まで、タイムアウト 5 秒 / 20 秒。
 - 抽出した本文は `[untrusted] <url>` を付けて出し、指示文として解釈しない。
 
@@ -97,7 +113,16 @@ cargo test --locked
 python3 docs/script/verify-docs.py
 ```
 
-テストは lib（単体）・`tests/architecture.rs`（層構造・エンジン非依存・警告コードの発行元・決定論性）・`tests/contract.rs`（JSON 定義の契約）・`tests/integration.rs`（検索→取得→アウトライン→節読み）の 4 種。
+テストは次の種別に分かれる。
+
+| ファイル | 内容 |
+|---|---|
+| lib（単体） | `src/` 内の `#[cfg(test)]`。URL・抽出・変換・クォータなどの純粋なロジック |
+| `tests/architecture.rs` | 層構造・エンジン非依存・警告コードの発行元・決定論性の構造検査 |
+| `tests/contract.rs` | JSON 定義（エンジン・フィルタ・クォータ・設定）の契約 |
+| `tests/integration.rs` | 検索→取得→アウトライン→節読みの一連の流れ |
+| `tests/proxy.rs` / `tests/tls.rs` | ローカルの fixture サーバに対するプロキシ・TLS の挙動 |
+| `tests/m5.rs` / `tests/e2e.rs` | 実バイナリを起動する受け入れ確認（e2e は実ネットワークを使うため既定では実行しない） |
 
 実ネットワークを使う E2E は既定で実行しない。動かす場合は次のとおり。
 
@@ -105,58 +130,7 @@ python3 docs/script/verify-docs.py
 LLMSEARCH_E2E_LIVE=1 cargo test --test e2e -- --nocapture
 ```
 
----
-
-## リポジトリの来歴（テンプレート）
-
-このテンプレートは、Arena.aiのエージェントモードを使用してLLMによる仕様駆動開発を行うためのリポジトリ構成とワークフローのベストプラクティスをまとめたものです。
-
-具体的なアプリケーション（Webアプリ、CLIツール、モバイルアプリ等）に依存しない、**開発プロセス・ドキュメント管理・CI/CD・環境対処法**に特化したテンプレートです。
-
----
-
-## 概要
-
-このテンプレートレポジトリによるLLM（Large Language Model）による仕様駆動開発は以下の3つの要素で構成されます：
-
-1. **ドキュメント管理戦略**: 仕様書・設計書・計画・履歴を構造化し、LLMと人間の双方が参照・検証可能にする
-2. **Arena.ai環境への適応**: サンドボックスの制約（通信制限・スナップショット上限・コンテナ再起動）への対処
-3. **CI/CD自動化**: GitHub Actionsによる継続的検証と、PRテンプレートによる品質保証
-
----
-
-## クイックスタート
-
-1. このテンプレートを元にして新しいリポジトリを作成
-
-2. レポジトリをArena.aiと連携し、以下のプロンプトをArena.aiのエージェントモードで入力する。
-
-```md
-レポジトリには、あなた(Agent)と仕様駆動で効率的に開発を行うための汎用的な基盤が用意されています。以下の作業を行なってください。
-
-1. `docs/developers.md`を確認する。
-2. 私(ユーザー)に作りたいソフトウェアがどんなものであるか質問する。
-
-私(ユーザー)が質問に答えたら、それに基づき、技術スタック・具体的な仕様など開発を始めるために必要な情報すべてを提案し、`docs/`にそれをドキュメント化・概要をチャットで私(ユーザー)に説明してください。
-```
-
----
-
-## ドキュメント構成
-
-```
-docs/
-├── script/
-│   └── verify-docs.py       # ドキュメント管理規則の機械検証スクリプト
-├── specifications/           # 純粋な仕様書（コード情報を含まない）
-│   └── overview.md           # 設計原則・用語・アーキテクチャ
-├── designs/                  # 実装設計書（仕様書と構造を一致させる）
-│   └── overview.md           # 対応ソースコードへの参照を含む
-├── handoff.md                # セッション引き継ぎ情報（毎セッション更新）
-├── developers.md             # 開発者ガイド（固定情報・規則）
-├── plans.md                  # 一時的な計画・進捗
-└── history.md                # 変更履歴・意思決定アーカイブ（追記専用）
-```
+開発プロセス（Arena.ai のエージェントモードを使った仕様駆動開発の手順）は `GUIDE.md` に、このリポジトリ固有の固定情報は `docs/developers.md` にある。
 
 ---
 

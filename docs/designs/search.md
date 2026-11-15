@@ -98,6 +98,8 @@
 
 `SessionState.queries` に要素を追加し、`active_query` を切り替える。結果一覧は `results_by_query` のスロットとして保持し、過去の一覧を保持する。
 
+非対話の `refine` は `REF:src/ui/commands.rs` から `search::refine` を呼び、変更前の検索語をセッションの `last_query`（または明示の `--previous`）から取得する。履歴に `Refine` を追記し、JSON に `previousQuery` を含める。結果の別スロット保存は未対応のため、Issue #7 の残項目とする。
+
 ### 4.2 検索語の履歴
 
 状態: 実装完了（REF:src/core/select.rs）

@@ -15,49 +15,35 @@
 | 実装（M2） | 完了 | ポート・`core`・アダプタ・ユースケース・UI・同梱アセット | `REF:docs/plans.md#m2-implement` |
 | 品質強化（M3） | 完了 | アーキテクチャ検査・契約テスト・結合テスト・容量管理 | `REF:docs/plans.md#m3-hardening` |
 | リリース準備（M4） | 完了 | README・開発者ガイド・CI・v0.1.0 のタグ付けとリリース | `REF:docs/plans.md#m4-release` |
+| 使いやすさ・安全性（M5） | 完了 | Issue 洗い出し・CLI/JSON/信頼境界・プロキシ・配布互換性 | `REF:docs/plans.md#m5-usability-safety` |
+| 実運用と仕様同期（M6） | 実装中 | システム CA ルート・E4004 耐性・M5 残 Issue の解消・ドキュメント同期 | `REF:docs/plans.md#m6-dogfood-sync` |
 <!-- SYNC:END project-status -->
 
 ---
 
 ## 2. 現在のブランチ・PR・直近の作業状態
 
-- **現在のブランチ**: `arena/7d587114-llmsearch`
-- **PR**: #1（`main` へマージ済み）
-- **リリース**: `v0.1.0`（Linux x86_64 の単一バイナリ + SHA256）
-- **現在の状態**: M2（実装）・M3（品質強化）・M4（リリース準備）すべて完了。`v0.1.0` を公開済み。実ネットワーク E2E（`LLMSEARCH_E2E_LIVE=1`）はユーザー指示により未実施。
-- **検証**: `cargo fmt --all --check`、`cargo clippy --all-targets -- -D warnings`、`cargo test`（すべて `--locked --offline`）が通過。`python3 docs/script/verify-docs.py` も通過。
-- **テスト数**: lib 114 / architecture 14 / assets 4 / contract 8 / integration 13。
-- **直近の作業**: 警告コードの発行元を仕様どおりに固定、`core` からの I/O・非決定性の除去、`config explain <key>` の実装、履歴の保持期間・上限件数、文書キャッシュの容量削除、README の利用手順。
-- **未確定事項**:
-  - 依存クレートのバージョン固定は完了（`htmd 0.5`, `scraper 0.29` 等）。追加のクレートが必要になった場合は vendor 退避の再実行が必要。
-- **Rust ツールチェーン**: `bash scripts/bootstrap-rust.sh` で搬入済み（`/home/user/build` はスナップショット対象外のため、コンテナ再起動後は再実行する）。復旧手順は `REF:docs/developers.md` §2.2 を参照。
+- **ブランチ**: `arena/6113b48d-llmsearch`（base: develop）
+- **PR**: #26 は develop へマージ済み（M5）。M6 の PR は作成前。マージは進行役が行う。
+- **状態**: M6 実装中。PR #26 の `Closes` 対象 #6/#8/#10/#14/#16/#24/#25/#27 を develop 上で実機確認し、手動クローズ済み。残る M5 由来の #4/#5/#7/#9/#12/#21/#23 に対応中。進捗は `REF:docs/plans.md#m6-dogfood-sync`。
+- **基準検証**: build/test/clippy/fmt 成功。`REF:scripts/verify.sh` 相当の検証はすべてローカルで通過。
+- **作業中検証**: 回帰テスト `REF:tests/m6.rs`（9 件）と `REF:tests/tls.rs`（7 件）を追加。システム CA ルートはローカルのプライベート CA を使う HTTPS サーバで 7 ケースを確認。抽出再試行は「応答が揺れる」fixture サーバで試行回数（既定 2 / `maxAttempts=4` で 4）を確認。
+- **ツールチェーン**: `/home/user/build/env.sh`。再起動時は `REF:docs/developers.md` §2.2 に従い復旧する。未コミット作業を破棄する reset --hard は行わない。
 
----
+## 3. 次の作業
 
-## 3. 次セッション開始時の手順
+1. M6 の PR 作成・レビュー・マージは進行役が行う（エージェントは行わない）。
+2. 既存 v0.1.0 添付物は未変更。配布には新しいタグで `REF:.github/workflows/release.yml` を実行する。既存タグの再実行では修正前のソースをビルドする点に注意（#25）。
+3. MITM 環境での実 HTTPS 通信（Muse 等）は進行役が確認する。サンドボックス側の検証はローカルのプライベート CA まで。
+4. #11/#13/#15/#17〜#20/#22 は M6 の範囲外で未対応。安全性の方針を独断で変更しない。
 
-1. `/home/user/build/env.sh` が存在しない場合（コンテナ再起動後・未搬入）は次を実行する（詳細は `REF:docs/developers.md` §2.2）:
-   ```bash
-   bash scripts/bootstrap-rust.sh
-   git fetch origin arena/7d587114-llmsearch
-   git reset --hard origin/arena/7d587114-llmsearch
-   ```
-2. ドキュメント規則を確認する:
-   ```bash
-   python3 docs/script/verify-docs.py
-   ```
-3. `REF:docs/plans.md#m3-hardening` の残項目（`unwrap` 禁止・非決定性の禁止の自動検査）と `REF:docs/plans.md#m4-release` を進める。
+M6 で `tls.caFile` が無くても HTTPS が通るようにした（システムの CA ストアと `SSL_CERT_FILE` / `CURL_CA_BUNDLE` / `REQUESTS_CA_BUNDLE` / `SSL_CERT_DIR` を参照。`REF:src/adapters/tls.rs`）。`tls.caFile` は従来どおり最優先で、読み込み失敗は `E2008` で停止する。
 
----
+## 4. コマンド所要時間（サンドボックス）
 
-## 4. コマンド所要時間の目安（サンドボックス）
-
-| コマンド | 初回 | 2 回目以降 |
+| コマンド | 初回 | 再実行 |
 |---|---|---|
-| `python3 docs/script/verify-docs.py` | 約 1 秒 | 約 1 秒 |
-| `node -v` / `npm -v` | 1 秒未満 | 1 秒未満 |
-| `npm view <pkg> version`（レジストリ照会） | 2〜20 秒 | 2〜20 秒 |
-| `bash scripts/verify.sh` | 約 1 秒（docs 検査のみ） | 同左 |
-| `. /home/user/build/env.sh && cargo check` | 約 43 秒 | 約 1 秒 |
-| `. /home/user/build/env.sh && cargo build` | 約 92 秒（release 含む） | 約 4 秒 |
-| `bash scripts/verify.sh`（cargo あり） | 約 95 秒 | 約 10 秒 |
+| bootstrap-rust | 約 1 分（339 MB） | 展開済みなら不要 |
+| cargo build --locked | 約 74 秒 | 数秒 |
+| cargo test --locked | 約 10 秒 | 数秒 |
+| python3 docs/script/verify-docs.py | 1 秒未満 | 1 秒未満 |

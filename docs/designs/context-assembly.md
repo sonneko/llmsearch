@@ -154,9 +154,9 @@
 
 ### 5.2 信頼境界の明示
 
-状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
+状態: 実装完了（REF:src/ui/render.rs）
 
-`UNTRUSTED_BEGIN = "[untrusted] "`、`UNTRUSTED_END = "--- end ---"` を定数化する。本文中に `--- end ---` が現れる場合は `sanitizeMarker()` で `— end —` へ置換し、本文が終端マーカーを偽装できないようにする。
+`Renderer::section_block` が `[untrusted] <URL>` と `--- end ---` を付与する。本文中の同一マーカーは `neutralize_markers` で `[untrusted]` → `［untrusted］`、`--- end ---` → `— end —` に置換する。本文の改行とその他の記述は保持する。JSON の `content.text` は変更せず、イベントと URL で境界を示す。回帰テストは `REF:src/ui/render.rs` に置く。
 
 ### 5.3 指示文の無害化
 

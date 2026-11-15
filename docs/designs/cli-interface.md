@@ -56,7 +56,7 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-`src/ui/render.rs` の `render_header`, `render_body`, `render_footer` に分離する。マーカーは定数 `UNTRUSTED_BEGIN` / `UNTRUSTED_END`。本文中の `--- end ---` は `sanitize_marker` で `— end —` へ置換する。
+`Renderer::section_block` がヘッダ・信頼境界・本文・終端を描画する。本文中のマーカーは `neutralize_markers` で無害化する。
 
 ### 2.5 通常の情報行
 
@@ -81,6 +81,8 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
 `src/ui/cli/commands/` に機能群ごとのファイルを置く（`search.rs`, `document.rs`, `history.rs`, `engines.rs`, `network.rs`, `filters.rs`, `quota.rs`, `config.rs`, `doctor.rs`）。各ファイルは `async fn run(args, ctx) -> Result<CmdOutcome>` を公開し、`dispatch.rs` が `match` で振り分ける（サブコマンドの分岐はここだけに存在する）。
+
+`REF:src/ui/commands.rs` が非対話コマンドを振り分ける。`search --limit` と `outline --depth` は省略時に解決済み設定値を使い、指定時のみ上書きする。`read` は既定で子節を含み、`--no-children` で除外する（`--children` と排他）。`REF:src/main.rs` は非対話でも `--session` を App に適用する。回帰テストは `REF:tests/m5.rs`。
 
 ### 3.2 対象の指定方法
 
