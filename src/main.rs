@@ -74,6 +74,8 @@ fn main() {
         }
     };
 
+    renderer.set_locale(app.locale());
+
     if app.verbose {
         for check in &resolved.checks {
             if matches!(check, llmsearch::core::errors::Check::Ok(_)) {

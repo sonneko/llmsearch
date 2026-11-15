@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::core::errors::{AppError, Check, Diagnostic, Locale};
 use crate::core::history::HistoryEntry;
@@ -16,7 +16,8 @@ use crate::usecases::doctor::CheckResult;
 pub struct Renderer {
     pub json: bool,
     pub color: bool,
-    pub locale: Locale,
+    /// 表示言語（設定の解決後に差し替えるため可変化する）。
+    locale: Arc<Mutex<Locale>>,
     pub quiet: bool,
     width: usize,
     clock: Arc<dyn Clock>,
@@ -35,11 +36,23 @@ impl Renderer {
         Self {
             json,
             color,
-            locale,
+            locale: Arc::new(Mutex::new(locale)),
             quiet,
             width,
             clock,
             session: Arc::new(Mutex::new(String::new())),
+        }
+    }
+
+    /// 表示言語（`ui.locale` の解決結果）。
+    pub fn locale(&self) -> Locale {
+        self.locale.lock().map(|l| *l).unwrap_or_default()
+    }
+
+    /// 表示言語を差し替える（設定読み込み後に 1 度だけ呼ぶ）。
+    pub fn set_locale(&self, locale: Locale) {
+        if let Ok(mut guard) = self.locale.lock() {
+            *guard = locale;
         }
     }
 
@@ -85,13 +98,29 @@ impl Renderer {
         }
     }
 
+    /// イベントの共通枠（`v` / `event` / `session` / `at`）を足したペイロードを作る。
+    ///
+    /// すべてのイベントが同じ共通フィールドを持つことを 1 か所で保証する。
+    /// 呼び出し側は種別ごとのフィールドだけを渡す。
+    pub fn envelope(&self, event: &str, fields: Value) -> Value {
+        let mut value = fields;
+        if let Some(map) = value.as_object_mut() {
+            map.insert("v".to_string(), json!(1));
+            map.insert("event".to_string(), json!(event));
+            map.entry("session")
+                .or_insert_with(|| json!(self.session_id()));
+            map.insert("at".to_string(), json!(self.at()));
+        }
+        value
+    }
+
     /// エラーを出力する（JSON のときは `error` イベント）。
     pub fn error(&self, err: &AppError) {
         // 個別の hint があれば優先し、無ければカタログの定型文を使う
         let hint = err
             .hint
             .clone()
-            .unwrap_or_else(|| crate::core::errors::hint(err.code, self.locale).to_string());
+            .unwrap_or_else(|| crate::core::errors::hint(err.code, self.locale()).to_string());
         if self.json {
             self.event(&serde_json::json!({
                 "v": 1,
@@ -99,20 +128,25 @@ impl Renderer {
                 "session": self.session_id(),
                 "at": self.at(),
                 "code": err.code.as_str(),
-                "message": crate::core::errors::message(err.code, self.locale),
+                "message": crate::core::errors::message(err.code, self.locale()),
                 "hint": hint,
                 "details": err.detail,
+                "warnings": warnings_json(&err.warnings),
             }));
         }
         eprintln!(
             "error: {} {}",
             err.code.as_str(),
-            crate::core::errors::message(err.code, self.locale)
+            crate::core::errors::message(err.code, self.locale())
         );
         if let Some(detail) = &err.detail {
             eprintln!("  詳細: {detail}");
         }
         eprintln!("  対処: {hint}");
+        // 失敗に至る過程で出た警告は捨てずに標準エラーへ出す（errors.md §1.2）。
+        for diagnostic in &err.warnings {
+            self.warn(diagnostic);
+        }
     }
 
     /// 警告を出力する。
@@ -158,20 +192,25 @@ impl Renderer {
 
     /// 結果一覧（1 行 1 件の要約）。
     pub fn hit_line(&self, hit: &SearchHit) -> String {
+        self.hit_line_with(hit, &hit.url)
+    }
+
+    /// 結果一覧（表示する URL を差し替える版。秘匿パラメータの伏字化用）。
+    pub fn hit_line_with(&self, hit: &SearchHit, url: &str) -> String {
         let snippet = hit
             .snippet
             .as_deref()
             .map(|s| truncate(s, 80))
             .unwrap_or_default();
         if snippet.is_empty() {
-            format!("[{}] {} <{}>", hit.label(), hit.title, hit.url)
+            format!("[{}] {} <{}>", hit.label(), hit.title, url)
         } else {
             format!(
                 "[{}] {}\n      {} <{}>",
                 hit.label(),
                 hit.title,
                 snippet,
-                hit.url
+                url
             )
         }
     }

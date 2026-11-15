@@ -140,6 +140,8 @@ pub struct AppError {
     /// 動的な補足（パス・値・件数など）。秘匿情報を含めてはならない。
     pub detail: Option<String>,
     pub hint: Option<String>,
+    /// 失敗に至る過程で出た警告（仕様 errors.md §1.2）。
+    pub warnings: Vec<Diagnostic>,
 }
 
 impl AppError {
@@ -148,6 +150,7 @@ impl AppError {
             code,
             detail: None,
             hint: None,
+            warnings: Vec::new(),
         }
     }
 
@@ -156,6 +159,7 @@ impl AppError {
             code,
             detail: Some(detail.into()),
             hint: None,
+            warnings: Vec::new(),
         }
     }
 
@@ -169,9 +173,15 @@ impl AppError {
         self
     }
 
-    /// 利用者向けの 1 文（既定は日本語）。
-    pub fn message(&self) -> &'static str {
-        message(self.code, Locale::default())
+    /// 失敗に至る過程で出た警告を添える（表示・JSON の両方で出す）。
+    pub fn warnings(mut self, warnings: Vec<Diagnostic>) -> Self {
+        self.warnings = warnings;
+        self
+    }
+
+    /// 利用者向けの 1 文。
+    pub fn message(&self, locale: Locale) -> &'static str {
+        message(self.code, locale)
     }
 
     pub fn exit_code(&self) -> i32 {

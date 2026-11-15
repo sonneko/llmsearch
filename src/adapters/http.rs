@@ -22,6 +22,9 @@ pub struct ReqwestClient {
     runtime: tokio::runtime::Runtime,
     /// 直近の送信時刻（ホストごとのレート制限）。
     last: std::sync::Mutex<std::collections::HashMap<String, u64>>,
+    /// 追加で信頼するルート証明書のキャッシュ（キーは解決に使った入力）。
+    /// クライアントを作り直すたびにシステムストアを読み直さないためのもの。
+    roots: std::sync::Mutex<Option<(String, Vec<reqwest::Certificate>)>>,
 }
 
 impl ReqwestClient {
@@ -37,6 +40,7 @@ impl ReqwestClient {
             reporter: None,
             runtime,
             last: std::sync::Mutex::new(std::collections::HashMap::new()),
+            roots: std::sync::Mutex::new(None),
         }
     }
 
@@ -86,10 +90,11 @@ impl ReqwestClient {
             }));
         }
 
-        if let Some(pem) = read_ca(&profile.tls.ca_file) {
-            let cert = reqwest::Certificate::from_pem(&pem)
-                .map_err(|e| AppError::with_detail(ErrorCode::E2008, format!("CA 読込: {e}")))?;
-            builder = builder.add_root_certificate(cert);
+        // 検証しない設定ではルート証明書を読まない（読んでも使わない）。
+        if profile.tls.verify {
+            for cert in self.root_certificates(&profile.tls.ca_file)? {
+                builder = builder.add_root_certificate(cert);
+            }
         }
         if profile.http_version == "1.1" {
             builder = builder.http1_only();
@@ -99,6 +104,36 @@ impl ReqwestClient {
         builder
             .build()
             .map_err(|e| AppError::with_detail(ErrorCode::E2001, format!("クライアント生成: {e}")))
+    }
+
+    /// `tls.caFile` とシステムルートストアを合わせた追加のルート証明書。
+    ///
+    /// システムストアの読み込みは送信ごとに繰り返さないよう保持する。
+    /// 保持のキーには解決に使った入力（設定値と環境変数）を含め、差し替えを
+    /// 反映できるようにする。
+    pub fn root_certificates(&self, ca_file: &str) -> Result<Vec<reqwest::Certificate>, AppError> {
+        let key = root_cache_key(ca_file, self.env.as_ref());
+        if let Ok(guard) = self.roots.lock()
+            && let Some((cached_key, certs)) = guard.as_ref()
+            && *cached_key == key
+        {
+            return Ok(certs.clone());
+        }
+        let roots = crate::adapters::tls::load(self.env.as_ref(), ca_file)?;
+        if let Some(reporter) = &self.reporter
+            && !roots.sources.is_empty()
+        {
+            reporter.verbose(&format!(
+                "TLS ルート証明書を追加した: {}（{} 件）",
+                roots.sources.join("; "),
+                roots.len()
+            ));
+        }
+        let certs = roots.certs().to_vec();
+        if let Ok(mut guard) = self.roots.lock() {
+            *guard = Some((key, certs.clone()));
+        }
+        Ok(certs)
     }
 
     fn wait_interval(&self, profile: &NetworkProfile, host: &str) {
@@ -260,31 +295,45 @@ fn resolve_proxy(
     Ok(Some(url))
 }
 
-fn read_ca(path: &str) -> Option<Vec<u8>> {
-    if path.trim().is_empty() {
-        None
-    } else {
-        std::fs::read(path).ok()
+/// ルート証明書キャッシュのキー（`tls.caFile` と参照した環境変数の値）。
+fn root_cache_key(ca_file: &str, env: &dyn Env) -> String {
+    let mut key = String::from(ca_file.trim());
+    for name in crate::adapters::tls::BUNDLE_ENV_VARS
+        .iter()
+        .chain(crate::adapters::tls::DIR_ENV_VARS.iter())
+    {
+        key.push('\u{1f}');
+        key.push_str(name);
+        key.push('=');
+        key.push_str(env.var(name).unwrap_or_default().trim());
     }
+    key
 }
 
 fn map_reqwest_error(err: reqwest::Error, request: &HttpRequest) -> AppError {
     let err = err.without_url();
     let host = request.url.host_str().unwrap_or("(unknown)");
+    // 送信エラーの文字列には URL や認証値が混ざることがあるため伏字化してから使う。
+    let text = crate::core::secret::redact_text(&err.to_string(), &request.secrets);
     if err.is_timeout() {
-        return AppError::with_detail(ErrorCode::E2002, format!("{host}: {err}"));
+        return AppError::with_detail(ErrorCode::E2002, format!("{host}: {text}"));
     }
     if err.is_connect() {
-        return AppError::with_detail(ErrorCode::E2001, format!("{host}: {err}"));
+        // TLS を含む接続失敗は、原因の切り分けに CA の確認が要る旨を必ず添える。
+        return AppError::with_detail(ErrorCode::E2001, format!("{host}: {text}")).hint(
+            "接続先・プロキシの設定を確認する。TLS の検証が原因なら `tls.caFile` か \
+             システムの CA ストア（`SSL_CERT_FILE`）を確認する",
+        );
     }
     if err.is_redirect() {
-        return AppError::with_detail(ErrorCode::E2004, format!("{host}: {err}"));
+        return AppError::with_detail(ErrorCode::E2004, format!("{host}: {text}"));
     }
-    let text = err.to_string().to_lowercase();
-    if text.contains("certificate") || text.contains("tls") {
-        return AppError::with_detail(ErrorCode::E2008, host.to_string());
+    let lower = text.to_lowercase();
+    if lower.contains("certificate") || lower.contains("tls") {
+        return AppError::with_detail(ErrorCode::E2008, host.to_string())
+            .hint("`tls.caFile` に CA 証明書（PEM）を指定するか、システムの CA ストアを確認する");
     }
-    AppError::with_detail(ErrorCode::E2001, format!("{host}: {err}"))
+    AppError::with_detail(ErrorCode::E2001, format!("{host}: {text}"))
 }
 
 fn http_status_error(status: u16, headers: &[(String, String)]) -> AppError {

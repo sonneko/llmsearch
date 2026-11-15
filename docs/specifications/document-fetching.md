@@ -14,7 +14,7 @@
 
 - 対応スキームは `http` と `https` のみとする。それ以外（`file:`, `ftp:`, `data:` 等）は拒否する（`E2005`）。
 - リダイレクトは最大 5 回まで追従し、最終 URL を文書の正規 URL とする。ループは `E2004` として検出する。
-- Content-Type が `text/html` または `application/xhtml+xml` であることを確認する。`application/pdf` および画像・バイナリは初期リリースでは非対応とし、`E3002` を返して理由を表示する。Content-Type が不明な場合は本文の先頭バイト列で HTML らしさを判定する。
+- Content-Type が `text/html` / `application/xhtml+xml` / `text/plain` であることを確認する。`text/plain` は HTML として変換せず、そのまま本文として扱う。`application/pdf` および画像・バイナリは初期リリースでは非対応とし、`E3002` を返して理由を表示する。Content-Type が不明な場合は本文の先頭バイト列で HTML らしさを判定する。
 - 応答本文の最大サイズは既定 5 MiB とする。超過した場合は打ち切って変換を続け、警告を出す。
 - タイムアウトは接続 5 秒、全体 20 秒を既定とする。
 

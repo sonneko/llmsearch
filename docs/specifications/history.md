@@ -82,7 +82,7 @@ H39  2026-11-07 14:22  search   気候変動 適応策  duckduckgo  7 件（除�
 
 ### 3.3 エクスポート
 
-履歴を Markdown または JSON Lines 形式で標準出力またはファイルへ出力できる。Markdown 出力は、セッションごとに見出しを付け、`search` / `fetch` / `read` を時系列に並べる。本文は含めず、節見出しのみを含める（`--with-body` 指定時のみ本文を含める）。
+履歴を Markdown または JSON Lines 形式で標準出力またはファイルへ出力できる。Markdown 出力は、セッションごとに見出しを付け、`search` / `fetch` / `read` を時系列に並べる。本文は含めず、節見出しのみを含める。
 
 ---
 

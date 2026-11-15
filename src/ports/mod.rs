@@ -86,7 +86,9 @@ pub struct EngineCall {
 pub fn classify(err: &AppError) -> FallbackClass {
     use crate::core::errors::ErrorCode::*;
     match err.code {
-        E4001 | E4003 => FallbackClass::RetryOtherEngine,
+        // E4004（抽出規則が応答と一致しない）は送出側の一時的な揺れでも起きるため、
+        // フォールバック先があればそこでも試す。
+        E4001 | E4003 | E4004 => FallbackClass::RetryOtherEngine,
         E1001 | E1002 | E1003 | E1004 | E1005 | E1006 | E1007 | E1008 => FallbackClass::Fatal,
         _ => FallbackClass::Fatal,
     }
