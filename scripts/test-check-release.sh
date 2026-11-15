@@ -12,7 +12,7 @@ SH
 cat > "$tmp/llmsearch" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
-    --version) echo 'llmsearch 0.1.0' ;;
+    --version) echo 'llmsearch 0.1.1' ;;
     *'engines list') echo duckduckgo ;;
     *'config show') echo search.engine ;;
     *) exit 1 ;;

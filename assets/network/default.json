@@ -7,7 +7,7 @@
   "maxBytes": 5242880,
   "maxRedirects": 5,
   "redirectPolicy": "follow",
-  "userAgent": "llmsearch/0.1.0 (+https://github.com/sonneko/llmsearch)",
+  "userAgent": "llmsearch/0.1.1 (+https://github.com/sonneko/llmsearch)",
   "headers": {
     "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8"
   },
