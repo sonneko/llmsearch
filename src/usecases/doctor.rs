@@ -151,7 +151,11 @@ pub fn run(app: &App) -> Vec<CheckResult> {
                 }),
                 Err(err) => out.push(CheckResult {
                     name: "network.reachability".into(),
-                    check: Check::Warn(format!("{}: {}", err.code.as_str(), err.message())),
+                    check: Check::Warn(format!(
+                        "{}: {}",
+                        err.code.as_str(),
+                        err.message(app.locale())
+                    )),
                 }),
             }
         }
@@ -168,7 +172,11 @@ pub fn run(app: &App) -> Vec<CheckResult> {
             ..Default::default()
         }) {
             Ok(entries) => Check::Ok(format!("{} 件以上を読める", entries.len())),
-            Err(err) => Check::Fail(format!("{}: {}", err.code.as_str(), err.message())),
+            Err(err) => Check::Fail(format!(
+                "{}: {}",
+                err.code.as_str(),
+                err.message(app.locale())
+            )),
         },
     });
 
