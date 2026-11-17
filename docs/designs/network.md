@@ -54,8 +54,9 @@
 
 - 判定: `should_retry(policy, outcome) -> bool`（`Outcome` は `Status(u16)` か `Err(io_kind)`）。
 - 待機: `backoff(policy, attempt) -> Duration`（`backoffMs * factor^(attempt-1)` を `maxBackoffMs` で頭打ちにし、`jitterMs` の範囲で疑似乱数を加える）。
-- `Retry-After` は秒数と HTTP-date の両方を解釈する（`chrono` 使用）。
-- `maxBackoffMs` を超える `Retry-After` は再試行を打ち切る。
+- `Retry-After` は秒数と HTTP-date の両方を解釈する（`chrono` 使用）。解釈は `REF:src/core/retry.rs` の `parse_retry_after_ms(value, now)`（純粋関数）に閉じ、日付形式は `RFC 1123`（`%a, %d %b %Y %H:%M:%S GMT`）のみを受理する。解釈できない値は `None` とし、指数バックオフへ戻す。
+- 待機時間は `REF:src/adapters/http.rs` の `send_blocking` が決める。`respectRetryAfter` が真で解釈できた場合はその値をそのまま待ち（揺らぎは加えない）、`maxBackoffMs` を超える場合は再試行を打ち切って `E4003` を返す。値の受け渡しはエラー詳細の文字列解析ではなく `AppError::retry_after_ms`（`REF:src/core/errors.rs`）で行う。
+- `Retry-After` が付くのは `4xx` / `5xx` 応答だけなので、抽出結果 0 件の再送（`REF:src/adapters/engine/eval.rs`）には適用しない。
 - 待機は `Clock::sleep` を呼ぶ。テストでは仮想時計で待機時間を検証する。
 - 抽出結果が 0 件の応答に対する再試行は `REF:src/adapters/engine/eval.rs` の `evaluate` が行う（HTTP 層の再試行とは別系統）。`retry.enabled` が偽なら 1 回で打ち切り、再試行ごとに `W4004` を記録する。最終的に失敗した場合は応答の先頭 200 文字を `E4004` の `detail` に含める（本文全体は出さない）。
 - `E4004` は `REF:src/ports/mod.rs` の `classify` で `FallbackClass::RetryOtherEngine` に分類し、フォールバック先が設定されていればそこでも試す。
@@ -96,12 +97,24 @@
 
 状態: 実装完了（REF:src/core/robots.rs）
 
-解析は `src/core/robots.rs` の `RobotsRules::parse(text, token) -> RobotsRules` と `RobotsRules::allows(path) -> bool`。
+解析は `src/core/robots.rs` の `Robots::parse(text, max_bytes) -> Robots` と `Robots::verdict(token, path) -> Verdict`（純粋ロジック）。
 
 - `User-agent` の一致判定は大文字小文字を区別せず、トークンの部分一致（`llmsearch` は `llmsearch/0.1.0` に一致）とする。
 - `*` のグループと自トークンのグループが両方ある場合は、より具体的な自トークンのグループを優先する（RFC 9309 に準拠）。
 - `Allow` と `Disallow` が同一長で競合する場合は `Allow` を優先する。
 - `onError=allow` は取得失敗時に全許可、`deny` は全拒否。
+
+強制は `REF:src/adapters/robots.rs` の `RobotsGate` が行う（従来は `core::robots` に呼び出し元が無かった）。
+
+- 呼び出しは `REF:src/adapters/extract/mod.rs` の `fetch_fresh` から、実際に HTTP を送る直前に行う。HTML 中継ページでリダイレクトする場合は、追従先についても判定する。本文キャッシュが有効な場合は `fetch_fresh` に到達しないため判定しない。
+- `HttpFetcher` は `robots: Option<RobotsGate>` を持ち、`REF:src/usecases/document.rs` の `fetch` が（状態ディレクトリのパス・HTTP クライアント・時計・通知先を渡して）組み立てる。`None` のときは判定しない（テストと「判定不要な経路」のため）。
+- robots.txt の URL は `<scheme>://<host>[:<port>]/robots.txt`。取得は `HttpClient::send_blocking` をそのまま使うため、プロファイルのプロキシ・TLS・レート制限・再試行が効く。取得自体はクォータを消費しない（消費はユースケース層しかしないため、アダプタからの取得は自動的に消費 0 となる）。
+- 判定結果は `<state-dir>/cache/robots.json` に「オリジン → 取得時刻 + 解析結果」で保持し、`REF:src/adapters/state/mod.rs` の `write_atomic` で書く。読み込み時に `robots.ttlMinutes` を過ぎていれば破棄して取り直す。ファイルが壊れていれば空として扱う（取得を止めない）。
+- 取得に失敗した場合、`onError=deny` は即座に `E2006`。`allow` は「規則なし」を同じ保持時間だけ保持し、同じホストの文書を取得するたびに取り直さないようにする。
+- 判定に使うパスは `url.path()` に `?` とクエリを足したもの（RFC 9309）。
+- `Crawl-delay` は解析するが強制しない（レート制限は `minIntervalMs` に一本化する）。
+
+`respect=false` のときは判定もファイルの読み書きも行わず、履歴の `fetch` レコードに `robotsSkipped: true` を残す（既存の実装どおり）。
 
 ---
 
@@ -110,6 +123,14 @@
 状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
 `core::net::headers::compose(profile, engine, accept) -> HeaderMap` が 4 段の合成を 1 か所で行い、禁止ヘッダの検査（`E1004`）もここで行う。`reqwest::Client::builder().default_headers()` にはプロファイル分のみを設定し、エンジン固有ヘッダはリクエスト単位で付す（クライアントの再利用で混線しないようにするため）。
+
+`3xx` の扱いは `REF:src/adapters/http.rs` の `send_once` で `status` を見て分岐する（`reqwest` の `Policy::none()` は `manual` と `never` で同じ動きになるため、分岐は自前で行う）。
+
+- `never`: `E2003`（`reason = リダイレクトを許可しない`）。
+- `manual`: `Location` が解決できれば `final_url` にそれを入れ、本文を空にして `Ok` を返す。解決できない場合は `E2004`。
+- `follow`: `Policy::limited(maxRedirects)` に委ねる。回数超過は `reqwest` のエラー（`is_redirect`）として `E2004` になる。`Location` が無く追えない `3xx` が返った場合も `E2004` とする。
+
+HTML 中継ページの追従（`<meta http-equiv="refresh">` と JS の location）は `REF:src/adapters/extract/mod.rs` の `fetch_fresh` が行う。試行回数は `profile.max_redirects` をそのまま上限とし、0 のときは 1 hop も追わない（従来の `max(1)` は `maxRedirects=0` を無視していた）。
 
 ---
 

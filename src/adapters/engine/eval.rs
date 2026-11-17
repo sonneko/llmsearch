@@ -17,6 +17,8 @@ pub struct EngineCall {
     pub status: u16,
     pub truncated: bool,
     pub elapsed_ms: u128,
+    /// 実際に送信した回数（抽出結果 0 件による再送を含む）。
+    pub requests: u32,
 }
 
 /// エンジンを 1 回呼び出し、結果を抽出する。
@@ -104,6 +106,7 @@ pub fn evaluate(
             status: response.status,
             truncated: response.truncated,
             elapsed_ms,
+            requests: attempt + 1,
         });
     }
 

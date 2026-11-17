@@ -64,11 +64,16 @@ pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppEr
     let candidates = candidate_engines(app)?;
     let mut last_error: Option<AppError> = None;
     let mut used_fallback: Option<String> = None;
+    // 送信した回数（フォールバックで試したエンジン数だけ増える）。
+    // 操作が成功したときだけ `consume_all` で永続化する（仕様 quotas.md §3.2）。
+    let mut pending = Usage::default();
 
     for (index, selector) in candidates.iter().enumerate() {
         let Some(def) = app.engines.get(selector) else {
             continue;
         };
+        // これから送る 1 回分を含めて判定する（送った分は未消費のため）。
+        guard.check(Metric::Searches, pending.searches + 1)?;
         match call_engine(app, def, &query, page, limit_u32) {
             Ok(call) => {
                 let engine_call = call;
@@ -107,6 +112,7 @@ pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppEr
                 }
 
                 let now = app.clock.today_local();
+                let obtained = raw_hits.len() as u64;
                 let engines: Vec<String> = vec![def.selector(); raw_hits.len()];
                 let assigned = search_core::assign_ids(raw_hits, 1, &engines);
                 let (kept, filtered) = crate::core::config::filter::apply_results(
@@ -122,20 +128,12 @@ pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppEr
                     && (page as usize) * limit < def.max_results(app.settings.search.max_results);
 
                 // 消費量の確定（クォータ）
-                let usage = Usage {
-                    searches: 1,
-                    results: page_hits.len() as u64,
-                    chars: page_hits
-                        .iter()
-                        .map(|h| {
-                            (text::chars(&h.title)
-                                + h.snippet.as_deref().map(text::chars).unwrap_or(0))
-                                as u64
-                        })
-                        .sum(),
-                    ..Default::default()
-                };
-                guard.consume_all(usage)?;
+                // `searches` は送信した回数（同一エンジン内の再送も合算）。
+                // `results` はフィルタ前の取得件数。`chars` は `read` でのみ
+                // 消費するため、ここでは加算しない（仕様 quotas.md §2.2 / §3.1）。
+                pending.searches += engine_call.requests.max(1) as u64;
+                pending.results += obtained;
+                guard.consume_all(pending)?;
 
                 // 履歴
                 let entry = crate::core::history::HistoryEntry::new(
@@ -179,6 +177,8 @@ pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppEr
                 });
             }
             Err(err) => {
+                // 送信しているので 1 回として数える（成功時にまとめて消費する）。
+                pending.searches += 1;
                 let class = crate::ports::classify(&err);
                 if class == crate::ports::FallbackClass::RetryOtherEngine
                     && index + 1 < candidates.len()
@@ -186,6 +186,7 @@ pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppEr
                     last_error = Some(err);
                     continue;
                 }
+                // 操作全体が失敗したので `pending` は捨てる（消費しない）。
                 return Err(err);
             }
         }
