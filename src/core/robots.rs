@@ -1,21 +1,23 @@
 //! robots.txt の解釈（純粋ロジック）。
 
+use serde::{Deserialize, Serialize};
+
 /// 判定結果。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Verdict {
     Allow,
     Deny,
 }
 
 /// 1 つの `Allow` / `Disallow` 行。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rule {
     pub allow: bool,
     pub pattern: String,
 }
 
 /// 1 つの User-agent 群。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Group {
     pub agents: Vec<String>,
     pub rules: Vec<Rule>,
@@ -23,7 +25,7 @@ pub struct Group {
 }
 
 /// 解釈した robots.txt。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Robots {
     pub groups: Vec<Group>,
 }

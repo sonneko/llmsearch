@@ -181,3 +181,45 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
 - `AppError::hint` を実際に表示に使い、`AppError::message()` が `ui.locale` を反映するようにした。
 - `E2007` は初期リリースでは発行しないことを `REF:docs/specifications/errors.md` §2.2 に明記した（応答サイズ超過は打ち切り + `W3003`）。
 - 検査: `REF:tests/m6.rs`（9 件）。
+
+### [HIST:SPEC-FIX:F007] 2026-11-14 robots.txt を実際に強制する
+[HIST-TAG: category=SPEC-FIX id=F007 topics=robots,e2006,fetch,cache,quota,issues-13]
+
+- 症状: `REF:src/core/robots.rs` に解析ロジックがあるだけで呼び出し元が無く、`Disallow` のページも取得できていた（Issue #13）。`E2006` も発行されなかった。
+- 対応: `REF:src/adapters/robots.rs` の `RobotsGate` を追加し、本文取得の前に「オリジン単位（`scheme://host[:port]`）」で robots.txt を判定する。拒否された場合は `E2006`。取得は `HttpClient::send_blocking` をそのまま使うため、プロファイルのプロキシ・TLS・レート制限・再試行が効く。
+- 設計判断: 判定結果は `<state-dir>/cache/robots.json` に「オリジン → 取得時刻 + 解析結果」で保持し、`network.robots.ttlMinutes` の間は再利用する（同じホストの文書ごとに取り直さない）。取得に失敗した場合、`onError=allow` は「規則なし」を同じ保持時間だけ保持する。ファイルが壊れていれば空として扱い、取得を止めない。
+- 設計判断: robots.txt の取得はクォータを消費しない。消費はユースケース層しかしないため、アダプタからの取得は自動的に 0 となる。
+- 設計判断: `E2006` は `classify()` で `Fatal` のままとし、robots の拒否で別エンジンへフォールバックしない（拒否は取得先の問題であり、検索エンジンの問題ではない）。
+- 設計判断: `respect=false` のときは判定もファイルの読み書きも行わず、履歴の `fetch` レコードに `robotsSkipped: true` を残す。`doctor` は `[warn]` を出す（従来どおり）。
+- 副次修正: `REF:src/usecases/document.rs` の `load()` は「保存された本文」を読み直していたため、`respect=false` や `--no-cache`（保存しない経路）で必ず `E3001` になっていた。取得した本文を `Fetched.markdown` として持ち、保存の有無に関わらずその場で使うようにした（保存しない方針は変えない）。
+- 仕様: `REF:docs/specifications/network.md` §6、`REF:docs/specifications/search.md` §5.3、`REF:docs/specifications/document-fetching.md` §1。
+- 検査: `REF:tests/m7.rs`（拒否・取得成功・`onError=deny`・`respect=false`・キャッシュ再利用・クォータ非消費）と実バイナリでの 6 ケース。
+
+### [HIST:SPEC-FIX:F008] 2026-11-14 `Retry-After` を再試行の待機時間に使う
+[HIST-TAG: category=SPEC-FIX id=F008 topics=retry,retry-after,e4003,http,spec,issues-15]
+
+- 症状: `Retry-After` はエラー詳細の文字列に混ぜて表示するだけで、待機時間には使われていなかった（Issue #15）。
+- 対応: `REF:src/core/retry.rs` の `parse_retry_after_ms(value, now)`（純粋関数）で秒数と HTTP 日付（`RFC 1123`）を解釈し、`AppError::retry_after_ms` として運ぶ。`respectRetryAfter` が真で解釈できた場合はその値をそのまま待つ（揺らぎは加えない）。`maxBackoffMs` を超える場合は再試行せず `E4003` を返す。解釈できない値は指数バックオフへ戻す。
+- 副次修正: 再試行の可否判定（`REF:src/adapters/http.rs` の `retryable`）が状態番号をエラー詳細の文字列から解析していたため、`Retry-After` が付いた応答（`HTTP 503（Retry-After: 1）`）が再試行されなかった。`AppError::status` に状態番号を持たせ、詳細文の解析に頼らないようにした。
+- 設計判断: `Retry-After` が付くのは `4xx` / `5xx` 応答だけなので、抽出結果 0 件の再送（F005）には適用しない。
+- 仕様: `REF:docs/specifications/network.md` §3。
+- 検査: `REF:tests/m7.rs`（上限内で待機・上限超過で `E4003` ・`respectRetryAfter=false` ・解釈不能）と実バイナリでの 3 ケース（待機 1.01 秒 / 打ち切り / 無視して 0.11 秒）。
+
+### [HIST:SPEC-FIX:F009] 2026-11-14 `redirectPolicy` ごとの 3xx の扱い
+[HIST-TAG: category=SPEC-FIX id=F009 topics=redirect,3xx,e2003,e2004,http,issues-17]
+
+- 症状: `send_once` が `status >= 400` でしかエラーにしないため、`never` でも 3xx が成功扱いになり（本文は空）、`manual` の `Location` も使われず、`maxRedirects` の `0` も HTML 中継ページの追従で無視されていた（Issue #17）。
+- 対応: 3xx を `redirectPolicy` で分岐する。`never` は `E2003`（`reason = リダイレクトを許可しない`）。`manual` は `Location` を解決して `final_url` に入れ、本文を空にして `Ok` を返す（追うかどうかは呼び出し側の判断）。`follow` で追いきれなかった 3xx は `E2004`。`Location` が解決できない `manual` も `E2004`。
+- 対応: HTML 中継ページの追従上限を `max_redirects.max(1)` から `max_redirects` に戻し、`0` のときは 1 hop も追わないようにした。
+- 設計判断: `manual` は「追わないが行き先は返す」とした。3xx を握りつぶすと `outline` / `read` が空本文に対して「JavaScript 依存」の警告を出すだけになり、利用者が気付けないため。
+- 仕様: `REF:docs/specifications/network.md` §8.3。
+- 検査: `REF:tests/m7.rs`（`never` で `E2003` / `never` で 2xx は成功 / `manual` で `Location` を返す / `maxRedirects=0`）と実バイナリでの 4 ケース（`follow` で追従・`never` で `E2003` ・`manual` で空本文・`maxRedirects=0` で `E2004`）。
+
+### [HIST:SPEC-FIX:F010] 2026-11-14 クォータの消費を仕様どおりに数える
+[HIST-TAG: category=SPEC-FIX id=F010 topics=quota,metrics,chars,results,fallback,issues-18]
+
+- 症状: 消費が仕様とずれていた（Issue #18）。`fetch` が取得した本文の文字数を `chars` に加算していた。検索の `results` がフィルタ後の `page_hits.len()` だった。フォールバックは成功した 1 回分しか `searches` を消費しなかった。
+- 対応: `REF:src/usecases/document.rs` の `fetch` は `fetches` のみを消費する（`chars` は `read` が出力した分だけ）。`REF:src/usecases/search.rs` の `run` は `results` にフィルタ前の取得件数を入れ、`searches` に「送信した回数」（フォールバックで試したエンジン数 + 同一エンジン内の再送回数）を積む。
+- 設計判断: 消費は `pending` に積み、**操作が成功したときだけ** `Guard::consume_all` で永続化する。全ての候補が失敗した場合は `pending` を捨てるため消費は 0 のままになる（仕様 `quotas.md` §3.2）。次に試すエンジンの判定は `guard.check(Searches, pending.searches + 1)` のように「既に送った分 + これから送る 1 回」で行う。
+- 仕様: `REF:docs/specifications/quotas.md` §2.2 / §3.1 / §3.2。`history show` は本文を再出力しない（メタデータと記録のみ）ため消費しないことを明記した（従来の「`chars` のみ加算」は実装と矛盾していた）。
+- 検査: `REF:tests/m7.rs`（`outline` で `chars` を消費しない / `read` で消費する / フィルタ前の件数 / フォールバックで 2 回 / 全滅で 0 回）と実バイナリでの 3 ケース（`outline` で `fetches=1, chars=0` → `read` で `chars=46` → 追加の `read` で `chars=91`）。

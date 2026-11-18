@@ -15,7 +15,8 @@
 | 品質強化（M3） | 完了 | アーキテクチャ検査・契約テスト・結合テスト・容量管理 | `REF:docs/plans.md#m3-hardening` |
 | リリース準備（M4） | 完了 | README・開発者ガイド・CI・v0.1.0 のタグ付けとリリース | `REF:docs/plans.md#m4-release` |
 | 使いやすさ・安全性（M5） | 完了 | Issue 洗い出し・CLI/JSON/信頼境界・プロキシ・配布互換性 | `REF:docs/plans.md#m5-usability-safety` |
-| 実運用と仕様同期（M6） | 実装中 | システム CA ルート・E4004 耐性・M5 残 Issue の解消・ドキュメント同期 | `REF:docs/plans.md#m6-dogfood-sync` |
+| 実運用と仕様同期（M6） | 完了 | システム CA ルート・E4004 耐性・M5 残 Issue の解消・ドキュメント同期（PR #28） | `REF:docs/plans.md#m6-dogfood-sync` |
+| 取得の作法と計測（M7） | 実装中 | robots.txt の強制（#13）・`Retry-After`（#15）・`redirectPolicy` の 3xx（#17）・クォータ消費のずれ（#18） | `REF:docs/plans.md#m7-fetch-discipline` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -113,6 +114,18 @@ JSON 全コマンド統一・robots・クォータ計測変更・リダイレク
 - [x] 仕様・設計・README と実装の突き合わせ（M6 時点）
 
 未対応: #11 / #13 / #15 / #17〜#20 / #22（M5 の棚卸しで起票されたまま。M6 の範囲外）。
+
+<a id="m7-fetch-discipline"></a>
+### M7: 取得の作法と計測
+
+- [x] #13: robots.txt の強制。`REF:src/core/robots.rs` の純粋ロジックに呼び出し元を付け、本文取得の前にオリジン単位で判定して `E2006` を返す（`REF:src/adapters/robots.rs`）。判定結果は `<state-dir>/cache/robots.json` に `ttlMinutes` で保持し、取得失敗は `onError` に従う
+- [x] #15: `Retry-After` の解釈（`REF:src/core/retry.rs`。秒数と HTTP 日付）と再試行待機への反映。`maxBackoffMs` を超える待機は `E4003` で打ち切る
+- [x] #17: `redirectPolicy` の 3xx 処理。`never` は `E2003`、`manual` は `Location` を解決して返し、`follow` で追いきれない 3xx は `E2004`。`maxRedirects = 0` は HTML 中継ページも追わない
+- [x] #18: クォータ消費の訂正。`fetch` は `fetches` のみ（`chars` は `read` だけ）、`results` はフィルタ前の件数、フォールバックと同一エンジン内の再送は試行ごとに `searches` を消費し、操作全体が失敗した場合は消費しない
+- [x] 再試行判定が詳細文の状態番号解析に依存していた不具合を修正（`AppError::status`。`Retry-After` が付く応答が再試行されなかった）
+- [x] 回帰試験 `REF:tests/m7.rs`（ローカル TCP サーバと偽 HTTP のみ。外部ネットワークは使わない）
+
+未対応: #11 / #19 / #20 / #22（M7 の範囲外）。
 
 ---
 

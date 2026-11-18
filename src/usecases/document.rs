@@ -17,6 +17,8 @@ pub struct Fetched {
     pub document: DocumentRef,
     pub new: bool,
     pub warnings: Vec<Diagnostic>,
+    /// 取得した本文（`load` がキャッシュを読み直さないように持つ）。
+    pub markdown: String,
 }
 
 /// 取得済み文書（本文付き）。
@@ -34,7 +36,15 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
         Some(std::sync::Arc::clone(&app.documents)),
         std::sync::Arc::clone(&app.clock),
         std::sync::Arc::clone(&app.reporter),
-    );
+    )
+    .with_robots(std::sync::Arc::new(
+        crate::adapters::robots::RobotsGate::new(
+            app.paths.robots_file(),
+            std::sync::Arc::clone(&app.http),
+            std::sync::Arc::clone(&app.clock),
+            std::sync::Arc::clone(&app.reporter),
+        ),
+    ));
 
     let id_hint = app.ensure_session()?;
     app.set_session(id_hint.clone());
@@ -65,9 +75,11 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
         ));
     }
 
+    // `chars` は消費しない。仕様 quotas.md §3.1 は `chars` を「出力した本文の
+    // 文字数（`read` の合計）」とし、`outline` は `fetches` のみを消費する。
+    // 取得しただけでは本文の予算を減らさない。
     guard.consume_all(Usage {
         fetches: if fetched.cached { 0 } else { 1 },
-        chars: chars as u64,
         ..Default::default()
     })?;
 
@@ -115,6 +127,7 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
         document,
         new,
         warnings,
+        markdown: fetched.markdown.clone(),
     })
 }
 
@@ -131,20 +144,12 @@ pub fn load(app: &mut App, document: &DocumentRef) -> Result<LoadedDocument, App
             refetched: false,
         });
     }
+    // 保存されない場合（`--no-cache` と `robots.respect = false`）でも、
+    // いま取った本文をそのまま使う（取り直さない）。
     let fetched = fetch(app, &url)?;
-    let stored = app.documents.get(&url)?;
-    let markdown = match stored {
-        Some((_, md)) => md,
-        None => {
-            return Err(AppError::with_detail(
-                ErrorCode::E3001,
-                "本文を保存できなかった".to_string(),
-            ));
-        }
-    };
     Ok(LoadedDocument {
         document: fetched.document,
-        markdown,
+        markdown: fetched.markdown,
         refetched: true,
     })
 }

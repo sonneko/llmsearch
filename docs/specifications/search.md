@@ -113,7 +113,7 @@
 
 ### 5.3 robots.txt
 
-本文取得の前に、対象ホストの robots.txt を取得して判定する。設定 `network.respectRobots` が `false` の場合を除き、`Disallow` に該当するパスは取得しない。robots.txt を取得できない場合（404・タイムアウト）は取得を許可する。判定結果はセッション中キャッシュする。
+本文取得の前に、対象ホストの robots.txt を取得して判定する。設定 `network.robots.respect` が `false` の場合を除き、`Disallow` に該当するパスは取得しない。robots.txt を取得できない場合（404・タイムアウト）は取得を許可する。判定結果は状態ディレクトリの `cache/robots.json` に保持し、`network.robots.ttlMinutes` の間は再利用する。
 
 ### 5.4 User-Agent
 

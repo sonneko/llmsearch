@@ -20,6 +20,8 @@
 
 スキーム検証は `core::url::validate`。リダイレクトは `redirect::Policy::none()` にして自前で追従し、`Vec<Url>` で訪問済みを管理して `E2004`（ループ）を検出する。サイズ上限は `bytes_stream` の累積で判定する。タイムアウトは `Client::timeout` と `Request::timeout` の二段構え。
 
+robots.txt の判定（`REF:src/adapters/robots.rs`）は `send_blocking` の直前、追従先を含めた各 hop で行う。拒否された時点で `E2006` を返し、取得もクォータ消費も行わない。
+
 ### 1.3 文字コード
 
 状態: 実装完了（REF:src/adapters/extract/mod.rs, REF:src/core/convert.rs）

@@ -23,6 +23,8 @@ pub struct HttpFetcher {
     pub store: Option<std::sync::Arc<dyn DocumentStore>>,
     pub clock: std::sync::Arc<dyn Clock>,
     pub reporter: std::sync::Arc<dyn Reporter>,
+    /// robots.txt の判定ゲート（本文取得の前に適用する）。
+    pub robots: Option<std::sync::Arc<crate::adapters::robots::RobotsGate>>,
 }
 
 impl HttpFetcher {
@@ -37,7 +39,17 @@ impl HttpFetcher {
             store,
             clock,
             reporter,
+            robots: None,
         }
+    }
+
+    /// robots.txt の判定ゲートを設定する。
+    pub fn with_robots(
+        mut self,
+        robots: std::sync::Arc<crate::adapters::robots::RobotsGate>,
+    ) -> Self {
+        self.robots = Some(robots);
+        self
     }
 
     /// 取得（キャッシュは使わない）。
@@ -48,9 +60,14 @@ impl HttpFetcher {
         // HTTP の 3xx は HTTP 層が追う。ここでは HTML の中継ページ
         // （<meta refresh> / JS の location）で返るリダイレクトを追う。
         let response = loop {
+            // 取得の前に robots.txt を判定する（追従先についても判定する）。
+            if let Some(gate) = &self.robots {
+                gate.check(&options.profile, &target)?;
+            }
             let request = HttpRequest::get(target.clone());
             let response = self.client.send_blocking(&options.profile, &request)?;
-            if hops >= options.profile.max_redirects.max(1) {
+            // `maxRedirects = 0` は「追わない」意味なので、1 hop も許可しない。
+            if hops >= options.profile.max_redirects {
                 break response;
             }
             let Ok(text) = String::from_utf8(response.body.clone()) else {

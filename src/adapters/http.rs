@@ -170,6 +170,7 @@ impl ReqwestClient {
         client: &reqwest::Client,
         profile: &NetworkProfile,
         request: &HttpRequest,
+        now: chrono::DateTime<chrono::Utc>,
     ) -> Result<HttpResponse, AppError> {
         let mut builder = match request.method.to_ascii_uppercase().as_str() {
             "POST" => client.post(request.url.clone()),
@@ -209,24 +210,45 @@ impl ReqwestClient {
             })
             .collect();
 
-        if profile.redirect_policy == RedirectPolicy::Manual
-            && let Some(location) = response.headers().get("location")
-        {
-            let target = String::from_utf8_lossy(location.as_bytes()).to_string();
-            if let Ok(next) = request.url.join(&target) {
-                return Ok(HttpResponse {
-                    status,
-                    final_url: next,
-                    headers,
-                    body: Vec::new(),
-                    truncated: false,
-                    redirects: 1,
-                });
+        // 3xx: ポリシーに従う。`manual` は追わずに `Location` を渡す。
+        if (300..400).contains(&status) {
+            match profile.redirect_policy {
+                RedirectPolicy::Never => return Err(redirect_error(status)),
+                RedirectPolicy::Manual => {
+                    if let Some(location) = response.headers().get("location") {
+                        let target = String::from_utf8_lossy(location.as_bytes()).to_string();
+                        if let Ok(next) = request.url.join(&target) {
+                            return Ok(HttpResponse {
+                                status,
+                                final_url: next,
+                                headers,
+                                body: Vec::new(),
+                                truncated: false,
+                                redirects: 1,
+                            });
+                        }
+                    }
+                    // `Location` が解決できない 3xx は追えないのでエラーにする。
+                    return Err(AppError::with_detail(
+                        ErrorCode::E2004,
+                        format!("HTTP {status}（Location を解決できない）"),
+                    )
+                    .status(status));
+                }
+                // `follow` は reqwest が追う。追いきれなかった分だけが残る。
+                RedirectPolicy::Follow => {
+                    let max = profile.max_redirects;
+                    return Err(AppError::with_detail(
+                        ErrorCode::E2004,
+                        format!("HTTP {status}（{max} 回まで追従する設定で追いきれない）"),
+                    )
+                    .status(status));
+                }
             }
         }
 
         if status >= 400 {
-            return Err(http_status_error(status, &headers));
+            return Err(http_status_error(status, &headers, now));
         }
 
         // サイズ上限を意識して読み込む
@@ -336,20 +358,42 @@ fn map_reqwest_error(err: reqwest::Error, request: &HttpRequest) -> AppError {
     AppError::with_detail(ErrorCode::E2001, format!("{host}: {text}"))
 }
 
-fn http_status_error(status: u16, headers: &[(String, String)]) -> AppError {
-    let retry_after = headers
+/// 応答ヘッダから `Retry-After` を取り出す（reqwest が名を小文字に揃えている）。
+fn retry_after_header(headers: &[(String, String)]) -> Option<&str> {
+    headers
         .iter()
         .find(|(k, _)| k == "retry-after")
-        .map(|(_, v)| v.clone());
+        .map(|(_, v)| v.trim())
+        .filter(|v| !v.is_empty())
+}
+
+fn http_status_error(
+    status: u16,
+    headers: &[(String, String)],
+    now: chrono::DateTime<chrono::Utc>,
+) -> AppError {
+    let retry_after = retry_after_header(headers);
     let detail = match retry_after {
         Some(v) => format!("HTTP {status}（Retry-After: {v}）"),
         None => format!("HTTP {status}"),
     };
+    let wait_ms = retry_after.and_then(|v| crate::core::retry::parse_retry_after_ms(v, now));
+    let with_meta = |err: AppError| err.retry_after_ms(wait_ms).status(status);
     match status {
-        429 | 403 => AppError::with_detail(ErrorCode::E4003, detail),
-        408 => AppError::with_detail(ErrorCode::E2002, detail),
-        _ => AppError::with_detail(ErrorCode::E2003, detail),
+        429 | 403 => with_meta(AppError::with_detail(ErrorCode::E4003, detail)),
+        408 => with_meta(AppError::with_detail(ErrorCode::E2002, detail)),
+        _ => with_meta(AppError::with_detail(ErrorCode::E2003, detail)),
     }
+}
+
+/// `redirectPolicy` に従って 3xx を処理する（仕様 network.md §8.3）。
+fn redirect_error(status: u16) -> AppError {
+    AppError::with_detail(
+        ErrorCode::E2003,
+        format!("HTTP {status}（リダイレクトを許可しない: redirectPolicy=never）"),
+    )
+    .status(status)
+    .hint("`network.redirectPolicy` を `follow` にするか、最終 URL を直接指定する")
 }
 
 impl HttpClient for ReqwestClient {
@@ -369,21 +413,32 @@ impl HttpClient for ReqwestClient {
         for attempt in 0..attempts {
             if attempt > 0 {
                 let jitter = self.clock.monotonic_ns();
-                let wait = profile.retry.backoff(attempt, jitter);
+                let wait = retry_wait(profile, last_error.as_ref(), attempt, jitter);
                 if wait > 0 {
                     self.clock.sleep(Duration::from_millis(wait));
                 }
             }
             self.wait_interval(profile, &host);
 
+            let now = self.clock.now_utc();
             let outcome = self
                 .runtime
-                .block_on(Self::send_once(&client, profile, request));
+                .block_on(Self::send_once(&client, profile, request, now));
             match outcome {
                 Ok(response) => return Ok(response),
                 Err(err) => {
-                    let retryable = retryable(profile, &err);
-                    if !retryable {
+                    // `Retry-After` が `maxBackoffMs` を超える場合は、長時間の
+                    // 沈黙を避けるため再試行せずに `E4003` で打ち切る
+                    // （仕様 network.md §3）。
+                    if profile.retry.respect_retry_after
+                        && crate::core::retry::exceeds(
+                            err.retry_after_ms,
+                            profile.retry.max_backoff_ms,
+                        )
+                    {
+                        return Err(too_long_wait_error(&err));
+                    }
+                    if !retryable(profile, &err) {
                         return Err(err);
                     }
                     last_error = Some(err);
@@ -418,16 +473,42 @@ fn retryable(profile: &NetworkProfile, err: &AppError) -> bool {
             .any(|e| matches!(e.as_str(), "timeout" | "connect")),
         ErrorCode::E4003 => true,
         ErrorCode::E2003 => {
-            let status = err
-                .detail
-                .as_deref()
-                .and_then(|d| d.split_whitespace().nth(1))
-                .and_then(|s| s.parse::<u16>().ok())
-                .unwrap_or(0);
+            // 状態番号は詳細文の解析ではなくエラーが持つ値を使う
+            // （詳細文には `Retry-After` などが混ざり解析できないため）。
+            let status = err.status.unwrap_or(0);
             profile.retry.on_status.contains(&status)
         }
         _ => false,
     }
+}
+
+/// 次の再試行までの待機時間（ms）。
+///
+/// `respectRetryAfter` が真で `Retry-After` を解釈できている場合は、その値を
+/// そのまま使う（揺らぎは加えない）。それ以外は指数バックオフと揺らぎ。
+fn retry_wait(
+    profile: &NetworkProfile,
+    last_error: Option<&AppError>,
+    attempt: u32,
+    jitter: u64,
+) -> u64 {
+    if profile.retry.respect_retry_after
+        && let Some(ms) = last_error.and_then(|e| e.retry_after_ms)
+    {
+        return ms;
+    }
+    profile.retry.backoff(attempt, jitter)
+}
+
+/// 待機が長すぎるために再試行を打ち切る旨のエラー（仕様 network.md §3）。
+fn too_long_wait_error(err: &AppError) -> AppError {
+    let wait = err.retry_after_ms.unwrap_or_default();
+    AppError::with_detail(
+        ErrorCode::E4003,
+        format!("再試行に {wait} ms の待機が必要なため打ち切った"),
+    )
+    .hint("`network.retry.maxBackoffMs` を広げるか、時間を置いて再実行する")
+    .warnings(err.warnings.clone())
 }
 
 /// プロファイルの危険設定を警告へ変換する。
@@ -465,11 +546,33 @@ pub fn redact_for_display(url: &Url, secrets: &[String]) -> String {
 mod tests {
     use super::*;
 
+    fn fixed_now() -> chrono::DateTime<chrono::Utc> {
+        use chrono::TimeZone;
+        chrono::Utc.with_ymd_and_hms(2026, 11, 14, 0, 0, 0).unwrap()
+    }
+
     #[test]
     fn status_errors_map_to_codes() {
-        assert_eq!(http_status_error(429, &[]).code, ErrorCode::E4003);
-        assert_eq!(http_status_error(500, &[]).code, ErrorCode::E2003);
-        assert_eq!(http_status_error(408, &[]).code, ErrorCode::E2002);
+        let now = fixed_now();
+        assert_eq!(http_status_error(429, &[], now).code, ErrorCode::E4003);
+        assert_eq!(http_status_error(500, &[], now).code, ErrorCode::E2003);
+        assert_eq!(http_status_error(408, &[], now).code, ErrorCode::E2002);
+    }
+
+    #[test]
+    fn status_errors_carry_retry_after() {
+        let now = fixed_now();
+        let headers = vec![("retry-after".to_string(), "120".to_string())];
+        let err = http_status_error(429, &headers, now);
+        assert_eq!(err.retry_after_ms, Some(120_000));
+    }
+
+    #[test]
+    fn unparsable_retry_after_is_ignored() {
+        let now = fixed_now();
+        let headers = vec![("retry-after".to_string(), "soon".to_string())];
+        let err = http_status_error(503, &headers, now);
+        assert_eq!(err.retry_after_ms, None);
     }
 
     #[test]
@@ -495,11 +598,21 @@ mod tests {
         ));
         assert!(retryable(
             &NetworkProfile::default(),
-            &AppError::with_detail(ErrorCode::E2003, "HTTP 503")
+            &AppError::with_detail(ErrorCode::E2003, "HTTP 503").status(503)
         ));
         assert!(!retryable(
             &NetworkProfile::default(),
-            &AppError::with_detail(ErrorCode::E2003, "HTTP 404")
+            &AppError::with_detail(ErrorCode::E2003, "HTTP 404").status(404)
+        ));
+        // 詳細文に `Retry-After` が混ざっても状態番号で判定する
+        assert!(retryable(
+            &NetworkProfile::default(),
+            &AppError::with_detail(ErrorCode::E2003, "HTTP 503（Retry-After: 1）").status(503)
+        ));
+        // 状態番号が無い場合は再試行しない（解析に頼らない）
+        assert!(!retryable(
+            &NetworkProfile::default(),
+            &AppError::with_detail(ErrorCode::E2003, "HTTP 503（Retry-After: 1）")
         ));
     }
 }
