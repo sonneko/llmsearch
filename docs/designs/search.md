@@ -18,7 +18,9 @@
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`run_with_fallback` は `for def in chain { match search_once(def).await { Ok(v) => return Ok(v.with_engine(def)), Err(e) if e.is_fallbackable() => continue, Err(e) => return Err(e) } }` の形にする。`is_fallbackable()` は `Provider { kind: NoResults | Blocked }` のみ `true` を返す（`E2xxx` は含めない）。マージは `search.merge=true` のとき `tokio::join!` ではなく逐次に実行し、レート制限を守る。
+`usecases::search::run` は `search.merge=true` なら `run_merge`、そうでなければ `run_fallback` に分岐する（`candidate_engines` がどちらの連鎖を作るかも同じ条件で決める）。`run_fallback` は候補を順に試し、`ports::classify(&err) == FallbackClass::RetryOtherEngine`（`E4001` / `E4003` / `E4004`）のときだけ次の候補へ進む。`E2xxx` を含む他は即座に返す。
+
+`run_merge` は `search.engines` を列挙順に逐次呼び、成功したエンジンの結果だけを集めて `core::search::merge_round_robin` で統合する。並列送信はしない（レート制限を守るため）。`search.merge=true` かつ `search.engines` が空の設定は `Settings::validate()` が `E1004` とするため、`run_merge` には空で入らない（防御的に空なら `E4002`）。
 
 ### 1.3 送信の制約
 

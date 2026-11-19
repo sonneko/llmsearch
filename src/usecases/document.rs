@@ -53,7 +53,8 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
 
     let options = FetchOptions {
         refresh: app.refresh,
-        no_cache: app.no_cache,
+        // `cache.enabled=false`（環境変数 `LLMSEARCH_NO_CACHE=1`）も「読み書きしない」
+        no_cache: app.no_cache || !app.settings.cache.enabled,
         extract_mode: crate::core::convert::ExtractMode::Density,
         ttl_hours: app.settings.cache.ttl_hours,
         profile: app.network.clone(),

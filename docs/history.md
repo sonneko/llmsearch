@@ -223,3 +223,56 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
 - 設計判断: 消費は `pending` に積み、**操作が成功したときだけ** `Guard::consume_all` で永続化する。全ての候補が失敗した場合は `pending` を捨てるため消費は 0 のままになる（仕様 `quotas.md` §3.2）。次に試すエンジンの判定は `guard.check(Searches, pending.searches + 1)` のように「既に送った分 + これから送る 1 回」で行う。
 - 仕様: `REF:docs/specifications/quotas.md` §2.2 / §3.1 / §3.2。`history show` は本文を再出力しない（メタデータと記録のみ）ため消費しないことを明記した（従来の「`chars` のみ加算」は実装と矛盾していた）。
 - 検査: `REF:tests/m7.rs`（`outline` で `chars` を消費しない / `read` で消費する / フィルタ前の件数 / フォールバックで 2 回 / 全滅で 0 回）と実バイナリでの 3 ケース（`outline` で `fetches=1, chars=0` → `read` で `chars=46` → 追加の `read` で `chars=91`）。
+
+### [HIST:SPEC-FIX:F011] 2026-11-19 `config show/path/init` を仕様へ適合させる
+[HIST-TAG: category=SPEC-FIX id=F011 topics=config,show,path,init,origin,issues-11]
+
+- 症状: `config show` は 8 キーのみで由来（`argv` / `env` / `file` / `default`）を出さず、`config path` は状態ディレクトリと同梱 `settings.json` の 2 行のみ、`config init` は `settings.json` しか書き出さなかった（Issue #11。仕様 §7.1〜§7.3 違反）。
+- 対応: `REF:src/usecases/config.rs` に `describe` / `paths` / `init` の 3 関数を置き、表示の組み立てを UI からユースケースへ移した。`ConfigRow { key, value, origin, source }` と `PathRow { label, path, used }` を返し、`REF:src/ui/render.rs` は整形だけを行う。
+- 設計判断: 由来は「マージ後の値からは復元できない」ため、読み込んだ `settings.json` の生 JSON を再帰走査してキーの有無を確かめる。`--config` / `LLMSEARCH_CONFIG` は全キーについて `argv` / `env` を優先する。`$ref` の解決先も `resolved.sources` に入るため `file` の根拠になる。
+- 設計判断: `config path` は「読んだファイル」と「存在しない候補」を同じ一覧に並べ、`[使用]` / `[候補]` で区別する（仕様 §7.2 の「存在しない候補もあわせて表示する」）。並びは設定 → 資源（network / filters / quota）→ エンジン → 状態ディレクトリ。
+- 設計判断: `config init` は 4 ファイルのうち既存のものを飛ばして残りを書き出す（1 つの既存ファイルで全部を諦めない）。飛ばしたパスは表示し、終了コードは `0`。`--force` で全上書き。
+- 仕様: `REF:docs/specifications/configuration.md` §7.1〜§7.3。
+- 検査: `REF:tests/m8.rs`（由来 4 種の判定・`[候補]` の表示・4 ファイルの雛形・既存ファイルの保持）。
+
+### [HIST:SPEC-FIX:F012] 2026-11-19 `quota reset` を履歴に記録する
+[HIST-TAG: category=SPEC-FIX id=F012 topics=quota,reset,history,audit,issues-19]
+
+- 症状: `quota reset` は `counters.reset(scope)` のみで履歴を残さず、「誰がいつ何をリセットしたか」を追えなかった（Issue #19。仕様 §6.1 違反）。
+- 対応: `REF:src/ui/commands.rs` の `run_quota` に `record_quota_reset` を追加し、`EventType::Quota` のレコードを 1 件追記する。`payload` は `action=reset` / `scope` / `policy` / `note`、`cost` はリセット前、`remaining` はリセット後の消費量。
+- 設計判断: リセット前の値はリセット前に `Counters` から読み、リセット後の値は読み直さずに「スコープに応じて 0 になった項目」を差分で求める（同じ読み込みを 2 回しない）。
+- 設計判断: 履歴の追記に失敗してもリセットは成功として扱い、`Reporter::warn` で 1 行通知する。監査の失敗で解除を巻き戻すと、上限に張り付いたまま操作できなくなるため。
+- 副次修正: リセット前後の値は「リセットした単位」の消費量を採る（`session` / `day` / `window` / `total`）。単位の違う計測値を足し合わせると、`scope=day` の記録にセッションと累積の分まで乗り、実バイナリの確認で 2 クエリ分が 6 と表示された。
+- 副次修正: `cache.enabled=false`（`LLMSEARCH_NO_CACHE=1` を含む）を本文キャッシュの読み書きへ実際に反映した（従来は `--no-cache` だけが効いていた）。
+- 仕様: `REF:docs/specifications/quotas.md` §6.1、`REF:docs/specifications/errors.md` §3。
+- 検査: `REF:tests/m8.rs`（`quota reset` 後の履歴レコードの種別・`scope`・ポリシー ID・`cost` / `remaining`）。
+
+### [HIST:SPEC-FIX:F013] 2026-11-19 設定探索順を直し、`LLMSEARCH_CONFIG` を実装する
+[HIST-TAG: category=SPEC-FIX id=F013 topics=config,search-path,env,llmsearch-config,issues-20]
+
+- 症状: `candidate_paths` が「利用者設定 → 状態ディレクトリ」の順で畳み込んでいたため、仕様 §2.3 と逆（状態ディレクトリが弱い）になっていた。`LLMSEARCH_CONFIG` は未実装で `--config` だけが効いた。仕様 §4 の環境変数の多くが未実装で、逆に仕様表に無い変数（`LLMSEARCH_SEARCH_LIMIT` 等）が実装されていた（Issue #20）。
+- 対応: `candidate_paths` を「利用者設定 → 状態ディレクトリ」の順（後勝ちの畳み込みで状態ディレクトリが強い）に直し、`LLMSEARCH_CONFIG` を優先度 2 として追加した。指定先が存在しない場合は `E1003`（黙って既定値へ落ちない）。
+- 対応: 状態ディレクトリ配下の資源（`network/` など）と `settings.json` の位置を揃え、`config init` の書き出し先と一致させた。
+- 対応: 環境変数表を仕様へ反映した（`LLMSEARCH_FILTERS` と既存の `LLMSEARCH_SEARCH_*` などを追記）。解釈できない数値・真偽値は捨てずに `E1004` とした（従来は黙って無視）。
+- 設計判断: 探索順の判定は「候補の並び」と「畳み込みの向き」を 1 か所（`candidate_paths` と `load`）に閉じ、ユーザー設定ディレクトリは読めた場合だけ重ねる。指示の有無（`--config` / `LLMSEARCH_CONFIG`）と存在しない状態を混同しない。
+- 仕様: `REF:docs/specifications/configuration.md` §2.3 / §4。
+- 検査: `REF:tests/m8.rs`（状態ディレクトリが利用者設定を上書きする・`LLMSEARCH_CONFIG` が効く・不在で `E1003`・不正値で `E1004`）。
+
+### [HIST:SPEC-FIX:F014] 2026-11-19 `search.merge` のラウンドロビン統合を実装する
+[HIST-TAG: category=SPEC-FIX id=F014 topics=search,merge,round-robin,quota,issues-22]
+
+- 症状: `core::search::merge_round_robin` に呼び出し元が無く、`search.merge=true` でも `candidate_engines` の最初の成功で return していたため、実質フォールバックとして動いていた（Issue #22。仕様 §7.4 違反）。
+- 対応: `REF:src/usecases/search.rs` を `run_fallback` / `run_merge` に分けた。`run_merge` は `search.engines` を列挙順に逐次呼び、成功した結果を `merge_round_robin` で交互に統合する。重複 URL の除去件数は `W4005`、由来エンジンは `engine` に付し、`id` / `rank` は統合後に 1 回だけ振り直す。
+- 設計判断: 一部のエンジンが失敗しても 1 つでも結果があれば成功として返し、失敗はエラーコード付きの警告 1 行にする。全滅時のみ最初のエラー（無ければ `E4001`）を返す。フォールバックは適用しない（列挙が利用者の意思であるため）。
+- 設計判断: クォータは送信した回数だけ `searches` を消費し、`results` は各エンジンのフィルタ前件数の合計とする。統合結果を返す以上は操作として成功であり、失敗した送信も消費に含める（`quotas.md` §3.2 の「操作が成功した場合は送った回数だけ」）。
+- 設計判断: `search.merge=true` かつ `search.engines` が空の設定は `Settings::validate()` が `E1004` とする（既存の検証を維持）。`run_merge` は防御的に空なら `E4002`。
+- 仕様: `REF:docs/specifications/engine-definitions.md` §7.4、`REF:docs/specifications/search.md` §1.2。フォールバックの警告コードの記述が実装（`W4003`）と食い違っていたため `W4005` から `W4003` へ直した。
+- 検査: `REF:tests/m8.rs`（交互の順序・重複除去・由来エンジン・一部失敗時の継続・全滅時のエラー・クォータの送信回数）。
+
+### [HIST:DECISION:D030] 2026-11-19 設定・状態ディレクトリ配下の配置を仕様どおりに揃える
+[HIST-TAG: category=DECISION id=D030 topics=state-dir,config,layout,migration]
+
+- 背景: 状態ディレクトリ側の `settings.json` を `config/settings.json`、資源を `config/network/` に置いていたが、仕様 `REF:docs/specifications/configuration.md` §2.3 は「状態ディレクトリの `settings.json`」、§7.3 は `network/default.json` を状態ディレクトリ直下の兄弟として書くよう求めており、`config init` の書き出し先とも食い違っていた。
+- 決定: `<state.dir>/settings.json`, `<state.dir>/network/`, `<state.dir>/filters/`, `<state.dir>/quotas/`, `<state.dir>/engines/` に統一した（探索と書き出しの両方）。
+- 影響: 旧配置（`<state.dir>/config/settings.json`）に置いた利用者設定は読まれなくなる。`config init` が新しい位置へ雛形を書くため、移行は「`config show` の由来が `default` になっているキーを `config init` の雛形へ移す」手順になる。リリース前（v0.1.1 未満）の開発経緯内の変更であり、旧配置を読む互換コードは残さない（探索順を二重に持つと `config path` の表示が曖昧になるため）。
+- 検査: `REF:tests/m8.rs` の探索順・`config path`・`config init` の各ケースと実バイナリでの確認。

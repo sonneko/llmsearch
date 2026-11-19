@@ -46,9 +46,11 @@
 
 ### 2.3 探索順
 
-状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
+状態: 実装完了（REF:src/adapters/config/mod.rs）
 
-`locate_config(cli: Option<&Path>, env: &Env) -> Vec<PathBuf>` が候補を返す。存在しない候補も `config path` 用に保持する。`--config` 不在時は即座に `E1003`。
+`candidate_paths(env, options) -> Vec<PathBuf>` が弱い順（後ろほど優先）に候補を返す。順序は「利用者設定ディレクトリの `settings.json`」→「状態ディレクトリの `settings.json`」で、`LLMSEARCH_CONFIG` があればその 1 件だけ、`--config` があればその 1 件だけを返す。`--config` / `LLMSEARCH_CONFIG` の指定先が存在しない場合は既存の候補へ落とさず `E1003` を返す。存在しない候補も `config path` 用に保持する。
+
+状態ディレクトリのパスは `state_dir(env, explicit)`（`--state-dir` → `LLMSEARCH_STATE_DIR` → `state.home`）で解決し、`settings.json` はその直下に置く（`config/settings.json` ではない）。`network/` などの資源ディレクトリも同じ基準（`<state.dir>/network/`）とする。`LoadedSettings` は読み込んだ `sources` を優先順（弱い→強い）で保持し、`config show` の由来表示に使う。
 
 ---
 
@@ -108,9 +110,19 @@
 
 ## 4. 環境変数
 
-状態: 実装完了（REF:src/usecases/config.rs）
+状態: 実装完了（REF:src/usecases/config.rs, REF:src/ui/cli.rs, REF:src/adapters/config/mod.rs）
 
-`src/usecases/config.rs` が写像表を持ち、`Value` を組み立ててマージ層に渡す。真偽値は `1`/`true`/`0`/`false` のみ受理し、他は `E1004`。`LLMSEARCH_ENGINES_DIR` は `std::env::split_paths` で分解する。
+`src/usecases/config.rs` の `env_overrides(env)` が 1 つの写像表（`(変数名, キー, 種別)`）を持ち、`Value` を組み立ててマージ層へ渡す。由来の表示（`config show` / `config explain`）も同じ表の `env_keys()` を参照し、表の二重管理を避ける。真偽値は `1`/`true`/`0`/`false` のみ受理する。数値・真偽値として解釈できない値は、その変数を黙って捨てずに `E1004`（キー・指定値・許容範囲）として返す。
+
+設定ファイルへ落とせない変数は経路を分ける。
+
+- `LLMSEARCH_CONFIG`: `adapters::config::candidate_paths` が探索順 2 番目として扱う。
+- `LLMSEARCH_STATE_DIR`: `adapters::config::state_dir` が解決する。
+- `LLMSEARCH_ENGINE` / `LLMSEARCH_NETWORK` / `LLMSEARCH_FILTERS` / `LLMSEARCH_QUOTA`: 参照 ID の解決（`resolve_network` / `resolve_filters` / `resolve_quota` と `usecases::config::build` の既定エンジン解決）で引く。
+- `LLMSEARCH_ENGINES_DIR`: `std::env::split_paths`（`Env` 経由）で分解し、`--engines-dir` の後ろへ連結する。
+- `LLMSEARCH_NO_CACHE`: `cache.enabled` の逆として `env_overrides` に入れる。`--no-cache` も同じキーを上書きする。
+- `LLMSEARCH_TIMEOUT_MS` / `LLMSEARCH_USER_AGENT`: 設定 `network` がインライン定義のときだけ `settings.network` のインライン値へ重ねる（ID 参照のときは解決後の `NetworkProfile` へ上書きする）。空の `LLMSEARCH_USER_AGENT` は `E1004`。
+- `NO_COLOR` / `LLMSEARCH_UI_COLOR`: `ui.color` へ写す。`NO_COLOR` が最優先。
 
 ---
 
@@ -174,21 +186,29 @@
 
 ### 7.1 `config show`
 
-状態: 実装完了（REF:src/ui/render.rs）
+状態: 実装完了（REF:src/usecases/config.rs, REF:src/ui/render.rs）
 
-由来は `Origin`（`Default` / `Profile` / `File` / `Env` / `Argv`）として保持し、`src/ui/render.rs` が「キー / 値 / 由来」を 3 列で描画する。`secrets` に解決済みの値は表示しない。
+`usecases::config::describe(app, resolved) -> Vec<ConfigRow>` が全キーを 1 か所で組み立てる。`ConfigRow { key, value, origin, source }` の `origin` は `Origin`（`Argument` / `Env(String)` / `File(PathBuf)` / `Default`）で、`source` は由来の補足（環境変数名・ファイルパス）である。
+
+由来の決定は「引数 → 環境変数 → 読み込んだファイル（`resolved.sources` のうち当該キーを含む最も強いもの）→ 既定」の順に判定する。ファイル由来の判定は、読み込み時にキーごとの由来を記録するのではなく、`settings.json` の生 JSON を再帰的に走査してキーの存在を確かめる（マージ後の型では由来が失われるため）。`--config` / `LLMSEARCH_CONFIG` は全キーに優先する。
+
+`apiKey` 等の秘匿値と `value_env` の解決値は `value` に載せず `***` とする（`core::secret::Secrets` の値をそのまま表示しない）。`--json` では `values` の各要素に `key` / `value` / `origin` / `source` を出す。
 
 ### 7.2 `config path`
 
-状態: 実装完了（REF:src/ui/render.rs）
+状態: 実装完了（REF:src/usecases/config.rs, REF:src/ui/render.rs）
 
-`ConfigPaths { settings, network_dir, filters_dir, quotas_dir, engines_dirs, state_dir }` を `src/ui/render.rs` が 1 行 1 件で表示する。
+`usecases::config::paths(app, resolved) -> Vec<PathRow>` が `PathRow { label, path, used }` を返す。`used` は実際に読み込んだ（または使用する）パスで、`false` は「存在しない候補」を表す。並びは `settings.json` の探索候補 → `network` / `filters` / `quota`（解決ファイルと探索ディレクトリ候補）→ エンジン定義ディレクトリ → 状態ディレクトリと配下の実ファイル（履歴・カウンタ・セッション・文書・robots）。
+
+`src/ui/render.rs` は `[使用]` / `[候補]` の接頭辞を付けて 1 行 1 件で表示する。`--json` では `paths` に `label` / `path` / `used` を持つ配列を出す。
 
 ### 7.3 `config init`
 
-状態: 実装完了（REF:src/adapters/config/mod.rs）
+状態: 実装完了（REF:src/usecases/config.rs, REF:src/adapters/config/mod.rs）
 
-雛形は `src/adapters/config/mod.rs` に `&'static str` として置き、`include_str!` で `assets/config/*.json` を埋め込む。既存ファイルは `--force` が無ければ `E1004`。
+雛形は `include_str!` で `assets/config/settings.json`、`assets/network/default.json`、`assets/filters/default.json`、`assets/quotas/default.json` を埋め込み、`usecases::config::init(state_dir, force) -> InitReport` が 4 ファイルを書き出す。`InitReport` は「書き出したパス」と「既存のため飛ばしたパス」を持つ。
+
+`--force` が無いときに既存ファイルがあっても、他のファイルの書き出しは続ける（4 ファイルのうち 1 つあるだけで全部を諦めない）。既存を飛ばした場合は `E1004` ではなく通常終了とし、飛ばしたパスを表示して利用者に `--force` を案内する。書き出しは `write_atomic` を使う。
 
 ### 7.4 `config validate`
 
@@ -198,6 +218,6 @@
 
 ### 7.5 `config explain <key>`
 
-状態: 実装完了（REF:src/ui/render.rs）
+状態: 実装完了（REF:src/usecases/config.rs, REF:src/ui/render.rs）
 
-`ResolvedSettings` が保持する `origins: BTreeMap<String, Origin>` からキーを引き、`src/ui/render.rs` が 1 行で表示する。キーが存在しない場合は `E1004` と近いキー名の候補を返す。
+`usecases::config::explain(app, resolved, env, key)` が `describe` の該当行から値と由来を返し、`src/ui/render.rs` が 1 行で表示する。キーが存在しない場合は `E1004` と、`describe` のキー一覧から編集距離の近い候補を `details` に付す。`config show` と同じ由来判定を使う（表示の食い違いを作らない）。
