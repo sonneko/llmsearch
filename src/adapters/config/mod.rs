@@ -16,8 +16,15 @@ pub struct LoadedSettings {
     pub settings: Settings,
     /// 読み込んだファイル（後ろほど優先）。
     pub sources: Vec<PathBuf>,
+    /// 読み込んだファイルと、その内容（`sources` と同じ順）。
+    ///
+    /// 由来（`file`）の判定に使う。マージ後の型からはどのファイルが
+    /// キーを指定したかを復元できないため、生の JSON を保持する。
+    pub layers: Vec<(PathBuf, Value)>,
     /// 設定ディレクトリ（`network/` などの兄弟）。
     pub base_dir: PathBuf,
+    /// 探索したすべての候補（存在しないものを含む。弱い順）。
+    pub candidates: Vec<PathBuf>,
 }
 
 /// 読み込みのオプション。
@@ -30,10 +37,11 @@ pub struct LoadOptions {
 
 /// 既定の探索順で設定を読み込む。
 pub fn load(env: &dyn Env, options: &LoadOptions) -> Result<LoadedSettings, AppError> {
-    let candidates = candidate_paths(env, options);
+    let candidates = candidate_paths(env, options)?;
     let mut merged = serde_json::to_value(Settings::default())
         .map_err(|e| AppError::with_detail(ErrorCode::E1003, format!("既定値: {e}")))?;
     let mut sources = Vec::new();
+    let mut layers = Vec::new();
     let mut base_dir = PathBuf::from(".");
 
     for path in &candidates {
@@ -47,8 +55,9 @@ pub fn load(env: &dyn Env, options: &LoadOptions) -> Result<LoadedSettings, AppE
             &mut std::collections::HashSet::new(),
             &read_json,
         )?;
-        merge_json(&mut merged, value);
+        merge_json(&mut merged, value.clone());
         sources.push(path.clone());
+        layers.push((path.clone(), value));
         base_dir = path
             .parent()
             .map(Path::to_path_buf)
@@ -64,30 +73,70 @@ pub fn load(env: &dyn Env, options: &LoadOptions) -> Result<LoadedSettings, AppE
     Ok(LoadedSettings {
         settings,
         sources,
+        layers,
         base_dir,
+        candidates,
     })
 }
 
-fn candidate_paths(env: &dyn Env, options: &LoadOptions) -> Vec<PathBuf> {
+/// 設定の探索候補（弱い順。後ろほど優先）。
+///
+/// `--config` と `LLMSEARCH_CONFIG` は「そのファイルだけを使う」指定であり、
+/// 指定先が無い場合は既定値へ落とさず `E1003` を返す（仕様 §2.3）。
+fn candidate_paths(env: &dyn Env, options: &LoadOptions) -> Result<Vec<PathBuf>, AppError> {
     if let Some(path) = &options.config_path {
-        return vec![path.clone()];
+        if !path.is_file() {
+            return Err(AppError::with_detail(
+                ErrorCode::E1003,
+                format!("--config の指定先が無い: {}", path.display()),
+            ));
+        }
+        return Ok(vec![path.clone()]);
+    }
+    if let Some(raw) = env.var("LLMSEARCH_CONFIG") {
+        let path = PathBuf::from(&raw);
+        if !path.is_file() {
+            return Err(AppError::with_detail(
+                ErrorCode::E1003,
+                format!("LLMSEARCH_CONFIG の指定先が無い: {raw}"),
+            ));
+        }
+        return Ok(vec![path]);
     }
     let mut out = Vec::new();
+    // 強い順は「状態ディレクトリ → 利用者設定ディレクトリ」なので、
+    // 後勝ちで畳み込むこの一覧では利用者設定を先に置く。
     if let Some(dir) = env.config_home() {
         out.push(dir.join("llmsearch/settings.json"));
     }
     if let Some(dir) = state_dir(env, None) {
-        out.push(dir.join("config/settings.json"));
+        out.push(dir.join("settings.json"));
     }
-    out
+    Ok(out)
 }
 
 /// 状態ディレクトリを解決する。
+///
+/// 優先順は `--state-dir` → `LLMSEARCH_STATE_DIR` → 設定 `state.dir` →
+/// `state.home`。`settings` は設定 `state.dir` を評価するときにだけ渡す
+/// （設定の読み込み自体が状態ディレクトリを必要とするため、ここでは引数で受ける）。
 pub fn state_dir(env: &dyn Env, explicit: Option<&Path>) -> Option<PathBuf> {
+    state_dir_with(env, explicit, None)
+}
+
+/// `state.dir` を加味した状態ディレクトリの解決。
+pub fn state_dir_with(
+    env: &dyn Env,
+    explicit: Option<&Path>,
+    configured: Option<&str>,
+) -> Option<PathBuf> {
     if let Some(dir) = explicit {
         return Some(dir.to_path_buf());
     }
     if let Some(dir) = env.var("LLMSEARCH_STATE_DIR") {
+        return Some(PathBuf::from(dir));
+    }
+    if let Some(dir) = configured.filter(|d| !d.trim().is_empty()) {
         return Some(PathBuf::from(dir));
     }
     env.state_home().map(|d| d.join("llmsearch"))
@@ -143,7 +192,7 @@ pub fn resolve_resource_dir(
     let mut out = Vec::new();
     out.push(base_dir.join(subdir));
     if let Some(state) = state_dir(env, None) {
-        out.push(state.join("config").join(subdir));
+        out.push(state.join(subdir));
     }
     if let Some(config) = env.config_home() {
         out.push(config.join("llmsearch").join(subdir));

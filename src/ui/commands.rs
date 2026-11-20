@@ -1035,7 +1035,16 @@ fn run_quota(
                     "--yes が必要".to_string(),
                 ));
             }
+            let before = app.counters.load().ok();
             app.counters.reset(scope)?;
+            let after = app.counters.load().ok();
+            // 仕様 quotas.md §6.1: 誰がいつ何をリセットしたかを履歴に残す。
+            if let Err(err) = record_quota_reset(app, scope, before, after) {
+                app.reporter.warn(&crate::core::errors::Diagnostic::new(
+                    crate::core::errors::WarningCode::W5001,
+                    format!("クォータのリセットを履歴に記録できなかった: {err}"),
+                ));
+            }
             if renderer.json {
                 done(renderer, "quota reset", format!("scope={scope}"));
             } else {
@@ -1104,41 +1113,112 @@ fn run_quota(
     }
 }
 
+/// `quota reset` を履歴に記録する（仕様 quotas.md §6.1）。
+///
+/// `cost` にリセット前、`remaining` にリセット後の消費量を入れる。値は
+/// リセットした単位（`session` / `day` / `window` / `total`）のものを取り、
+/// 単位が違う計測値を混ぜて二重に数えない。
+fn record_quota_reset(
+    app: &App,
+    scope: &str,
+    before: Option<crate::core::config::quota::Counters>,
+    after: Option<crate::core::config::quota::Counters>,
+) -> Result<(), AppError> {
+    use crate::core::config::quota::{Counters, Usage};
+    use crate::core::history::{Cost, EventType, HistoryEntry};
+
+    /// スコープに対応する消費量。
+    fn usage_for(counters: &Counters, scope: &str) -> Usage {
+        match scope {
+            "session" => counters.session,
+            "day" => counters.day,
+            "window" => {
+                let mut sum = Usage::default();
+                for w in &counters.window {
+                    sum.searches += w.used.searches;
+                    sum.fetches += w.used.fetches;
+                    sum.results += w.used.results;
+                    sum.chars += w.used.chars;
+                }
+                sum
+            }
+            // `total` と `all` は累積値で代表させる
+            _ => counters.total,
+        }
+    }
+    fn to_cost(u: Usage) -> Cost {
+        Cost {
+            searches: u.searches,
+            fetches: u.fetches,
+            results: u.results,
+            chars: u.chars,
+        }
+    }
+
+    let before = before.unwrap_or_default();
+    let after = after.unwrap_or_default();
+    let mut entry = HistoryEntry::new(
+        app.history.next_id().unwrap_or_else(|_| "H?".to_string()),
+        app.clock.now_utc(),
+        app.current_session_id(),
+        EventType::Quota,
+        json!({
+            "action": "reset",
+            "scope": scope,
+            "policy": app.quota.id,
+            "note": format!("quota reset ({scope})"),
+        }),
+    );
+    entry.cost = Some(to_cost(usage_for(&before, scope)));
+    entry.remaining = Some(to_cost(usage_for(&after, scope)));
+    app.history.append(&entry)
+}
+
 fn run_config(
     app: &mut App,
     renderer: &Renderer,
     resolved: &crate::usecases::config::Resolved,
     action: &Option<ConfigAction>,
 ) -> Result<i32, AppError> {
+    use crate::usecases::config as config_uc;
     match action {
         None | Some(ConfigAction::Show) => {
-            let rows = crate::usecases::config::describe(app);
+            let rows = config_uc::describe(app, resolved);
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "config",
                     json!({
-                        "values": rows.iter().map(|(k, v)| json!({"key": k, "value": v}))
-                            .collect::<Vec<_>>(),
+                        "values": rows.iter().map(|row| json!({
+                            "key": row.key,
+                            "value": row.value,
+                            "origin": row.origin.kind(),
+                            "source": row.source,
+                        })).collect::<Vec<_>>(),
                     }),
                 ));
                 done(renderer, "config show", format!("{} 件", rows.len()));
             } else {
-                for (k, v) in rows {
-                    renderer.out(&format!("{k:<20} {v}"));
+                for row in &rows {
+                    renderer.out(&format!(
+                        "{:<26} {:<10} {}",
+                        row.key,
+                        row.origin.label(),
+                        row.value
+                    ));
                 }
             }
             Ok(0)
         }
         Some(ConfigAction::Explain { key }) => {
-            let (value, origin) =
-                crate::usecases::config::explain(app, resolved, app.env.as_ref(), key)?;
+            let (value, origin) = config_uc::explain(app, resolved, app.env.as_ref(), key)?;
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "config",
                     json!({
                         "key": key,
                         "value": value,
-                        "origin": origin.label(),
+                        "origin": origin.kind(),
+                        "source": origin.label(),
                     }),
                 ));
                 done(renderer, "config explain", key.clone());
@@ -1148,35 +1228,52 @@ fn run_config(
             Ok(0)
         }
         Some(ConfigAction::Path) => {
-            let paths = [
-                app.paths.root.display().to_string(),
-                app.bundled
-                    .join("config/settings.json")
-                    .display()
-                    .to_string(),
-            ];
+            let rows = config_uc::paths(app, resolved);
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "config",
                     json!({
-                        "paths": paths,
+                        "paths": rows.iter().map(|row| json!({
+                            "label": row.label,
+                            "path": row.path.display().to_string(),
+                            "used": row.used,
+                        })).collect::<Vec<_>>(),
                     }),
                 ));
-                done(renderer, "config path", paths.len().to_string());
+                done(renderer, "config path", rows.len().to_string());
             } else {
-                for path in &paths {
-                    renderer.out(path);
+                for row in &rows {
+                    let mark = if row.used { "[使用]" } else { "[候補]" };
+                    renderer.out(&format!("{mark} {:<10} {}", row.label, row.path.display()));
                 }
             }
             Ok(0)
         }
         Some(ConfigAction::Init { force }) => {
-            let target = app.paths.root.join("config/settings.json");
-            crate::usecases::config::write_settings(&target, &app.settings, *force)?;
+            let report = config_uc::init(&app.paths.root, *force)?;
             if renderer.json {
-                done(renderer, "config init", target.display().to_string());
+                renderer.event(&renderer.envelope(
+                    "config",
+                    json!({
+                        "written": report.written.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+                        "skipped": report.skipped.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
+                    }),
+                ));
+                done(
+                    renderer,
+                    "config init",
+                    format!("{} 件", report.written.len()),
+                );
             } else {
-                renderer.out(&format!("{} を書き出した", target.display()));
+                for path in &report.written {
+                    renderer.out(&format!("{} を書き出した", path.display()));
+                }
+                for path in &report.skipped {
+                    renderer.out(&format!(
+                        "{} は既に存在するため書き出さない（--force で上書き）",
+                        path.display()
+                    ));
+                }
             }
             Ok(0)
         }

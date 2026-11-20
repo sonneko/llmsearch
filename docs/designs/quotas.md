@@ -144,9 +144,11 @@
 
 ### 6.1 履歴への記録
 
-状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
+状態: 実装完了（REF:src/ui/commands.rs, REF:src/core/history.rs）
 
-`HistoryEvent` に `cost: Usage` と `remaining: Vec<MetricUsage>` を持たせる。イベント生成は `usecases::history::record` が 1 か所で行う。
+消費を伴う操作は `HistoryEntry` の `cost` / `remaining` に消費量と残量を入れて記録する。`quota reset` は `EventType::Quota` の 1 レコードとして `src/ui/commands.rs` の `record_quota_reset` が記録する。`payload` は `{ "action": "reset", "scope": ..., "policy": ..., "note": ... }` とし、`cost` にリセット前、`remaining` にリセット後の消費量を入れる（`Cost` は 4 項目のため、`MetricUsage` の一覧は `payload` に入れない）。
+
+リセット前の値は `Counters` から読み、`app.counters.reset(scope)` の直後に記録する。履歴の追記に失敗してもリセットは成功として扱い、`Reporter::warn` で 1 行通知する（監査の失敗で解除を巻き戻すと、上限に張り付いたまま操作できなくなるため）。`scope` の解釈は `CounterStore::reset` と同じ語（`session` / `day` / `window` / `total` / それ以外は全体）を用いる。
 
 ### 6.2 改変の検出
 

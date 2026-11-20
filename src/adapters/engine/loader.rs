@@ -22,8 +22,12 @@ pub fn engine_dirs(
     extra: &[PathBuf],
 ) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = extra.to_vec();
+    // `LLMSEARCH_ENGINES_DIR` は `--engines-dir` の後ろへ連結する（仕様 §7.1）。
+    if let Some(raw) = env.var("LLMSEARCH_ENGINES_DIR") {
+        out.extend(std::env::split_paths(std::ffi::OsStr::new(&raw)));
+    }
     if let Some(state) = crate::adapters::config::state_dir(env, None) {
-        out.push(state.join("config/engines"));
+        out.push(state.join("engines"));
     }
     if let Some(config) = env.config_home() {
         out.push(config.join("llmsearch/engines"));

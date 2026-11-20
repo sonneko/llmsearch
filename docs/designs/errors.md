@@ -82,7 +82,7 @@
 | `W4004` | `adapters/engine/eval.rs` |
 | `W4005` | `REF:src/core/search.rs` |
 | `W4006` | `REF:src/core/search.rs`, `REF:src/usecases/search.rs` |
-| `W5001` | `adapters/state/session_store.rs`, `counters_store.rs` |
+| `W5001` | `adapters/state/session_store.rs`, `counters_store.rs`, `REF:src/ui/commands.rs`（クォータ解除の履歴記録失敗） |
 | `W5002` | `usecases/state/cleanup.rs` |
 | `W5004` | `adapters/state/history_jsonl.rs` |
 | `W5005` | `usecases/guard/quota.rs` |
