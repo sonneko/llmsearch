@@ -183,9 +183,11 @@
 
 ### 7.4 複数エンジンのマージ（任意機能）
 
-状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
+状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`core/search/merge.rs` の `round_robin_merge(per_engine: Vec<Vec<SearchHit>>) -> Vec<SearchHit>` は純粋関数。URL の正規形をキーに `HashSet` で重複を除去し、`engine` フィールドを付す。識別子の付与はマージ後に 1 回だけ行い、連番を保証する。
+`src/core/search.rs` の `merge_round_robin(lists: Vec<Vec<RawHit>>, engines: &[String]) -> (Vec<RawHit>, Vec<String>, usize)` は純粋関数。各エンジンの結果を 1 件ずつ順に取り出し、URL の正規形（`url::dedup_key`）をキーに `HashSet` で重複を除去して、由来エンジン名を並べて返す。識別子の付与はマージ後に `assign_ids` で 1 回だけ行い、連番を保証する。
+
+`usecases::search::run` は `search.merge=true` のとき `run_merge` へ分岐する。`run_merge` は `search.engines` を列挙順に逐次呼び、各エンジンの結果を集めて `merge_round_robin` に渡す。失敗したエンジンはエラーコード付きの警告 1 行に変換して捨て、全滅した場合だけ最初のエラーを返す。`pending.searches` には成功・失敗にかかわらず送信回数を積み、統合結果を返すときに `Guard::consume_all` で確定する（`quotas.md` §3.2）。既存の `candidate_engines` はマージ時に `search.engines` をそのまま返す（フォールバックの連鎖は作らない）。
 
 ---
 

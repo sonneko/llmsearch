@@ -39,7 +39,17 @@ fn main() {
         ));
     }
 
-    let mut overrides = config_uc::env_overrides(deps.1.as_ref());
+    let mut overrides = match config_uc::env_overrides(deps.1.as_ref()) {
+        Ok(overrides) => overrides,
+        Err(err) => {
+            renderer.error(&err);
+            std::process::exit(err.exit_code());
+        }
+    };
+    if cli.global.no_cache {
+        overrides.retain(|(k, _)| k != "cache.enabled");
+        overrides.push(("cache.enabled".to_string(), serde_json::json!(false)));
+    }
     if cli.global.no_filter {
         overrides.retain(|(k, _)| k != "filters");
     }

@@ -48,11 +48,13 @@
 ### 2.3 探索順
 
 1. `--config <path>` で明示指定（不在は `E1003`）
-2. 環境変数 `LLMSEARCH_CONFIG`
-3. 状態ディレクトリの `settings.json`
+2. 環境変数 `LLMSEARCH_CONFIG`（不在は `E1003`）
+3. 状態ディレクトリの `settings.json`（`<state.dir>/settings.json`）
 4. 利用者設定ディレクトリの `settings.json`（`~/.config/llmsearch/settings.json` 等）
 
-読み込んだパスは `config show` と `--verbose` に表示する。ファイルが 1 つも無い場合は既定値で動作し、`config init` で雛形を生成できる。
+3 と 4 は下に行くほど弱く、1 と 2 は「そのファイルだけを使う」指定である。3・4 が両方存在する場合は 3 を先に読み、4 を深いマージで上書きする（結果として 3 が強い）。3・4 が存在しない場合は読み飛ばす。
+
+読み込んだパスは `config show` と `--verbose` に表示する。ファイルが 1 つも無い場合は既定値で動作し、`config init` で雛形を生成できる。読み込みの対象は `settings.json` だけでなく、`settings.json` が `$ref` で参照するファイル、`network` / `filters` / `quota` の ID 参照で解決したファイル、エンジン定義を含む。
 
 ---
 
@@ -139,16 +141,26 @@
 
 | 変数 | 対応する設定 | 備考 |
 |---|---|---|
-| `LLMSEARCH_CONFIG` | 設定ファイルのパス | |
+| `LLMSEARCH_CONFIG` | 設定ファイルのパス | §2.3 の探索順 2 番目 |
 | `LLMSEARCH_STATE_DIR` | `state.dir` | |
 | `LLMSEARCH_ENGINE` | `search.engine` | |
 | `LLMSEARCH_NETWORK` | `network` | プロファイル ID |
-| `LLMSEARCH_NO_CACHE` | `cache.enabled` | `1` で無効 |
+| `LLMSEARCH_FILTERS` | `filters` | フィルタ集合 ID |
 | `LLMSEARCH_QUOTA` | `quota` | ポリシー ID |
-| `LLMSEARCH_TIMEOUT_MS` | ネットワークプロファイルの `timeoutTotalMs` | |
-| `LLMSEARCH_USER_AGENT` | ネットワークプロファイルの `userAgent` | |
+| `LLMSEARCH_NO_CACHE` | `cache.enabled` | `1` で無効（`0` で有効） |
+| `LLMSEARCH_TIMEOUT_MS` | ネットワークプロファイルの `timeoutTotalMs` | 正の整数（ms） |
+| `LLMSEARCH_USER_AGENT` | ネットワークプロファイルの `userAgent` | 空文字は `E1004` |
 | `LLMSEARCH_ENGINES_DIR` | エンジン定義の追加探索ディレクトリ | パス区切りで複数指定可 |
-| `NO_COLOR` | `ui.color` | 設定時は `never` |
+| `LLMSEARCH_SEARCH_LIMIT` | `search.limit` | 整数 |
+| `LLMSEARCH_SEARCH_MAX_RESULTS` | `search.maxResults` | 整数 |
+| `LLMSEARCH_CONTEXT_MAX_CHARS` | `context.maxChars` | 整数 |
+| `LLMSEARCH_CONTEXT_OUTLINE_DEPTH` | `context.outlineDepth` | 整数 |
+| `LLMSEARCH_HISTORY_ENABLED` | `history.enabled` | `1` / `0` / `true` / `false` |
+| `LLMSEARCH_UI_LOCALE` | `ui.locale` | `ja` / `en` |
+| `LLMSEARCH_UI_COLOR` | `ui.color` | `auto` / `always` / `never` |
+| `NO_COLOR` | `ui.color` | 設定時は `never`。`LLMSEARCH_UI_COLOR` より強い |
+
+`LLMSEARCH_CONFIG` は「そのファイルだけを使う」指定であり、指定先が存在しない場合は `E1003` で停止する（黙って既定値へ落ちない）。数値・真偽値として解釈できない値は、その変数を無視せず `E1004` として扱い、キーのパス・指定値・許容範囲を示す。
 
 認証情報の環境変数名はエンジン定義側で宣言する（`value_env`）。本ツールはその名前を列挙せず、値も保持しない。
 
@@ -195,15 +207,35 @@ JSON の解析に失敗した場合、行・桁と理由を表示して終了す
 
 ### 7.1 `config show`
 
-有効な設定を、由来（`default` / `profile` / `file` / `env` / `argv`）とともに表示する。認証情報と `value_env` の参照先の値は表示しない。
+有効な設定を、由来（`default` / `file` / `env` / `argv`）とともに表示する。対象は次のキーである。
+
+- `settings.json` の全キー（`schemaVersion` を除く。`search.*`, `context.*`, `cache.*`, `history.*`, `session.*`, `ui.*`, `state.*`）
+- `network` / `filters` / `quota`（解決後の ID）と、その解決元ファイル
+- `search.engine`（解決後のエンジン）、`state.dir`（解決後の状態ディレクトリ）、`engines.dir`（エンジン定義の探索先）
+
+由来は次の 4 種類とする。上位ほど強い（§2.1）。
+
+| 由来 | 意味 |
+|---|---|
+| `argv` | コマンドライン引数（`--config` / `--engine` / `--network` / `--filters` / `--quota` / `--state-dir` / `--engines-dir`） |
+| `env` | 環境変数（変数名を併記する） |
+| `file` | 設定ファイル（パスを併記する。`$ref` の解決先も含む） |
+| `default` | 同梱の既定値 |
+
+キーごとに 1 行で「キー / 値 / 由来」を表示する。認証情報と `value_env` の参照先の値は表示しない（値の代わりに `***` とする）。`--json` では `values` の各要素に `key` / `value` / `origin` / `source` を持つ。
 
 ### 7.2 `config path`
 
-読み込んだ各設定ファイルのパス、エンジン定義ディレクトリ、状態ディレクトリを表示する。存在しない候補もあわせて表示する。
+次を 1 行 1 件で表示する。読み込んだファイルと、読み込まなかった候補（存在しない探索先）の双方を含み、状態（`[使用]` / `[候補]`）を付す。
+
+1. `settings.json` の探索候補（`--config` / `LLMSEARCH_CONFIG` / 状態ディレクトリ / 利用者設定ディレクトリの順）
+2. `network` / `filters` / `quota` の解決に使ったファイルと、その探索ディレクトリの候補
+3. エンジン定義ディレクトリの探索候補（`--engines-dir` / `LLMSEARCH_ENGINES_DIR` / 状態ディレクトリ / 利用者設定ディレクトリ / 同梱）
+4. 状態ディレクトリと、履歴・カウンタ・文書キャッシュ・セッション・robots キャッシュの実パス
 
 ### 7.3 `config init`
 
-`settings.json`、`network/default.json`、`filters/default.json`、`quotas/default.json` の雛形を書き出す。既存ファイルがある場合は上書きせず、`--force` 指定時のみ上書きする。
+`settings.json`、`network/default.json`、`filters/default.json`、`quotas/default.json` の 4 ファイルの雛形を、状態ディレクトリ配下の対応する位置（`settings.json`, `network/`, `filters/`, `quotas/`）へ書き出す。既存ファイルがある場合はそのファイルだけを上書きせず、残りを書き出したうえで上書きしなかったパスを表示する。`--force` 指定時のみすべて上書きする。書き出す内容は同梱アセット（既定値）と同一とし、`schemaVersion` を含む。
 
 ### 7.4 `config validate`
 

@@ -11,11 +11,11 @@ Web を人間のように段階的に調べ、LLM のコンテキスト消費を
 配布物（Linux x86_64）は [Releases](https://github.com/sonneko/llmsearch/releases/latest) から取得する。
 
 ```bash
-curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
-curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
-sha256sum -c llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
-tar xzf llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
-./llmsearch-v0.1.1-x86_64-unknown-linux-gnu/llmsearch doctor
+curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.2-x86_64-unknown-linux-gnu.tar.gz
+curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.2-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c llmsearch-v0.1.2-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar xzf llmsearch-v0.1.2-x86_64-unknown-linux-gnu.tar.gz
+./llmsearch-v0.1.2-x86_64-unknown-linux-gnu/llmsearch doctor
 ```
 
 ソースからビルドする場合。
@@ -48,13 +48,13 @@ cargo build --release
 初回は同梱の既定値だけで動く。ユーザー設定を作る場合は次のいずれか。
 
 ```bash
-llmsearch config path        # 設定ファイルの探索先を表示する
-llmsearch config init        # 雛形を書き出す（既存ファイルがあれば --force が必要）
-llmsearch config show        # 解決後の値と由来を表示する
+llmsearch config path        # 設定ファイルの探索先（存在しない候補も）を表示する
+llmsearch config init        # settings/network/filters/quotas の 4 ファイルの雛形を書き出す
+llmsearch config show        # 全キーの値と由来（argv / env / file / default）を表示する
 llmsearch config explain search.limit   # 個別のキーを説明する
 ```
 
-状態ディレクトリ（セッション・履歴・文書キャッシュ）は既定で `~/.local/state/llmsearch`。
+状態ディレクトリ（セッション・履歴・文書キャッシュ・`settings.json`）は既定で `~/.local/state/llmsearch`。設定の探索は「`--config` → `LLMSEARCH_CONFIG` → 状態ディレクトリの `settings.json` → `~/.config/llmsearch/settings.json`」の順に強く、`LLMSEARCH_ENGINE` / `LLMSEARCH_NETWORK` / `LLMSEARCH_FILTERS` / `LLMSEARCH_QUOTA` / `LLMSEARCH_NO_CACHE` / `LLMSEARCH_TIMEOUT_MS` / `LLMSEARCH_USER_AGENT` / `NO_COLOR` などの環境変数で上書きできる。
 
 ## 典型的な使い方
 
@@ -63,6 +63,7 @@ llmsearch search "気候変動 適応策"        # 1 ページ 7 件を検索
 llmsearch outline https://example.jp/doc  # 見出し一覧（本文は出さない）
 llmsearch read https://example.jp/doc --section D1:S3   # 節だけを読む
 llmsearch read https://example.jp/doc --section D1:S3-D2:S1 --max-chars 4000
+llmsearch quota reset --scope day --yes   # クォータを解除する（実行は履歴に残る）
 llmsearch next --session <searchで得たID>     # 同じクエリの次ページ
 llmsearch refine "気候変動 適応策 自治体" --session <searchで得たID>  # 検索語を修正
 ```
@@ -100,7 +101,8 @@ API キーは JSON に書かず `value_env` で環境変数名を参照する。
 
 ## 制限と注意
 
-- クォータ既定: セッション 50 検索 / 60 分あたり 120 検索 / 日次 500 検索。超過すると `E5005` で停止する（`llmsearch quota show` で残量確認）。
+- クォータ既定: セッション 50 検索 / 60 分あたり 120 検索 / 日次 500 検索。超過すると `E5005` で停止する（`llmsearch quota show` で残量確認、`llmsearch quota reset --scope day --yes` で解除。解除の実行は履歴に残る）。
+- `search.merge=true` と `search.engines` を設定すると、複数エンジンの結果を 1 件ずつ交互に統合する（重複は URL で除去し、由来は `engine` に残る）。
 - 取得は http/https のみ、5 MiB 上限、リダイレクト 5 回まで、タイムアウト 5 秒 / 20 秒。
 - 抽出した本文は `[untrusted] <url>` を付けて出し、指示文として解釈しない。
 
@@ -122,7 +124,8 @@ python3 docs/script/verify-docs.py
 | `tests/contract.rs` | JSON 定義（エンジン・フィルタ・クォータ・設定）の契約 |
 | `tests/integration.rs` | 検索→取得→アウトライン→節読みの一連の流れ |
 | `tests/proxy.rs` / `tests/tls.rs` | ローカルの fixture サーバに対するプロキシ・TLS の挙動 |
-| `tests/m5.rs` / `tests/e2e.rs` | 実バイナリを起動する受け入れ確認（e2e は実ネットワークを使うため既定では実行しない） |
+| `tests/m5.rs`〜`tests/m8.rs` | M5〜M8 で直した挙動の回帰（CLI・JSON・取得作法・設定・統合） |
+| `tests/e2e.rs` | 実バイナリを起動する受け入れ確認（実ネットワークを使うため既定では実行しない） |
 
 実ネットワークを使う E2E は既定で実行しない。動かす場合は次のとおり。
 

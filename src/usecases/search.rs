@@ -48,94 +48,189 @@ pub fn prepare_query(input: &str) -> Result<(String, Vec<Diagnostic>), AppError>
 }
 
 /// 検索を実行する（ページ指定あり）。
+///
+/// `search.merge=true` のときは全エンジンへ送ってラウンドロビン統合し、
+/// そうでなければフォールバックの連鎖として実行する。
 pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppError> {
-    let (query, mut warnings) = prepare_query(query)?;
-    let limit = app.settings.search.limit.max(1);
-    let limit_u32 = limit as u32;
+    let (query, warnings) = prepare_query(query)?;
 
     // セッションを確定してからクォータを判定する（セッション単位の上限のため）
     let session_id = app.ensure_session()?;
     app.set_session(session_id);
 
-    // クォータ確認（送信前に判定し、成功後に消費する）
+    if app.settings.search.merge {
+        run_merge(app, &query, page, warnings)
+    } else {
+        run_fallback(app, &query, page, warnings)
+    }
+}
+
+/// 1 エンジン分の検索（正規化・重複除去まで済ませた生の結果）。
+struct EngineOutcome {
+    def: EngineDef,
+    /// エンジン定義の累積上限（`limits.maxResults` / `paging.maxResults`）。
+    max_results: usize,
+    hits: Vec<search_core::RawHit>,
+    /// フィルタ前の取得件数。
+    obtained: usize,
+    /// 送信した回数（抽出結果 0 件による再送を含む）。
+    requests: u32,
+    warnings: Vec<Diagnostic>,
+}
+
+/// エンジンを 1 つ呼び、結果を正規化する（重複除去・リダイレクト展開まで）。
+fn search_once(
+    app: &App,
+    def: &EngineDef,
+    query: &str,
+    page: u32,
+    limit: u32,
+) -> Result<EngineOutcome, AppError> {
+    let call = call_engine(app, def, query, page, limit)?;
+    let mut warnings: Vec<Diagnostic> = Vec::new();
+    let hits = call.outcome.hits;
+    if call.outcome.items_seen == 0 && hits.is_empty() {
+        return Err(AppError::with_detail(
+            ErrorCode::E4001,
+            format!("{query} / {}", def.selector()),
+        ));
+    }
+
+    // 抽出でリダイレクトを解けなかった結果をここで解く（取得時に
+    // エンジン側のページを読んでしまうのを防ぐ）
+    let (hits, unwrapped, example) = search_core::unwrap_redirects(hits);
+    if unwrapped > 0 {
+        warnings.push(Diagnostic::new(
+            WarningCode::W4006,
+            match &example {
+                Some(first) => {
+                    format!("エンジンのリダイレクト URL を {unwrapped} 件展開した（例: {first}）")
+                }
+                None => format!("エンジンのリダイレクト URL を {unwrapped} 件展開した"),
+            },
+        ));
+    }
+    let (deduped, removed) = search_core::dedup(hits);
+    if removed > 0 {
+        warnings.push(Diagnostic::new(
+            WarningCode::W4005,
+            format!("重複 URL を {removed} 件除去した"),
+        ));
+    }
+    warnings.extend(call.outcome.warnings.iter().cloned());
+    Ok(EngineOutcome {
+        def: def.clone(),
+        max_results: def.max_results(app.settings.search.max_results),
+        obtained: deduped.len(),
+        hits: deduped,
+        requests: call.requests,
+        warnings,
+    })
+}
+
+/// フィルタを適用し、1 ページ分に切り出して結果を組み立てる。
+#[allow(clippy::too_many_arguments)]
+fn finish(
+    app: &App,
+    query: &str,
+    page: u32,
+    limit: usize,
+    raw: Vec<search_core::RawHit>,
+    owners: Vec<String>,
+    _obtained: usize,
+    max_results: usize,
+    engine: String,
+    fallback_from: Option<String>,
+    mut warnings: Vec<Diagnostic>,
+) -> SearchOutcome {
+    let now = app.clock.today_local();
+    let assigned = search_core::assign_ids(raw, 1, &owners);
+    let (kept, filtered) =
+        crate::core::config::filter::apply_results(&app.filters, assigned, now, app.no_filter);
+    let truncated_by_limit = kept.len().saturating_sub(limit);
+    let page_hits: Vec<SearchHit> = kept.into_iter().take(limit).collect();
+
+    let max_results = max_results.max(limit);
+    let has_more = page_hits.len() == limit && (page as usize) * limit < max_results;
+
+    if let Some(from) = &fallback_from {
+        warnings.push(Diagnostic::new(
+            WarningCode::W4003,
+            format!("{from} の代わりに {engine} を使用した"),
+        ));
+    }
+
+    SearchOutcome {
+        query: query.to_string(),
+        hits: page_hits,
+        engine,
+        fallback_from,
+        filtered,
+        truncated_by_limit,
+        page: PageState {
+            page,
+            next_page: page + 1,
+            exhausted: !has_more,
+        },
+        has_more,
+        warnings,
+    }
+}
+
+/// フォールバックの連鎖（`search.merge=false`）。
+fn run_fallback(
+    app: &mut App,
+    query: &str,
+    page: u32,
+    mut warnings: Vec<Diagnostic>,
+) -> Result<SearchOutcome, AppError> {
+    let limit = app.settings.search.limit.max(1);
+    let limit_u32 = limit as u32;
     let mut guard = app.guard()?;
     guard.check(Metric::Searches, 1)?;
 
     let candidates = candidate_engines(app)?;
     let mut last_error: Option<AppError> = None;
     let mut used_fallback: Option<String> = None;
+    // 送信した回数（フォールバックで試したエンジン数だけ増える）。
+    // 操作が成功したときだけ `consume_all` で永続化する（仕様 quotas.md §3.2）。
+    let mut pending = Usage::default();
 
     for (index, selector) in candidates.iter().enumerate() {
         let Some(def) = app.engines.get(selector) else {
             continue;
         };
-        match call_engine(app, def, &query, page, limit_u32) {
+        // これから送る 1 回分を含めて判定する（送った分は未消費のため）。
+        guard.check(Metric::Searches, pending.searches + 1)?;
+        match search_once(app, def, query, page, limit_u32) {
             Ok(call) => {
-                let engine_call = call;
-                let hits = engine_call.outcome.hits;
                 if index > 0 {
                     used_fallback = Some(candidates[0].clone());
                 }
-                if engine_call.outcome.items_seen == 0 && hits.is_empty() {
-                    return Err(AppError::with_detail(
-                        ErrorCode::E4001,
-                        format!("{query} / {}", def.selector()),
-                    ));
-                }
-
-                // 抽出でリダイレクトを解けなかった結果をここで解く（取得時に
-                // エンジン側のページを読んでしまうのを防ぐ）
-                let (hits, unwrapped, example) = search_core::unwrap_redirects(hits);
-                if unwrapped > 0 {
-                    warnings.push(Diagnostic::new(
-                        WarningCode::W4006,
-                        match &example {
-                            Some(first) => format!(
-                                "エンジンのリダイレクト URL を {unwrapped} 件展開した（例: {first}）"
-                            ),
-                            None => format!("エンジンのリダイレクト URL を {unwrapped} 件展開した"),
-                        },
-                    ));
-                }
-                let (deduped, removed) = search_core::dedup(hits);
-                let raw_hits = deduped;
-                if removed > 0 {
-                    warnings.push(Diagnostic::new(
-                        WarningCode::W4005,
-                        format!("重複 URL を {removed} 件除去した"),
-                    ));
-                }
-
-                let now = app.clock.today_local();
-                let engines: Vec<String> = vec![def.selector(); raw_hits.len()];
-                let assigned = search_core::assign_ids(raw_hits, 1, &engines);
-                let (kept, filtered) = crate::core::config::filter::apply_results(
-                    &app.filters,
-                    assigned,
-                    now,
-                    app.no_filter,
-                );
-                let truncated_by_limit = kept.len().saturating_sub(limit);
-                let page_hits: Vec<SearchHit> = kept.into_iter().take(limit).collect();
-
-                let has_more = page_hits.len() == limit
-                    && (page as usize) * limit < def.max_results(app.settings.search.max_results);
-
                 // 消費量の確定（クォータ）
-                let usage = Usage {
-                    searches: 1,
-                    results: page_hits.len() as u64,
-                    chars: page_hits
-                        .iter()
-                        .map(|h| {
-                            (text::chars(&h.title)
-                                + h.snippet.as_deref().map(text::chars).unwrap_or(0))
-                                as u64
-                        })
-                        .sum(),
-                    ..Default::default()
-                };
-                guard.consume_all(usage)?;
+                // `searches` は送信した回数（同一エンジン内の再送も合算）。
+                // `results` はフィルタ前の取得件数。`chars` は `read` でのみ
+                // 消費するため、ここでは加算しない（仕様 quotas.md §2.2 / §3.1）。
+                pending.searches += call.requests.max(1) as u64;
+                pending.results += call.obtained as u64;
+                guard.consume_all(pending)?;
+
+                warnings.extend(call.warnings.iter().cloned());
+                let engine = call.def.selector();
+                let owners: Vec<String> = vec![engine.clone(); call.hits.len()];
+                let outcome = finish(
+                    app,
+                    query,
+                    page,
+                    limit,
+                    call.hits,
+                    owners,
+                    call.obtained,
+                    call.max_results,
+                    engine.clone(),
+                    used_fallback.clone(),
+                    warnings,
+                );
 
                 // 履歴
                 let entry = crate::core::history::HistoryEntry::new(
@@ -146,39 +241,17 @@ pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppEr
                     serde_json::json!({
                         "query": query,
                         "page": page,
-                        "results": page_hits.len(),
-                        "filtered": filtered.removed,
+                        "results": outcome.hits.len(),
+                        "filtered": outcome.filtered.removed,
+                        "engine": engine,
                     }),
                 );
                 let _ = app.history.append(&entry);
-
-                let page_state = PageState {
-                    page,
-                    next_page: page + 1,
-                    exhausted: !has_more,
-                };
-
-                if let Some(from) = &used_fallback {
-                    warnings.push(Diagnostic::new(
-                        WarningCode::W4003,
-                        format!("{from} の代わりに {} を使用した", def.selector()),
-                    ));
-                }
-                warnings.extend(engine_call.outcome.warnings.iter().cloned());
-
-                return Ok(SearchOutcome {
-                    query: query.clone(),
-                    hits: page_hits,
-                    engine: def.selector(),
-                    fallback_from: used_fallback,
-                    filtered,
-                    truncated_by_limit,
-                    page: page_state,
-                    has_more,
-                    warnings,
-                });
+                return Ok(outcome);
             }
             Err(err) => {
+                // 送信しているので 1 回として数える（成功時にまとめて消費する）。
+                pending.searches += 1;
                 let class = crate::ports::classify(&err);
                 if class == crate::ports::FallbackClass::RetryOtherEngine
                     && index + 1 < candidates.len()
@@ -186,11 +259,126 @@ pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppEr
                     last_error = Some(err);
                     continue;
                 }
+                // 操作全体が失敗したので `pending` は捨てる（消費しない）。
                 return Err(err);
             }
         }
     }
     Err(last_error.unwrap_or_else(|| AppError::new(ErrorCode::E4001)))
+}
+
+/// ラウンドロビン統合（`search.merge=true`。仕様 engine-definitions.md §7.4）。
+fn run_merge(
+    app: &mut App,
+    query: &str,
+    page: u32,
+    mut warnings: Vec<Diagnostic>,
+) -> Result<SearchOutcome, AppError> {
+    let limit = app.settings.search.limit.max(1);
+    let limit_u32 = limit as u32;
+    let selectors = app.settings.search.engines.clone();
+    if selectors.is_empty() {
+        // `Settings::validate()` が先に `E1004` とするが、防御的に弾く
+        return Err(AppError::with_detail(
+            ErrorCode::E4002,
+            "search.merge = true だが search.engines が空".to_string(),
+        ));
+    }
+
+    let mut guard = app.guard()?;
+    guard.check(Metric::Searches, 1)?;
+
+    let mut pending = Usage::default();
+    let mut lists: Vec<Vec<search_core::RawHit>> = Vec::new();
+    let mut owners: Vec<String> = Vec::new();
+    // フィルタ前の取得件数（各エンジンの合計。クォータの `results` 用）
+    let mut obtained = 0usize;
+    let mut first_error: Option<AppError> = None;
+
+    for selector in &selectors {
+        let Some(def) = app.engines.get(selector) else {
+            warnings.push(Diagnostic::new(
+                WarningCode::W4004,
+                format!("エンジン '{selector}' が見つからないため統合から除いた"),
+            ));
+            continue;
+        };
+        guard.check(Metric::Searches, pending.searches + 1)?;
+        match search_once(app, def, query, page, limit_u32) {
+            Ok(call) => {
+                pending.searches += call.requests.max(1) as u64;
+                pending.results += call.obtained as u64;
+                obtained += call.obtained;
+                warnings.extend(call.warnings.iter().cloned());
+                owners.push(call.def.selector());
+                lists.push(call.hits);
+            }
+            Err(err) => {
+                pending.searches += 1;
+                warnings.push(Diagnostic::new(
+                    WarningCode::W4004,
+                    format!(
+                        "{} は失敗したため統合から除いた（{}: {}）",
+                        def.selector(),
+                        err.code.as_str(),
+                        err.detail.clone().unwrap_or_default()
+                    ),
+                ));
+                if first_error.is_none() {
+                    first_error = Some(err);
+                }
+            }
+        }
+    }
+
+    if lists.iter().all(|l| l.is_empty()) {
+        // 操作全体が失敗したので消費しない（仕様 quotas.md §3.2）
+        return Err(first_error.unwrap_or_else(|| AppError::new(ErrorCode::E4001)));
+    }
+
+    let (merged, merged_owners, removed) = search_core::merge_round_robin(lists, &owners);
+    let merged_len = merged.len();
+    if removed > 0 {
+        warnings.push(Diagnostic::new(
+            WarningCode::W4005,
+            format!("マージ時に重複 URL を {removed} 件除去した"),
+        ));
+    }
+
+    guard.consume_all(pending)?;
+
+    let engine = selectors.join("+");
+    let outcome = finish(
+        app,
+        query,
+        page,
+        limit,
+        merged,
+        merged_owners,
+        obtained + merged_len,
+        app.settings.search.max_results,
+        engine.clone(),
+        None,
+        warnings,
+    );
+
+    let entry = crate::core::history::HistoryEntry::new(
+        app.history.next_id().unwrap_or_else(|_| "H?".to_string()),
+        app.clock.now_utc(),
+        app.current_session_id(),
+        crate::core::history::EventType::Search,
+        serde_json::json!({
+            "query": query,
+            "page": page,
+            "results": outcome.hits.len(),
+            "filtered": outcome.filtered.removed,
+            "engine": engine,
+            "merged": true,
+            "engines": selectors,
+        }),
+    );
+    let _ = app.history.append(&entry);
+    Ok(outcome)
 }
 
 fn candidate_engines(app: &App) -> Result<Vec<String>, AppError> {

@@ -78,13 +78,19 @@
 
 状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
 
-`Guard::consume(usage: Usage)` を各ユースケースの成功直後に 1 回だけ呼ぶ。`retry` は試行ごとに `consume(Usage::searches(1))` を呼ぶ（`adapters::http::retry` にコールバックを渡す）。
+`Guard::consume_all(usage: Usage)` を各ユースケースの成功直後に 1 回だけ呼ぶ。消費は 1 か所にまとめ、経路ごとに散らばらせない。
+
+- 検索（`REF:src/usecases/search.rs`）: 送信した回数を `Usage.searches`、得られた件数（フィルタ前）を `Usage.results` に入れる。`chars` は消費しない（仕様 §2.2 の `chars` は `read` の出力のみ）。フォールバックで複数エンジンを試した場合は、試行ごとに 1 を積む。積み上げた `Usage` はローカル変数 `pending` に保持し、**操作が成功したときだけ** `consume_all` で永続化する。そのため、次に試すエンジンの判定は `guard.check(Searches, pending.searches + 1)` のように「既に送った分 + これから送る 1 回」で行う。
+- 同一エンジン内での再送信（抽出結果 0 件による再試行。`REF:src/adapters/engine/eval.rs`）は `EngineCall.requests` として送信回数を返し、検索がそれを `searches` に合算する。
+- 取得（`REF:src/usecases/document.rs`）: `Usage.fetches` のみを消費する。取得した本文の文字数は `chars` に入れない（`outline` だけで本文の予算を減らさないため）。`chars` は `read` が出力文字数で消費する。
 
 ### 3.2 失敗時の扱い
 
 状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
 
 `guard::check` と `guard::consume` を分離することで「失敗時に消費しない」を実現する。`AppError` を返す経路では `consume` を呼ばない。
+
+フォールバックは「送信したが失敗した試行」を `pending` に積んだまま次のエンジンへ進み、最終的に成功した時点で合算して永続化する。全ての候補が失敗した場合は `pending` を捨てるため、消費は 0 のままになる（仕様 §3.2 の「操作全体が失敗した場合は消費しない」に対応）。
 
 ### 3.3 消費の記録
 
@@ -138,9 +144,11 @@
 
 ### 6.1 履歴への記録
 
-状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
+状態: 実装完了（REF:src/ui/commands.rs, REF:src/core/history.rs）
 
-`HistoryEvent` に `cost: Usage` と `remaining: Vec<MetricUsage>` を持たせる。イベント生成は `usecases::history::record` が 1 か所で行う。
+消費を伴う操作は `HistoryEntry` の `cost` / `remaining` に消費量と残量を入れて記録する。`quota reset` は `EventType::Quota` の 1 レコードとして `src/ui/commands.rs` の `record_quota_reset` が記録する。`payload` は `{ "action": "reset", "scope": ..., "policy": ..., "note": ... }` とし、`cost` にリセット前、`remaining` にリセット後の消費量を入れる（`Cost` は 4 項目のため、`MetricUsage` の一覧は `payload` に入れない）。
+
+リセット前の値は `Counters` から読み、`app.counters.reset(scope)` の直後に記録する。履歴の追記に失敗してもリセットは成功として扱い、`Reporter::warn` で 1 行通知する（監査の失敗で解除を巻き戻すと、上限に張り付いたまま操作できなくなるため）。`scope` の解釈は `CounterStore::reset` と同じ語（`session` / `day` / `window` / `total` / それ以外は全体）を用いる。
 
 ### 6.2 改変の検出
 

@@ -4,6 +4,7 @@ pub mod config;
 pub mod engine;
 pub mod extract;
 pub mod http;
+pub mod robots;
 pub mod state;
 pub mod system;
 pub mod tls;

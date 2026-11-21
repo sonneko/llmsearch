@@ -10,6 +10,7 @@ pub mod history;
 pub mod markdown;
 pub mod model;
 pub mod outline;
+pub mod retry;
 pub mod robots;
 pub mod search;
 pub mod secret;

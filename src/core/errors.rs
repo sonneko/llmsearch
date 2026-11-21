@@ -142,6 +142,10 @@ pub struct AppError {
     pub hint: Option<String>,
     /// 失敗に至る過程で出た警告（仕様 errors.md §1.2）。
     pub warnings: Vec<Diagnostic>,
+    /// `Retry-After` の解釈結果（ミリ秒）。再試行の待機時間に使う。
+    pub retry_after_ms: Option<u64>,
+    /// HTTP 応答の状態番号（あれば）。再試行判定で詳細文を解析しないために持つ。
+    pub status: Option<u16>,
 }
 
 impl AppError {
@@ -151,6 +155,8 @@ impl AppError {
             detail: None,
             hint: None,
             warnings: Vec::new(),
+            retry_after_ms: None,
+            status: None,
         }
     }
 
@@ -160,6 +166,8 @@ impl AppError {
             detail: Some(detail.into()),
             hint: None,
             warnings: Vec::new(),
+            retry_after_ms: None,
+            status: None,
         }
     }
 
@@ -176,6 +184,18 @@ impl AppError {
     /// 失敗に至る過程で出た警告を添える（表示・JSON の両方で出す）。
     pub fn warnings(mut self, warnings: Vec<Diagnostic>) -> Self {
         self.warnings = warnings;
+        self
+    }
+
+    /// `Retry-After` の解釈結果を添える（再試行の待機時間）。
+    pub fn retry_after_ms(mut self, ms: Option<u64>) -> Self {
+        self.retry_after_ms = ms;
+        self
+    }
+
+    /// HTTP 応答の状態番号を添える（再試行判定で使う）。
+    pub fn status(mut self, status: u16) -> Self {
+        self.status = Some(status);
         self
     }
 
