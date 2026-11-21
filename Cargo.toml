@@ -1,6 +1,6 @@
 [package]
 name = "llmsearch"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.90"
 description = "Web search and reading for LLMs, one deliberate step at a time (human-like browsing)"

@@ -11,11 +11,11 @@ Web を人間のように段階的に調べ、LLM のコンテキスト消費を
 配布物（Linux x86_64）は [Releases](https://github.com/sonneko/llmsearch/releases/latest) から取得する。
 
 ```bash
-curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
-curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
-sha256sum -c llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz.sha256
-tar xzf llmsearch-v0.1.1-x86_64-unknown-linux-gnu.tar.gz
-./llmsearch-v0.1.1-x86_64-unknown-linux-gnu/llmsearch doctor
+curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.2-x86_64-unknown-linux-gnu.tar.gz
+curl -LO https://github.com/sonneko/llmsearch/releases/latest/download/llmsearch-v0.1.2-x86_64-unknown-linux-gnu.tar.gz.sha256
+sha256sum -c llmsearch-v0.1.2-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar xzf llmsearch-v0.1.2-x86_64-unknown-linux-gnu.tar.gz
+./llmsearch-v0.1.2-x86_64-unknown-linux-gnu/llmsearch doctor
 ```
 
 ソースからビルドする場合。
