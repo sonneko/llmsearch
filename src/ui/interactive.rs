@@ -252,7 +252,8 @@ impl Interactive {
                 crate::core::text::truncate_display(&hit.title, title_limit)
             )
             .map_err(io_error)?;
-            writeln!(out, "     {}", hit.url).map_err(io_error)?;
+            let secrets = crate::core::secret::redaction_list(&self.app.secrets);
+            writeln!(out, "     {}", display_url(&hit.url, &secrets)).map_err(io_error)?;
             if !snippet.is_empty() {
                 writeln!(
                     out,
@@ -343,9 +344,14 @@ impl Interactive {
         for doc in &documents {
             match document::outline(&mut self.app, doc, self.depth) {
                 Ok(view) => {
-                    let text =
-                        self.renderer
-                            .outline_lines(&view.document, &view.headings, view.depth);
+                    let secrets = crate::core::secret::redaction_list(&self.app.secrets);
+                    let url = display_url(&view.document.final_url, &secrets);
+                    let text = self.renderer.outline_lines(
+                        &view.document,
+                        &url,
+                        &view.headings,
+                        view.depth,
+                    );
                     write!(out, "{text}").map_err(io_error)?;
                     if view.whole_body {
                         writeln!(out, "  （見出しが見つからない。本文全体は S0 で読めます）")
@@ -419,9 +425,10 @@ impl Interactive {
                         } else {
                             None
                         };
+                        let secrets = crate::core::secret::redaction_list(&self.app.secrets);
                         let block = self.renderer.section_block(
                             &header,
-                            &doc.final_url,
+                            &display_url(&doc.final_url, &secrets),
                             &body.text,
                             truncated,
                         );
@@ -527,4 +534,12 @@ fn read_line(input: &mut dyn BufRead) -> Result<Option<String>, AppError> {
 
 fn io_error(e: std::io::Error) -> AppError {
     AppError::with_detail(ErrorCode::E1001, format!("出力に失敗: {e}"))
+}
+
+/// 表示用 URL（秘匿パラメータを伏字化する）。
+fn display_url(url: &str, secrets: &[String]) -> String {
+    match url::Url::parse(url) {
+        Ok(parsed) => crate::core::url::redact(&parsed, secrets),
+        Err(_) => crate::core::secret::redact_text(url, secrets),
+    }
 }

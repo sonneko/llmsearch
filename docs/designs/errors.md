@@ -30,7 +30,7 @@
 
 状態: 実装完了（REF:src/core/errors.rs）
 
-発生箇所は「引数解析（`ui/cli/args.rs`）」「設定検証（`core/config/*::validate`）」「エンジン定義検証（`usecases/engines/validate`）」「入力解釈（`core/parse/`）」「対象解決（`usecases/target.rs`）」に限定する。各所は `Result<_, AppError>` を返し、`panic!` / `unwrap` を使わない（`tests/architecture.rs` で `unwrap_used` 系の clippy lint を有効化）。
+発生箇所は「引数解析（`ui/cli/args.rs`）」「設定検証（`core/config/*::validate`）」「エンジン定義検証（`usecases/engines/validate`）」「入力解釈（`core/parse/`）」「対象解決（`REF:src/ui/commands.rs` の `resolve_target`）」に限定する。各所は `Result<_, AppError>` を返し、`panic!` / `unwrap` を使わない（`tests/architecture.rs` で `unwrap_used` 系の clippy lint を有効化）。
 
 ### 2.2 ネットワークエラー（`E2xxx`）
 
@@ -104,6 +104,10 @@
 状態: 実装完了（REF:src/core/errors.rs）
 
 `enum Locale { Ja, En }` を `Settings.ui.locale` から決め、`catalog::message(code, locale)` で取得する。`&'static str` を返し、実行時に文字列を組み立てない（動的な値は `details` へ）。
+
+`AppError` の `Display` は `ui.locale` を知らないため日本語のカタログ文言を返すが、利用者に見せる文言は `Renderer::error()` が `self.locale()` で選ぶ（JSON の `message` / `hint` と標準エラーが同じ言語になる）。`doctor` や検証結果も `err.message(app.locale())` を使い、`Display` の結果を直接表示しない。個別 `hint`（`AppError::hint`）は生成側が `ui.locale` に合わせて用意し、`Renderer::error()` がカタログの定型より優先する。
+
+設定の読み込み・検証で失敗した場合は `App` が無いため `app.locale()` を使えない。`REF:src/main.rs` が `config_uc::peek_locale(config_path, env)`（`REF:src/usecases/config.rs`）で `ui.locale` だけを先読みし、`Renderer` に反映してから `build` を呼ぶ。先読みに失敗した場合は日本語のまま表示し、本来のエラーを `build` が報告する（先読みの失敗を利用者に見せない）。
 
 ### 4.3 出力先
 

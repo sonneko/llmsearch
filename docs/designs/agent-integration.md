@@ -46,11 +46,15 @@
 
 `Renderer` が注入された `Clock` から UTC 秒精度・Z 終端の日時を作る。`done` / `error` にも `session` / `at` を付与する。検索・参照成功時とエラー処理時に現行セッションを Renderer に反映する。セッション作成前は空文字を使う。コマンド間の `--session` 引き継ぎとイベント形式は `REF:tests/m5.rs` で実プロセス検証する。
 
+警告の載せ方は 2 経路ある。各ハンドラが `crate::ui::render::warnings_json(&diagnostics)` で `warnings[]` を組み立てる経路（`search` / `next` / `refine` / `document` / `outline`）と、`Renderer::error()` が `AppError::warnings` を `error` イベントへ写す経路である。どちらも空配列を必ず出す（キーの有無で警告の有無を推測させない）。
+
 ### 2.2 イベント種別
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/ui/commands.rs）
 
 イベントは `Renderer::envelope(event, fields)` が共通枠（`v` / `event` / `session` / `at`）を付け、`Renderer::event()` が 1 行に出力する。種別ごとのフィールドは `src/ui/commands.rs` の各ハンドラが `json!` で組み立てる。共通枠を 1 か所で足すため、ハンドラ側で `v` / `session` / `at` を書き漏らす事故が起きない（`session` は呼び出し側で明示した値があればそれを使う）。種別名は `search` / `next` / `refine` / `document` / `outline` / `content` / `history` / `engines` / `engine` / `network` / `filters` / `config` / `quota` / `diagnostics` / `done` / `error`。各イベントの必須フィールドは `tests/contract/json_schema.rs` と `REF:tests/m5.rs` で検証する。
+
+`--json` の応答性は「生テキストを標準出力へ出さない」ことを不変条件にする。`engines show` / `engines test` / `network show` / `filters show` / `config *` / `quota *` / `history export` は `renderer.json` で分岐し、必ずイベントと `done` を出す（`REF:tests/m9.rs`）。`engines list` の `apiKey` は表示用の日本語文ではなく `not-required` / `configured` / `missing` の識別子とし、参照する環境変数名は `apiKeyEnvs` に分ける（`REF:src/usecases/engines.rs`）。
 
 ### 2.3 結果オブジェクト
 
@@ -74,7 +78,7 @@
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
 
-`QuotaView { metrics: Vec<MetricView> }`、`MetricView { name, used, limit: Option<u64>, resets_at: Option<String> }`。`limit` が未設定（無制限）の項目も必ず含め、`limit: null` とする（項目の有無で判断させない）。
+`QuotaView { metrics: Vec<MetricView> }`、`MetricView { name, used, limit: Option<u64>, resets_at: Option<String> }`。`limit` が未設定（無制限）の項目も必ず含め、`limit: null` とする（項目の有無で判断させない）。`resets_at` は `2026-11-22T00:00 local` の形（`src/core/config/quota.rs` の `format!` で組み立てる。日次・窓の判定が端末ローカル日付のため、UTC の `Z` 終端にはしない）。
 
 ### 2.7 エラーオブジェクト
 
@@ -130,9 +134,11 @@
 
 JSON 生成の直前に `crate::core::url::redact()`（`REF:src/core/url.rs`）を通す。`SecretString` は `Serialize` を実装しないため、誤って出力経路に載せるとコンパイルエラーになる。
 
-設定値を値として直接書いた場合（`TmplValue::Explicit`）は表示時に漏れるため、定義を JSON で出す経路（`engines show` / `network show`）では `crate::core::secret::redact_json()` を通す。`value_env`（環境変数名）は秘匿値ではないので残す。取得用の URL はセッション内の実体をそのまま保持し、表示・JSON には伏字化した `url` を出す。
+設定値を値として直接書いた場合（`TmplValue::Explicit`）は表示時に漏れるため、定義を JSON で出す経路（`engines show` / `network show` / `filters show`）では `crate::core::secret::redact_json()` を通す。`--raw` の定義ダンプも同じ基準で伏せる。`value_env`（環境変数名）は秘匿値ではないので残す。取得用の URL はセッション内の実体をそのまま保持し、表示・JSON には伏字化した `url` を出す。
 
-送信エラーの文字列（`E2001` / `E2002` / `E2004` の `details`）には URL や認証値が混ざるため、`crate::core::secret::redact_text()` を通してから表示する（`REF:src/adapters/http.rs`）。
+検索結果・文書の表示 URL は `src/ui/commands.rs` の `display_url(url, secrets)` を必ず通す。`display_url` は URL として解釈できれば `crate::core::url::redact()`（クエリの秘匿パラメータ名、およびパス中の `名前=値` を伏せる）、できなければ `redact_text()` に落とす。`hits_json()` と `hit_line_with()` の呼び出し側がこの 1 か所に集約されているため、新しい出力経路を足すときも同じ関数を使う。`outline` / `read` の見出しヘッダと `[untrusted]` 行、`content` / `document` の `url` / `finalUrl` も同じ関数を通す。
+
+送信エラーの文字列（`E2001` / `E2002` / `E2004` の `details`）には URL や認証値が混ざるため、`crate::core::secret::redact_text()` を通してから表示する（`REF:src/adapters/http.rs`）。robots.txt の取得失敗理由（`E2006` の `details`）も `reqwest` のエラー文字列を含むため同じ処理を通す（`REF:src/adapters/robots.rs`）。
 
 ### 4.3 再現性
 

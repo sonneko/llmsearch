@@ -105,11 +105,7 @@ pub enum Command {
         query: Option<String>,
     },
     /// 検索語を変更して再検索する。
-    Refine {
-        query: String,
-        #[arg(long)]
-        previous: Option<String>,
-    },
+    Refine { query: String },
     /// 文書を取得・変換し、見出し一覧を出力する。
     Outline {
         target: String,
