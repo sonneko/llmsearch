@@ -70,6 +70,13 @@ fn main() {
         overrides,
     };
 
+    // 設定の検証で失敗したときも、設定した言語で文言を出す。`build` が返す
+    // エラーは `ui.locale` を解決できない文脈で起きるため、ここで先に読む
+    // （読めない場合は日本語のまま。本来のエラーは `build` が報告する）。
+    if let Some(locale) = config_uc::peek_locale(cli.global.config.as_deref(), deps.1.as_ref()) {
+        renderer.set_locale(locale);
+    }
+
     let (app, resolved) = match config_uc::build(
         &bootstrap,
         std::sync::Arc::clone(&deps.0),

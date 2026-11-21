@@ -124,7 +124,7 @@ python3 docs/script/verify-docs.py
 | `tests/contract.rs` | JSON 定義（エンジン・フィルタ・クォータ・設定）の契約 |
 | `tests/integration.rs` | 検索→取得→アウトライン→節読みの一連の流れ |
 | `tests/proxy.rs` / `tests/tls.rs` | ローカルの fixture サーバに対するプロキシ・TLS の挙動 |
-| `tests/m5.rs`〜`tests/m8.rs` | M5〜M8 で直した挙動の回帰（CLI・JSON・取得作法・設定・統合） |
+| `tests/m5.rs`〜`tests/m9.rs` | M5〜M9 で直した挙動の回帰（CLI・JSON・取得作法・設定・統合・秘匿情報の伏字化） |
 | `tests/e2e.rs` | 実バイナリを起動する受け入れ確認（実ネットワークを使うため既定では実行しない） |
 
 実ネットワークを使う E2E は既定で実行しない。動かす場合は次のとおり。
@@ -139,12 +139,10 @@ LLMSEARCH_E2E_LIVE=1 cargo test --test e2e -- --nocapture
 
 ## 免責事項
 
-- このレポジトリの保有者であるsonnekoは、Arena.aiとは全く関係ありません。
-- Arena.aiを利用する場合は、Arena.aiの利用規約を参照してください。
-- このテンプレートレポジトリを利用することにより生じた、いかなるトラブル・不利益について、レポジトリ所有者のsonnekoは一切責任を取りません。
+本ソフトウェアは現状のまま提供される。利用によって生じたいかなるトラブル・不利益についても、作者は責任を負わない。外部サイトの取得・利用にあたっては、各サイトの利用規約と `robots.txt` を確認すること。
 
 ---
 
 ## ライセンス
 
-このテンプレート自体は [MIT License](./LICENSE) で提供されます。
+[MIT License](./LICENSE) で提供されます。

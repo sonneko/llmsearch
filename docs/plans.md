@@ -17,7 +17,8 @@
 | 使いやすさ・安全性（M5） | 完了 | Issue 洗い出し・CLI/JSON/信頼境界・プロキシ・配布互換性 | `REF:docs/plans.md#m5-usability-safety` |
 | 実運用と仕様同期（M6） | 完了 | システム CA ルート・E4004 耐性・M5 残 Issue の解消・ドキュメント同期（PR #28） | `REF:docs/plans.md#m6-dogfood-sync` |
 | 取得の作法と計測（M7） | 完了 | robots.txt の強制（#13）・`Retry-After`（#15）・`redirectPolicy` の 3xx（#17）・クォータ消費のずれ（#18） | `REF:docs/plans.md#m7-fetch-discipline` |
-| 設定・監査・統合の適合（M8） | 実装中 | `config show/path/init`（#11）・`quota reset` の履歴（#19）・設定探索順と環境変数（#20）・`search.merge` の統合（#22） | `REF:docs/plans.md#m8-config-quota-merge` |
+| 設定・監査・統合の適合（M8） | 完了 | `config show/path/init`（#11）・`quota reset` の履歴（#19）・設定探索順と環境変数（#20）・`search.merge` の統合（#22） | `REF:docs/plans.md#m8-config-quota-merge` |
+| JSON・秘匿情報・ドキュメント（M9） | 実装中 | `--json` の統一（#4/#5）・`refine` と対象解決（#7/#9）・表示 URL の伏字化（#12）・ドキュメント整理（#21/#23） | `REF:docs/plans.md#m9-json-and-docs` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -137,7 +138,17 @@ JSON 全コマンド統一・robots・クォータ計測変更・リダイレク
 - [x] #22: `search.merge=true` のとき `search.engines` の全エンジンへ逐次送信し、`merge_round_robin` で交互に統合する。`W4005` の重複除去件数と `engine` 付与、送信回数分のクォータ消費を行う
 - [x] 回帰試験 `REF:tests/m8.rs`（4 件の Issue に対応する 9 ケース）
 
-未対応: #4 / #5 / #7 / #9 / #12 / #21 / #23（次のマイルストーンで対応）。
+<a id="m9-json-and-docs"></a>
+### M9: JSON・秘匿情報・ドキュメントの総点検（M5 残課題）
+
+- [x] #4: `--json` の共通フィールドを全イベントへ揃える。`done` / `error` にも `session` / `at` を付け、`at` は `YYYY-MM-DDTHH:MM:SSZ`、`refine` に `previousQuery`、`outline` の前に `document` イベント、検索・文書系イベントに `warnings[]`、`engines` の `policy` は安定した識別子
+- [x] #5: `--json` 指定時に `engines show/test`・`network/filters show`・`config *`・`quota *`・`history export/clear` が生テキストを出さず、イベントと `done` を出す
+- [x] #7: `refine` は直前のクエリを `previousQuery` として扱い、`search_uc::refine` で履歴に `refine` を残す。仕様に無い `--previous` を削除する
+- [x] #9: セッション無しで識別子を指定した場合は `E5001`（暗黙作成なし）、セッション内に無い識別子は `E1006`、`next` のセッション無しも `E5001` と hint にする
+- [x] #12: 検索結果・文書の表示 URL を `display_url` で一元的に伏字化する。エラー `details`（送信・robots）も伏字化する
+- [x] #21: README のクォータ記述と `GUIDE.md` のテンプレート残骸を直し、設計書の TypeScript 時代のパスを実装に合わせる。未実装機能は仕様から外し `REF:docs/plans.md#unplanned` に移す
+- [x] #23: `E2007` を発行しない理由を仕様に明記したまま、`message` / `hint` を `ui.locale` で選び、`Display` は日本語固定であることを設計に記す
+- [x] 回帰試験 `REF:tests/m9.rs`
 
 ---
 
@@ -221,8 +232,8 @@ JSON 全コマンド統一・robots・クォータ計測変更・リダイレク
 - PDF・Office 文書の取り込み
 - 設定プロファイル（`--profile` / `profile` キー）による設定集合の切り替え（M5 の棚卸しで未実装と判明し、仕様から移動）
 - `read --heading <正規表現>` による見出し名での節指定（同上）
-- `--no-filter=all`（既定の除去要素まで無効化する指定。安全性のため提供しない方針。同上）
 - `history export --with-body`（履歴書き出しへの本文同梱。同上）
+- `--no-filter=all`（既定の除去要素まで無効化する指定）は採用しない。既定の除去要素は安全性のための不変条件とし、`--no-filter` は値なしのフラグに限る
 - 認証・Cookie を伴うページの取得
 - サイト内クローリングとサイトマップ探索
 - XML（RSS / Atom）応答の抽出器

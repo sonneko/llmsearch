@@ -215,8 +215,17 @@ pub fn html_redirect_target(body: &str, base: &Url) -> Option<Url> {
 }
 
 /// 表示用に秘匿パラメータを伏字化した文字列を返す。
+///
+/// クエリの秘匿パラメータ名（`token` 等）と、パス中の `名前=値` 形式を伏せる。
+/// パス全体は置換しない（無関係な語を巻き込むため）。
 pub fn redact(url: &Url, secrets: &[String]) -> String {
     let mut out = url.clone();
+    if let Some(path) = url.path().strip_prefix('/') {
+        let redacted = redact_path_segments(path);
+        if redacted != path {
+            out.set_path(&format!("/{redacted}"));
+        }
+    }
     if url.query().is_some() {
         let mut hidden_any = false;
         let pairs: Vec<(String, String)> = url
@@ -232,17 +241,44 @@ pub fn redact(url: &Url, secrets: &[String]) -> String {
                 (key, if hidden { "***".to_string() } else { val })
             })
             .collect();
-        // 伏せる対象が無いときは元の文字列をそのまま返す（再エンコードで見た目を変えない）。
-        if !hidden_any {
-            return url.to_string();
-        }
-        let mut ser = out.query_pairs_mut();
-        ser.clear();
-        for (k, v) in &pairs {
-            ser.append_pair(k, v);
+        // クエリに伏せる対象が無いときは、パスの置換結果だけを返す
+        // （再エンコードで見た目を変えない）。
+        if hidden_any {
+            let mut ser = out.query_pairs_mut();
+            ser.clear();
+            for (k, v) in &pairs {
+                ser.append_pair(k, v);
+            }
         }
     }
-    out.to_string()
+    // 環境変数から解決した秘匿値は、クエリ名に依らず文字列一致で伏せる
+    // （パスや断片に埋め込まれた場合もここで拾う）。
+    let text = out.to_string();
+    if secrets
+        .iter()
+        .any(|s| !s.is_empty() && text.contains(s.as_str()))
+    {
+        crate::core::secret::redact_text(&text, secrets)
+    } else {
+        text
+    }
+}
+
+/// パス中の `名前=値` を伏字化する（`/token=abc/x` → `/token=***/x`）。
+fn redact_path_segments(path: &str) -> String {
+    let mut changed = false;
+    let joined = path
+        .split('/')
+        .map(|seg| match seg.split_once('=') {
+            Some((name, value)) if !value.is_empty() && is_sensitive(name) => {
+                changed = true;
+                format!("{name}=***")
+            }
+            _ => seg.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    if changed { joined } else { path.to_string() }
 }
 
 /// ホスト名（`www.` を 1 回だけ除去）。

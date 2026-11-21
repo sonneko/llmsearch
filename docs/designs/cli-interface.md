@@ -86,9 +86,11 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 ### 3.2 対象の指定方法
 
-状態: 実装完了（REF:src/usecases/target.rs）
+状態: 実装完了（REF:src/ui/commands.rs）
 
-`src/usecases/target.rs` の `resolve_target(input, session) -> Result<Target>`。`Target` は `Url(Url)` / `ResultId(u32)` / `DocumentId(u32)`。数値はまず結果番号、次に文書番号として解釈し、どちらも無ければ `E1006`。
+`src/ui/commands.rs` の `resolve_target(app, input) -> Result<(session_id, Url)>`。`Target` は `Url(Url)` / `ResultId(u32)` / `DocumentId(u32)`。数値はまず結果番号、次に文書番号として解釈し、どちらも無ければ `E1006`（利用可能な識別子を `details` に添える）。
+
+セッションの扱いは入口で分ける。URL 指定は `app.ensure_session()` を呼んでから解決する（取得だけならセッション未作成でも成立するため）。識別子指定は `app.current_session_id()` が空なら `E5001` と「`search` で開始する」hint を返し、セッションを暗黙に作らない（失敗した参照解決で状態を変えない）。`next` も同じ規則で、セッション無しは `E5001` とする（`REF:tests/m6.rs`）。
 
 ### 3.3 終了コード
 

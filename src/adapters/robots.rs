@@ -20,6 +20,8 @@ pub struct RobotsGate {
     client: Arc<dyn HttpClient>,
     clock: Arc<dyn Clock>,
     reporter: Arc<dyn Reporter>,
+    /// 取得失敗理由の伏字化に使う値（エラー文字列に URL・認証値が混ざるため）。
+    secrets: Vec<String>,
 }
 
 impl RobotsGate {
@@ -34,7 +36,14 @@ impl RobotsGate {
             client,
             clock,
             reporter,
+            secrets: Vec::new(),
         }
+    }
+
+    /// 取得失敗理由の伏字化に使う秘匿値を与える。
+    pub fn with_secrets(mut self, secrets: Vec<String>) -> Self {
+        self.secrets = secrets;
+        self
     }
 
     /// 取得してよいか判定する。拒否の場合は `E2006` を返す。
@@ -96,6 +105,7 @@ impl RobotsGate {
         origin: &str,
         reason: &str,
     ) -> Result<Robots, AppError> {
+        let reason = crate::core::secret::redact_text(reason, &self.secrets);
         if profile.robots.on_error.trim().eq_ignore_ascii_case("deny") {
             return Err(AppError::with_detail(
                 ErrorCode::E2006,

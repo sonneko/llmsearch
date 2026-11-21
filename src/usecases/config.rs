@@ -10,7 +10,7 @@ use crate::adapters::state::StatePaths;
 use crate::adapters::state::history_jsonl::JsonlHistory;
 use crate::adapters::state::session_store::{FsCounters, FsDocumentStore, FsSessionStore};
 use crate::core::config::filter::CompiledFilters;
-use crate::core::errors::{AppError, Check, Diagnostic, ErrorCode, WarningCode};
+use crate::core::errors::{AppError, Check, Diagnostic, ErrorCode, Locale, WarningCode};
 use crate::core::secret::Secrets;
 use crate::ports::system::{SystemClock, SystemEnv, SystemIdGen};
 use crate::ports::{Clock, Env, IdGen, Reporter};
@@ -59,6 +59,19 @@ pub struct Resolved {
 }
 
 /// 同梱リソースのディレクトリ。
+/// 設定の検証に踏み込まずに `ui.locale` だけを先読みする。
+///
+/// `build` が失敗すると `ui.locale` を解決できないため、エラー文言の言語を
+/// 決めるためだけに使う。読めない場合は `None`（日本語のまま表示する）。
+pub fn peek_locale(config_path: Option<&std::path::Path>, env: &dyn Env) -> Option<Locale> {
+    let options = cfg::LoadOptions {
+        config_path: config_path.map(std::path::Path::to_path_buf),
+        overrides: Vec::new(),
+    };
+    let loaded = cfg::load(env, &options).ok()?;
+    Some(loaded.settings.locale())
+}
+
 pub fn bundled_root(env: &dyn Env) -> PathBuf {
     if let Some(dir) = env.executable_dir() {
         let assets = dir.join("assets");
