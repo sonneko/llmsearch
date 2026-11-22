@@ -276,3 +276,40 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
 - 決定: `<state.dir>/settings.json`, `<state.dir>/network/`, `<state.dir>/filters/`, `<state.dir>/quotas/`, `<state.dir>/engines/` に統一した（探索と書き出しの両方）。
 - 影響: 旧配置（`<state.dir>/config/settings.json`）に置いた利用者設定は読まれなくなる。`config init` が新しい位置へ雛形を書くため、移行は「`config show` の由来が `default` になっているキーを `config init` の雛形へ移す」手順になる。リリース前（v0.1.1 未満）の開発経緯内の変更であり、旧配置を読む互換コードは残さない（探索順を二重に持つと `config path` の表示が曖昧になるため）。
 - 検査: `REF:tests/m8.rs` の探索順・`config path`・`config init` の各ケースと実バイナリでの確認。
+
+### [HIST:SPEC-FIX:F015] 2026-11-19 `--json` の生テキスト経路を無くし、`refine` と対象解決を仕様へ戻す
+[HIST-TAG: category=SPEC-FIX id=F015 topics=json,refine,target,e5001,issues-4,issues-5,issues-7,issues-9]
+
+- 経緯: M5 で起票した #4 / #5 / #7 / #9 の多くは M6 までに直っており、 Issue 本文の現状記述は古くなっていた。M9 では現行コードと実バイナリで再監査し、残っていた差分だけを直した。
+- 対応（#4）: `Renderer::envelope()` が全イベントへ `v` / `event` / `session` / `at` を付け、`at` は `%Y-%m-%dT%H:%M:%SZ`。`done` / `error` にも付く。`refine` は `previousQuery` と `results[]` / `warnings[]` / `quota` を持ち、`outline` は `document` イベントを先に出す。`engines list` の `policy` は `first-wins`。
+- 対応（#5）: `history clear` と `history export --format markdown` に `--json` 分岐が無く生テキストを出していたため、`history` イベント（`removed` / `format`）を出すようにした。`quota reset` は `quota` イベント（`action` / `scope` / `policy` / `metrics`）を出す。`engines list` の `apiKey` は日本語の説明文から `not-required` / `configured` / `missing` の識別子へ変え、参照する環境変数名を `apiKeyEnvs` に分けた（テキスト表示は従来どおり日本語の見出しに変換する）。
+- 対応（#7）: 仕様に無い `--previous` を CLI から削除した。変更前の検索語は常にセッションの `last_query` とし、無ければ `E5001` と回復手順を返す。`search_uc::refine` が履歴に `refine` を残す。
+- 対応（#9）: 識別子指定でセッションが無い場合は `E5001`（暗黙作成しない）、セッション内に無い識別子は `E1006`、`next` のセッション無しも `E5001` と hint にする。仕様 `REF:docs/specifications/cli-interface.md` §3.2 を実装に合わせて書き分けた。
+- 検査: `REF:tests/m9.rs`（refine の履歴と `--previous` の拒否、対象解決の E5001 / E1006、封筒の `at`、`apiKey` の識別子、`history clear` / `quota reset` のイベント）。
+
+### [HIST:SPEC-FIX:F016] 2026-11-19 表示 URL の伏字化を 1 か所に集約する
+[HIST-TAG: category=SPEC-FIX id=F016 topics=secret,redaction,url,outline,read,issues-12]
+
+- 症状: 検索結果の一覧は `core::url::redact` を通していたが、`outline` / `read` の見出しヘッダと `[untrusted]` 行、`document` イベントの `url` / `finalUrl`、`content` イベントの `url` は生の URL を出していた。実バイナリで `https://one.example/token=SECRETVALUE1` がそのまま表示されることを確認した。`engines test` のテキスト（`--raw` 含む）も同様だった。
+- 対応: `src/ui/commands.rs` の `display_url()` を全表示経路の入口にした。`display_document()` は表示専用の複製を作り、URL と URL 由来のタイトル（`<title>` が無いページでは URL がタイトルになる）を伏せる。`read` の `S0` 見出しも同じ理由で伏せる。
+- 対応: `core::url::redact` にパス中の `名前=値` の伏字化を足した。クエリ名の一覧（`token` / `key` など）と同じ基準で判定し、パス全体は置換しない（無関係な語を巻き込まないため）。環境変数から解決した秘匿値は、クエリ名に依らず URL 文字列の一致で伏せる。
+- 対応: robots.txt の取得失敗理由（`E2006` の `details`）は `reqwest` のエラー文字列を含むため、`RobotsGate::with_secrets()` で受け取った秘匿値を `redact_text` で伏せてから `details` に入れる。
+- 設計判断: セッションに保持する取得用 URL は実体のまま（伏字化すると再取得できない）。伏字化は表示と JSON の境界だけで行う。
+- 検査: `REF:tests/m9.rs`（クエリ・パス・環境変数値の伏字化、無関係なパスの非変更）。
+
+### [HIST:DECISION:D031] 2026-11-19 エラー文言の言語は `Renderer` が決め、設定失敗時は `ui.locale` を先読みする
+[HIST-TAG: category=DECISION id=D031 topics=errors,locale,i18n,config,issues-23]
+
+- 背景: `AppError` の `Display` は `Locale::Ja` 固定で、`message()` / `hint()` は locale を受ける。`Renderer::error()` は `self.locale()` を使うため通常経路は正しいが、設定の読み込み・検証で失敗すると `App` が無く `app.locale()` を呼べず、`ui.locale=en` でも日本語で表示されていた（実バイナリで確認）。
+- 決定: `Display` は日本語固定のまま（`tests` とログの決定性を保つ）。利用者向けの文言は必ず `Renderer` か `err.message(app.locale())` を通す。`src/main.rs` は `build` の前に `config_uc::peek_locale()` で `ui.locale` だけを読み、`Renderer` に反映する。先読みの失敗は握りつぶし、本来のエラーを `build` が報告する。
+- 決定: `E2007`（応答サイズ超過）は初期リリースで発行しない。仕様 `REF:docs/specifications/errors.md` §2.2 に理由（打ち切り + `W3003` で継続する）を明記済みで、コードは将来の発行に備えて残す。
+- 検査: `REF:tests/m9.rs`（`message` / `hint` の locale 差）と実バイナリ（`ui.locale=en` での `E4002` / `E5001`）。
+
+### [HIST:DECISION:D032] 2026-11-19 ドキュメントのテンプレート残骸と実装と異なる記述を片付ける
+[HIST-TAG: category=DECISION id=D032 topics=docs,guide,readme,stale-path,issues-21]
+
+- 背景: `GUIDE.md` は「テンプレートの使い方」「応用パターン（大規模プロジェクト）」「よくある課題」などテンプレート配布元の説明を残したままだった。README 末尾も「このテンプレート自身は MIT」と書いていた。`docs/designs/context-assembly.md` には TypeScript 時代のパス（`src/core/outline/extract.ts` など）が 11 か所残っていた。
+- 決定: `GUIDE.md` の §7〜§9 をこのリポジトリの運用（ドキュメントの増やし方・エージェントへの指示・つまずいたときの対処）に置き換えた。`dependencies/` の移設手順は配布元の説明なので削った（実体は `REF:docs/developers.md` と `scripts/bootstrap-toolchain.sh` にある）。
+- 決定: 設計書のパスはすべて実装（`src/core/outline.rs` / `src/core/context.rs` / `src/ui/render.rs` など）へ直した。仕様に残っていた未実装機能（`--profile`、`--no-filter=all`、`read --heading`、`export --with-body`）は `REF:docs/plans.md#unplanned` に移し、仕様からは外した。
+- 決定: `--no-filter` は値なしの真偽フラグとし、既定の除去要素は常に残す（安全性のため無効化手段を提供しない）。設計書が `--no-filter=all` を実装済みのように書いていたのを直した。
+- 検査: `REF:docs/script/verify-docs.py`（見出し一致・状態行・REF の実在・SYNC 一致）と、`docs/designs/` に `.ts` パスが残っていないことの grep。

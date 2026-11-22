@@ -82,7 +82,8 @@ specifications/*.md > designs/*.md > ソースコード
 | 使いやすさ・安全性（M5） | 完了 | Issue 洗い出し・CLI/JSON/信頼境界・プロキシ・配布互換性 | `REF:docs/plans.md#m5-usability-safety` |
 | 実運用と仕様同期（M6） | 完了 | システム CA ルート・E4004 耐性・M5 残 Issue の解消・ドキュメント同期（PR #28） | `REF:docs/plans.md#m6-dogfood-sync` |
 | 取得の作法と計測（M7） | 完了 | robots.txt の強制（#13）・`Retry-After`（#15）・`redirectPolicy` の 3xx（#17）・クォータ消費のずれ（#18） | `REF:docs/plans.md#m7-fetch-discipline` |
-| 設定・監査・統合の適合（M8） | 実装中 | `config show/path/init`（#11）・`quota reset` の履歴（#19）・設定探索順と環境変数（#20）・`search.merge` の統合（#22） | `REF:docs/plans.md#m8-config-quota-merge` |
+| 設定・監査・統合の適合（M8） | 完了 | `config show/path/init`（#11）・`quota reset` の履歴（#19）・設定探索順と環境変数（#20）・`search.merge` の統合（#22） | `REF:docs/plans.md#m8-config-quota-merge` |
+| JSON・秘匿情報・ドキュメント（M9） | 実装中 | `--json` の統一（#4/#5）・`refine` と対象解決（#7/#9）・表示 URL の伏字化（#12）・ドキュメント整理（#21/#23） | `REF:docs/plans.md#m9-json-and-docs` |
 <!-- SYNC:END project-status -->
 ```
 
@@ -290,45 +291,20 @@ PR テンプレート（`.github/pull_request_template.md`）は、LLMがPRを�
 
 ---
 
-## 7. テンプレートの使い方
+## 7. このリポジトリでの運用
 
-### 7.1 新規プロジェクトの開始
+### 7.1 ドキュメントを増やすとき
 
-1. このテンプレートをコピーして新しいリポジトリを作成
-2. `docs/specifications/overview.md` にアプリケーションの仕様を記述
-3. `docs/designs/overview.md` に対応する設計を記述
-4. `docs/developers.md` をプロジェクト固有の情報に調整
-5. `.github/workflows/ci.yml` の lint / test / build をプロジェクト固有のコマンドに置換
-6. `scripts/bootstrap-toolchain.sh` をプロジェクトのツールチェーンに合わせて調整
-7. **技術スタックの環境整備**: `dependencies/` ディレクトリを参照（後述）
+1. `docs/specifications/` に仕様を書き、対応する `docs/designs/` に同じ見出し構成で設計を書く
+2. 各 `###` 節の冒頭に `状態:` 行を置き、`REF:src/...` で実装箇所を指す
+3. `docs/plans.md` に項目を足し、完了したら `docs/history.md` へ移す
+4. `python3 docs/script/verify-docs.py` を通す（見出し一致・状態行・REF の実在・SYNC 一致）
 
-### 7.1.1 `dependencies/` の扱い
-
-`dependencies/` には各技術スタック固有の環境整備ドキュメントとスクリプトが含まれている（詳細は `REF:dependencies/STRATEGY.md`）。
-
-プロジェクトで使用する技術スタックに応じて以下を行う：
-
-- **Rust を使う場合**: `dependencies/rust/` のファイルをプロジェクトに移動する
-  ```bash
-  cp dependencies/rust/bootstrap-rust.sh scripts/bootstrap-rust.sh
-  cp dependencies/rust/toolchain-export.yml .github/workflows/toolchain-export.yml
-  cp dependencies/rust/toolchain.env .github/toolchain.env
-  # dependencies/rust/README.md の内容を docs/add-dependencies.md に追記してもよい
-  ```
-  詳しい手順は `dependencies/rust/README.md` を参照すること。
-
-- **Rust を使わない場合**: `dependencies/rust/` を削除して問題ない
-  ```bash
-  rm -rf dependencies/rust/
-  ```
-
-- **他の技術スタックが必要な場合**: `dependencies/STRATEGY.md` の手順に従って新しい `dependencies/<stack>/` を追加する
-
-`dependencies/` のファイルはテンプレート利用時の参考情報であり、プロジェクトに統合後は `dependencies/` ディレクトリごと削除しても問題ない。
+仕様書（`docs/specifications/`）には実装のパスや `REF:` を書かない。仕様は「何を満たすか」、設計は「どう実装したか」を担う。両者の分離は `verify-docs.py` の rule-3 / rule-4 が機械的に検査する。
 
 ### 7.2 LLMエージェントへの指示
 
-Arena.ai で開発を開始する際、以下の情報をプロンプトに含める：
+Arena.ai で開発を継続する際、以下の情報をプロンプトに含める：
 
 1. `docs/developers.md` の内容（規則・環境・制約）
 2. `docs/handoff.md` の内容（現在の進捗）
@@ -351,48 +327,32 @@ Arena.ai で開発を開始する際、以下の情報をプロンプトに含�
 
 ---
 
-## 8. 応用パターン
+## 8. つまずいたときの対処
 
-### 8.1 複数エージェントでの開発
+### 8.1 ツールチェーンの復旧
 
-- 1つのPRで1つのセッション（1人のエージェント）
-- 異なる機能は異なるブランチ・PR で作業
-- ドキュメント管理規則が共通の「契約」として機能する
+サンドボックスのコンテナ再起動で `/home/user/build/` が消えた場合は、退避済みのツールチェーンを展開し直す。
 
-### 8.2 大規模プロジェクトでの拡張
+```bash
+bash scripts/bootstrap-toolchain.sh
+. /home/user/build/env.sh
+```
 
-- `docs/specifications/` を機能モジュールごとに分割（例: `auth.md`, `api.md`, `ui.md`）
-- `docs/designs/` も同じ構造で追従
-- `verify-docs.py` の検査を拡張
+到達できないホストのバイナリは、GitHub Actions で取得して Git Blob に退避する方式で搬入する（`REF:docs/developers.md` §2.2）。
 
-### 8.3 CI/CD パイプラインの拡張
+### 8.2 PR の競合
 
-- デプロイワークフロー（`.github/workflows/deploy.yml`）
-- リリースワークフロー（バージョン tagging に応じた自動リリース）
-- セキュリティスキャン
+- こまめなコミット & プッシュ
+- `scripts/verify.sh` でローカル検証を徹底
+- CI の変更フィルタリングでフィードバックループを高速化
 
----
-
-## 9. よくある課題と解決策
-
-### 9.1 仕様書の肥大化
+### 8.3 仕様書の肥大化
 
 - 歴史的情報は `docs/history.md` に分離
 - 機能モジュールごとにファイルを分割
 - `grep` で機械的に検索可能な構造を維持
 
-### 9.2 LLMが過去の判断を忘れる
+### 8.4 LLMが過去の判断を忘れる
 
 - `docs/history.md` に `[HIST-TAG: ...]` 形式でタグ付け
 - `grep` で検索可能な構造により、LLMが自律的に参照できる
-
-### 9.3 ツールチェーンの復旧
-
-- `scripts/bootstrap-toolchain.sh` でワンコマンド復旧
-- Git Blob 方式で外部依存を管理
-
-### 9.4 PR の競合
-
-- こまめなコミット & プッシュ
-- `scripts/verify.sh` でローカル検証を徹底
-- CI の変更フィルタリングでフィードバックループを高速化

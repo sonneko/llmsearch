@@ -43,7 +43,8 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
             std::sync::Arc::clone(&app.http),
             std::sync::Arc::clone(&app.clock),
             std::sync::Arc::clone(&app.reporter),
-        ),
+        )
+        .with_secrets(crate::core::secret::redaction_list(&app.secrets)),
     ));
 
     let id_hint = app.ensure_session()?;

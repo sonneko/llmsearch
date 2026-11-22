@@ -34,8 +34,10 @@ JSON の本文フィールドは `context.maxChars` に従う。1 コマンド�
 |---|---|---|
 | `v` | 整数 | スキーマ版（初期リリースは `1`） |
 | `event` | 文字列 | イベント種別 |
-| `session` | 文字列 | セッション識別子 |
+| `session` | 文字列 | セッション識別子（確定していない実行では空文字） |
 | `at` | 文字列 | 実行日時（UTC、`YYYY-MM-DDTHH:MM:SSZ`） |
+
+検索・文書を扱うイベント（`search` / `next` / `refine` / `document` / `outline`）は、実行中に出た警告を `warnings[]`（各要素は `code` と `message`）として持つ。警告が無い場合も空配列を必ず含める。同じ内容を標準エラーにも出力する。`error` は失敗に至る過程で出た警告を同じ形で持つ。
 
 ### 2.2 イベント種別
 
@@ -43,20 +45,23 @@ JSON の本文フィールドは `context.maxChars` に従う。1 コマンド�
 |---|---|
 | `search` | `query`, `engine`, `results[]`, `page`, `hasMore`, `filtered`, `quota` |
 | `next` | `page`, `results[]`, `hasMore`, `terminated`, `filtered`, `quota` |
-| `refine` | `query`, `previousQuery`, `session` |
+| `refine` | `query`, `previousQuery`, `results[]`, `warnings[]`, `quota` |
 | `document` | `documentId`, `url`, `finalUrl`, `title`, `site`, `chars`, `warnings[]`, `quota` |
-| `outline` | `documentId`, `depth`, `sections[]`, `totalChars`, `hidden` |
+| `outline` | `documentId`, `depth`, `sections[]`, `totalChars`, `hidden`, `warnings[]` |
 | `content` | `documentId`, `sectionId`, `heading`, `level`, `text`, `chars`, `truncated`, `nextSectionId`, `url`, `quota` |
-| `engines` | `engines[]`, `policy`（`engines list`。`policy` は `first-wins` などの安定した識別子） |
+| `engines` | `engines[]`, `policy`（`engines list`。`policy` は `first-wins` などの安定した識別子。`engines[]` の `apiKey` は `not-required` / `configured` / `missing` の識別子、`apiKeyEnvs` は参照する環境変数名の一覧） |
 | `engine` | `id`, `variant`, `kind`, `definition`（`engines show`） |
 | `network` | `ids[]`, `active`（一覧）／`id`, `path`, `definition`（`network show`） |
 | `filters` | `ids[]`, `active`（一覧）／`id`, `path`, `definition`（`filters show`） |
 | `config` | `values[]`（`config show`）／`key`, `value`, `origin`（`config explain`）／`paths[]`（`config path`） |
 | `diagnostics` | `checks[]`（`engines validate`, `engines test`, `network validate`, `filters validate`, `config validate`, `doctor`） |
-| `quota` | `metrics[]`, `policy`, `resetsAt[]`, `kind`, `amount`, `allowed`（`quota check`） |
-| `history` | `entries[]`, `total` |
+| `quota` | `metrics[]`, `policy`, `kind`, `amount`, `allowed`（`quota check`）／`action`, `scope`（`quota reset`） |
+| `history` | `entries[]`, `total`（`history list` / `show` / `grep` / `export`）／`removed`（`history clear`） |
 | `done` | `command`, `summary` |
 | `error` | `code`, `message`, `hint`, `details`, `warnings[]` |
+
+`--json` 指定時は、上表のいずれのサブコマンドも生テキストを標準出力へ出さない。イベントを 1 つ以上出したうえで、最後に `done` を出す（異常終了時は `error` のみ）。`history export --format markdown` のように本文を書き出す操作でも、`--json` のときは `history` イベントに包む。
+
 
 ### 2.3 結果オブジェクト
 
@@ -72,7 +77,7 @@ JSON の本文フィールドは `context.maxChars` に従う。1 コマンド�
 
 ### 2.6 クォータオブジェクト
 
-`quota` は `metrics[]` を持ち、各要素は `name`（`session.searches` 等）, `used`, `limit`（未設定は `null`）, `resetsAt` を持つ。
+`quota` は `metrics[]` を持ち、各要素は `name`（`session.searches` 等）, `used`, `limit`（未設定は `null`）, `resetsAt` を持つ。`resetsAt` は `YYYY-MM-DDT00:00 local`（端末のローカル日付の 0 時）または `null`。
 
 ### 2.7 エラーオブジェクト
 
@@ -113,6 +118,15 @@ JSON の本文フィールドは `context.maxChars` に従う。1 コマンド�
 ### 4.2 秘匿情報
 
 JSON 出力に API キー・Cookie・認証ヘッダを含めない。URL の秘匿パラメータは伏字化する。`engines show` の出力でも `value_env` の参照名のみを示し、値は示さない。
+
+伏字化の対象は次のとおり。
+
+- 検索結果・文書の `url` / `finalUrl`（表示用。セッション内に保持する取得用 URL は実体のまま）
+- `engines show` / `network show` / `filters show` の `definition` と `--raw` のダンプ
+- `engines test --dry-run` の `request.url` と `request.headers`
+- エラーの `details`（送信エラー文字列、robots.txt の取得失敗理由）
+
+URL のクエリに含まれる秘匿パラメータ名（`token`, `key`, `apikey`, `api_key`, `sig`, `signature`, `password`, `passwd`, `secret`, `auth`）は値だけを `***` に置き換える。パス中でも同じ `名前=値` の形をしていれば同じ基準で伏せる（パスの丸ごとの置換は行わず、誤爆を避ける）。環境変数から解決した秘匿値は、URL・エラー文字列のいずれでも文字列一致で `***` に置き換える。
 
 ### 4.3 再現性
 

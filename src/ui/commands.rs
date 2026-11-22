@@ -126,16 +126,18 @@ pub fn run(
             }
             Ok(0)
         }
-        Command::Refine { query, previous } => {
-            let previous = match previous {
-                Some(query) => query.clone(),
-                None => app
-                    .sessions
-                    .load(&app.current_session_id())?
-                    .map(|s| s.last_query)
-                    .filter(|q| !q.is_empty())
-                    .ok_or_else(|| AppError::new(ErrorCode::E5001))?,
-            };
+        Command::Refine { query } => {
+            // 変更前の検索語はセッションの直前クエリ（`last_query`）を使う。
+            // セッションが無い・検索していない場合は `refine` 自体が成立しない。
+            let previous = app
+                .sessions
+                .load(&app.current_session_id())?
+                .map(|s| s.last_query)
+                .filter(|q| !q.is_empty())
+                .ok_or_else(|| {
+                    AppError::with_detail(ErrorCode::E5001, "`refine` は変更前の検索語を要する")
+                        .hint("`search` で新しいセッションを開始してから `refine` を使う")
+                })?;
             let outcome = search_uc::refine(app, &previous, query)?;
             let session = search_uc::apply_to_session(app, &outcome, query)?;
             renderer.set_session(&session.session_id);
@@ -202,7 +204,14 @@ pub fn run(
                     format!("{} 見出し", view.headings.len()),
                 );
             } else {
-                renderer.out(&renderer.outline_lines(&view.document, &view.headings, view.depth));
+                let secrets = secret_values(app);
+                let shown = display_document(&view.document, &secrets);
+                renderer.out(&renderer.outline_lines(
+                    &shown,
+                    &shown.final_url,
+                    &view.headings,
+                    view.depth,
+                ));
             }
             Ok(0)
         }
@@ -241,21 +250,26 @@ pub fn run(
                             "chars": body.chars,
                             "truncated": body.truncated,
                             "nextSectionId": body.next_heading_id,
-                            "url": doc.final_url,
+                            "url": display_url(&doc.final_url, &secret_values(app)),
                             "quota": quota_json(app),
                         }),
                     ));
                 }
                 done(renderer, "read", format!("{} 字", outcome.total_chars));
             } else {
+                let secrets = secret_values(app);
+                let shown = display_document(&doc, &secrets);
                 for body in &outcome.sections {
-                    let header = document::section_header(&doc, body);
+                    // `S0`（本文全体）の見出しは文書タイトルなので、表示用に伏字化する。
+                    let mut display_body = body.clone();
+                    display_body.heading = display_url(&body.heading, &secrets);
+                    let header = document::section_header(&shown, &display_body);
                     let truncated = body
                         .truncated
                         .then(|| (crate::core::text::chars(&body.text), body.chars));
                     renderer.out(&renderer.section_block(
                         &header,
-                        &doc.final_url,
+                        &shown.final_url,
                         &body.text,
                         truncated,
                     ));
@@ -508,6 +522,18 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                         renderer.out(&serde_json::to_string(entry).unwrap_or_default());
                     }
                 }
+            } else if renderer.json {
+                // Markdown 書き出しでも `--json` のときは生テキストを出さずイベントに包む。
+                let ordered: Vec<_> = entries.iter().rev().cloned().collect();
+                renderer.event(&renderer.envelope(
+                    "history",
+                    json!({
+                        "format": "markdown",
+                        "entries": ordered.iter().map(entry_json).collect::<Vec<_>>(),
+                        "total": ordered.len(),
+                    }),
+                ));
+                done(renderer, "history export", format!("{} 件", ordered.len()));
             } else {
                 renderer.out(&history_uc::export(app, Some(200))?);
             }
@@ -521,7 +547,19 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                 ));
             }
             let removed = history_uc::clear(app, None)?;
-            renderer.out(&format!("履歴を削除した（{removed} 件）"));
+            if renderer.json {
+                renderer.event(&renderer.envelope(
+                    "history",
+                    json!({
+                        "removed": removed,
+                        "entries": [],
+                        "total": 0,
+                    }),
+                ));
+                done(renderer, "history clear", format!("{removed} 件"));
+            } else {
+                renderer.out(&format!("履歴を削除した（{removed} 件）"));
+            }
             Ok(0)
         }
     }
@@ -549,6 +587,7 @@ fn run_engines(
                             "tags": r.tags,
                             "requiresApiKey": r.requires_api_key,
                             "apiKey": r.api_key_state,
+                            "apiKeyEnvs": r.api_key_envs,
                             "description": r.description,
                         })).collect::<Vec<_>>(),
                     }),
@@ -563,7 +602,7 @@ fn run_engines(
                         r.kind,
                         if r.enabled { "有効" } else { "無効" },
                         r.tags.join(","),
-                        r.api_key_state
+                        api_key_label(r)
                     ));
                 }
             }
@@ -699,12 +738,13 @@ fn run_engines(
                 );
                 return Ok(0);
             }
+            let secrets = secret_values(app);
             if *raw {
                 for hit in outcome.hits.iter().take(3) {
                     renderer.out(&format!(
                         "{}\t{}\t{}",
                         hit.title,
-                        hit.url,
+                        display_url(&hit.url, &secrets),
                         hit.snippet.clone().unwrap_or_default()
                     ));
                 }
@@ -716,7 +756,11 @@ fn run_engines(
                     outcome.filtered.removed
                 ));
                 for hit in outcome.hits.iter().take(3) {
-                    renderer.out(&format!("- {} <{}>", hit.title, hit.url));
+                    renderer.out(&format!(
+                        "- {} <{}>",
+                        hit.title,
+                        display_url(&hit.url, &secrets)
+                    ));
                 }
             }
             Ok(0)
@@ -1046,6 +1090,16 @@ fn run_quota(
                 ));
             }
             if renderer.json {
+                renderer.event(&renderer.envelope(
+                    "quota",
+                    json!({
+                        "action": "reset",
+                        "scope": scope,
+                        "policy": app.quota.id,
+                        // リセット直後の残量をそのまま返す（`quota show` と同じ形）。
+                        "metrics": quota_json(app).get("metrics").cloned().unwrap_or(json!([])),
+                    }),
+                ));
                 done(renderer, "quota reset", format!("scope={scope}"));
             } else {
                 renderer.out(&format!("クォータを初期化した（scope={scope}）"));
@@ -1335,6 +1389,27 @@ fn entry_json(entry: &crate::core::history::HistoryEntry) -> serde_json::Value {
 }
 
 /// 表示用の伏字化した結果 URL（取得用の URL はセッション内に実体を保持する）。
+/// `engines list` のテキスト表示に使う API キー状態の見出し。
+fn api_key_label(row: &crate::usecases::engines::EngineRow) -> String {
+    match row.api_key_state.as_str() {
+        "not-required" => "不要".to_string(),
+        "configured" => format!("設定済み（{}）", row.api_key_envs.join(",")),
+        _ => format!("未設定（{}）", row.api_key_envs.join(",")),
+    }
+}
+
+/// 表示専用の文書情報。URL と、URL 由来のタイトルを伏字化する。
+fn display_document(
+    doc: &crate::core::session::DocumentRef,
+    secrets: &[String],
+) -> crate::core::session::DocumentRef {
+    let mut out = doc.clone();
+    out.title = display_url(&doc.title, secrets);
+    out.url = display_url(&doc.url, secrets);
+    out.final_url = display_url(&doc.final_url, secrets);
+    out
+}
+
 fn display_url(url: &str, secrets: &[String]) -> String {
     match url::Url::parse(url) {
         Ok(parsed) => crate::core::url::redact(&parsed, secrets),
@@ -1391,11 +1466,12 @@ fn quota_json(app: &App) -> serde_json::Value {
 
 fn document_event(app: &App, renderer: &Renderer, fetched: &document::Fetched) {
     let doc = &fetched.document;
+    let secrets = secret_values(app);
     renderer.event(&renderer.envelope("document", json!({
         "documentId": doc.id,
-        "url": doc.url,
-        "finalUrl": doc.final_url,
-        "title": doc.title,
+        "url": display_url(&doc.url, &secrets),
+        "finalUrl": display_url(&doc.final_url, &secrets),
+        "title": display_url(&doc.title, &secrets),
         "site": url::Url::parse(&doc.final_url).ok().and_then(|u| u.host_str().map(str::to_owned)),
         "chars": doc.chars,
         "warnings": crate::ui::render::warnings_json(&fetched.warnings),

@@ -78,7 +78,7 @@
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-Markdown は `src/ui/render.rs`。`--with-body` 時のみ `body.md` を読む。JSON Lines は履歴ファイルの行をそのまま出力し、`serde_json` で再整形しない（改変を避けるため）。
+Markdown は `src/ui/render.rs` の `history_line` を使い、本文は読まない。JSON Lines は履歴ファイルの行をそのまま出力し、`serde_json` で再整形しない（改変を避けるため）。`--json` のときは形式にかかわらず `history` イベント（`entries[]` / `total`）へ包み、生の JSON Lines を標準出力へ出さない（`REF:src/ui/commands.rs` の `run_history`）。
 
 ---
 

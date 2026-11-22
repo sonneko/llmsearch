@@ -15,6 +15,8 @@ pub struct EngineRow {
     pub tags: Vec<String>,
     pub requires_api_key: bool,
     pub api_key_state: String,
+    /// `apiKey` の解決に使う環境変数名（値は含めない）。
+    pub api_key_envs: Vec<String>,
     pub description: String,
 }
 
@@ -34,6 +36,7 @@ pub fn list(app: &App) -> Vec<EngineRow> {
             tags: def.tags.clone(),
             requires_api_key: def.limits.requires_api_key,
             api_key_state: api_key_state(app, def),
+            api_key_envs: collect_envs(def),
             description: def.description.clone().unwrap_or_default(),
         })
         .collect();
@@ -44,20 +47,12 @@ pub fn list(app: &App) -> Vec<EngineRow> {
 fn api_key_state(app: &App, def: &EngineDef) -> String {
     let envs = collect_envs(def);
     if envs.is_empty() {
-        return "不要".to_string();
+        return "not-required".to_string();
     }
-    let missing: Vec<&String> = envs.iter().filter(|e| !app.secrets.contains(e)).collect();
-    if missing.is_empty() {
-        format!("設定済み（{}）", envs.join(","))
+    if envs.iter().all(|e| app.secrets.contains(e)) {
+        "configured".to_string()
     } else {
-        format!(
-            "未設定（{}）",
-            missing
-                .iter()
-                .map(|s| s.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        )
+        "missing".to_string()
     }
 }
 

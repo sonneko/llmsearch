@@ -138,4 +138,4 @@
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`--no-filter` は `FilterSet` の `results` と `content.strip*` を空にした複製を作る。`--no-filter=all` では `DEFAULT_STRIP_SELECTORS` も空にする。`disabled: true` を `FilterStats` に含める。
+`--no-filter`（値なしの真偽フラグ）は `FilterSet` の `results` と `content.strip*` を空にした複製を作る。`DEFAULT_STRIP_SELECTORS` は常に残す（無効化する指定は提供しない）。`disabled: true` を `FilterStats` に含める。

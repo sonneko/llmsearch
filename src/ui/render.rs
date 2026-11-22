@@ -215,12 +215,15 @@ impl Renderer {
         }
     }
 
-    /// 見出し一覧（アウトライン）。
-    pub fn outline_lines(&self, document: &DocumentRef, headings: &[Heading], depth: u8) -> String {
-        let mut out = format!(
-            "[D{}] {}   {}\n",
-            document.id, document.title, document.final_url
-        );
+    /// 見出し一覧（アウトライン）。`url` は表示用（伏字化済み）を受け取る。
+    pub fn outline_lines(
+        &self,
+        document: &DocumentRef,
+        url: &str,
+        headings: &[Heading],
+        depth: u8,
+    ) -> String {
+        let mut out = format!("[D{}] {}   {}\n", document.id, document.title, url);
         for heading in headings {
             if heading.hidden {
                 continue;
