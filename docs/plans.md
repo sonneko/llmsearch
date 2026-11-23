@@ -20,6 +20,7 @@
 | 設定・監査・統合の適合（M8） | 完了 | `config show/path/init`（#11）・`quota reset` の履歴（#19）・設定探索順と環境変数（#20）・`search.merge` の統合（#22） | `REF:docs/plans.md#m8-config-quota-merge` |
 | JSON・秘匿情報・ドキュメント（M9） | 完了 | `--json` の統一（#4/#5）・`refine` と対象解決（#7/#9）・表示 URL の伏字化（#12）・ドキュメント整理（#21/#23）（PR #32） | `REF:docs/plans.md#m9-json-and-docs` |
 | 表示言語とエンジン言語（M10） | 完了 | CLI メッセージの全英語化・嘘をつく `ui.locale` の削除・`search.language` の追加 | `REF:docs/plans.md#m10-english-and-language` |
+| 配布互換ゲート（M11） | 完了 | CI の Build & Distribution Compatibility の `E1003`（ステージした `assets/` の入れ子）を直し、同梱既定の解決を配布配置に依存させない | `REF:docs/plans.md#m11-distribution-assets` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -163,6 +164,19 @@ JSON 全コマンド統一・robots・クォータ計測変更・リダイレク
 - [x] `Accept-Language` のエンジン段での補完、`NetworkProfile.acceptLanguage` の廃止、同梱 3 エンジン（duckduckgo / brave / searxng）の言語パラメータ配線
 - [x] `REF:tests/architecture.rs` にユーザー可視日本語リテラルの検出を追加し、`tests/m10.rs` に言語設定の配線と `ui.locale` 廃止の回帰試験を追加
 - [x] 実バイナリでの確認（`--help`・エラー・実検索・`config show`・`engines test --dry-run`）と PR（develop 向け）
+
+<a id="m11-distribution-assets"></a>
+### M11: 配布互換ゲートの `E1003` を直す
+
+- [x] 原因の記録: CI のステージ手順が `cp -R assets target/compatibility-package/assets` であり、rust-cache で復元された `target/compatibility-package/assets` が既にあると `assets/assets/` へ入れ子コピーになる。ステージ直後の `assets/network` が空になり、バイナリは隣の `assets/` を同梱既定として選ぶため `network profile 'default' was not found`（`E1003`）になる
+- [x] 原因の記録: 従来の最後の砦が `env!("CARGO_MANIFEST_DIR")` だったため、ビルドした機械のソースパスが存在する環境（CI のランナー）では検査をすり抜け、配布物だけで壊れる状態を検出できなかった
+- [x] `src/assets.rs` を追加し、同梱既定（network / filters / quotas / engines）を `include_str!` で保持する
+- [x] `usecases::config::bundled_root` を「バイナリの隣の `assets/` → 作業ディレクトリから上方探索」の 2 段にし、`CARGO_MANIFEST_DIR` 依存を外す（`Env` に `current_dir` を追加）
+- [x] 資源の解決（network / filters / quota / engines）で、ファイルが見つからない ID は埋め込み既定へ落とす。`config show` の `source` は `embedded` と表示する
+- [x] `REF:.github/workflows/ci.yml` のステージ手順を冪等にする（`rm -rf target/compatibility-package` の後にコピーする）
+- [x] `REF:scripts/check-release.sh` に「`assets/` 無し」「`assets/assets/` のみ」の 2 形態を追加し、同梱既定で起動できることを検査する
+- [x] `tests/m11.rs` に、埋め込み既定での起動と `bundled_root` の 2 段探索の回帰試験を追加する
+- [x] 実バイナリでの確認（CI と同じステージ手順で E1003 が出ないこと、`assets/` を削った状態でも 3 コマンドが成功すること）
 
 ---
 
