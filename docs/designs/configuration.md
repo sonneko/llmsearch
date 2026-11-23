@@ -14,6 +14,10 @@
 
 `src/core/config/` に種別ごとの型を置く（`settings.rs`, `network.rs`, `filter.rs`, `quota.rs`）。読み込みは `src/adapters/config/mod.rs` が担当し、`serde_json` で `Value` → 型へ変換する。種別ごとのファイル名と探索ディレクトリは `src/adapters/config/mod.rs` に定数として集約する。
 
+同梱アセットの既定値は `src/assets.rs` の `include_str!` 群として 1 か所に置く。`assets::Resource`（`Network` / `Filters` / `Quota` / `Engines`）が `dir()` と `embedded()` を持ち、`embedded()` は `(id, JSON 本文)` を返す。エンジン定義だけはファイル名ではなく定義の `id@variant` をキーにする。ファイル探索（バイナリの隣の `assets/` → 作業ディレクトリから上方探索）で見つからない ID についてだけ埋め込みへ落とす。優先順位は「利用者ファイル > 同梱ファイル > 埋め込み」であり、埋め込みはファイルが 1 つも無い配布形態でも起動できるようにするための最後の砦である。
+
+同梱アセットの既定値は `src/assets.rs` の `include_str!` 群として 1 か所に置く。`assets::Resource`（`Network` / `Filters` / `Quota` / `Engines`）が `dir()` と `embedded()` を持ち、`embedded()` は `(id, JSON 本文)` を返す。エンジン定義だけはファイル名ではなく定義の `id@variant` をキーにする。ファイル探索（バイナリの隣の `assets/` → 作業ディレクトリから上方探索）で見つからない ID についてだけ埋め込みへ落とす。優先順位は「利用者ファイル > 同梱ファイル > 埋め込み」であり、埋め込みはファイルが 1 つも無い配布形態でも起動できるようにするための最後の砦である。
+
 ### 1.2 `$ref` による分割
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）

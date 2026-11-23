@@ -26,6 +26,20 @@
 
 `adapters::config::layout::network_dirs(config_path) -> Vec<PathBuf>` が 4 経路を返す。同梱既定は `assets/network/*.json` を `include_str!` で埋め込み、`&'static str` として保持する（実行時にファイルシステム上のリポジトリを参照しない）。
 
+`usecases::config::bundled_root(env) -> PathBuf` は同梱アセットの根を次の順で決める（M11）。
+
+1. `env.executable_dir()/assets` がディレクトリであればそこ（配布物を展開した配置）。
+2. 無ければ `env.current_dir()` から上方へたどり、`assets/config/settings.json` を含む最初の `assets/`。完全なアセットだけを拾うため、`config/settings.json` の実在を条件にする（無関係な `assets/` を影として拾わない）。
+3. どちらも無ければ空の `PathBuf` を返し、資源の解決は埋め込み既定へ落ちる。
+
+隣の `assets/` は常に上方探索より強いので、配布物の中に `assets/` があれば祖先ディレクトリを探しに行かない（影のリスクは「隣に `assets/` が無く、かつ祖先に完全な `assets/` がある」場合に限られる）。`bundled_root` の結果は `config show` の `engines.dir` にそのまま現れるため、どの `assets/` を使ったかは実行で確認できる。
+
+資源の解決（`adapters::config::resolve_network` / `resolve_filters` / `resolve_quota`）は、ディレクトリ探索で見つからなかった ID について `crate::assets::embedded_as::<T>(Resource::Network | Filters | Quota, id, ...)` へ落ちる。エンジン定義は `adapters::engine::loader::load_registry` が登録 0 件のときだけ `crate::assets::Resource::Engines::embedded()` を読む（ファイルが 1 件でも見つかればそれだけを使う＝利用者の定義を埋め込みで薄めない）。
+
+`config show` の `source` は、埋め込みで解決した資源について `embedded` と表示する（`Origin::Default` かつ `source == "embedded"`）。ディレクトリ探索で見つかった場合は従来どおり実パスを表示する。
+
+以前は候補 3（`env!("CARGO_MANIFEST_DIR")`）が最後の砦だった。ビルドした機械のソースパスがバイナリへ埋め込まれるため、CI のランナーでは偶然そのパスが存在して検査をすり抜け、配布物だけが壊れる状態を作っていた（M11 の原因）。埋め込み既定はこの経路を置き換える。
+
 ---
 
 ## 2. プロファイルの構造

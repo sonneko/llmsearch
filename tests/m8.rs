@@ -73,6 +73,11 @@ impl Env for TestEnv {
     fn config_home(&self) -> Option<PathBuf> {
         self.config_home.clone()
     }
+
+    /// 同梱アセットはリポジトリの `assets/` を使う（M11 の上方探索）。
+    fn current_dir(&self) -> Option<PathBuf> {
+        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+    }
 }
 
 /// 組み立て結果一式。

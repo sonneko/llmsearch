@@ -141,6 +141,10 @@ impl Env for SystemEnv {
     fn executable_dir(&self) -> Option<PathBuf> {
         std::env::current_exe().ok()?.parent().map(PathBuf::from)
     }
+
+    fn current_dir(&self) -> Option<PathBuf> {
+        std::env::current_dir().ok()
+    }
 }
 
 /// プロキシの認証情報を環境変数から解決する（表示には出さない）。

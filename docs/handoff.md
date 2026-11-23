@@ -21,15 +21,16 @@
 | 設定・監査・統合の適合（M8） | 完了 | `config show/path/init`（#11）・`quota reset` の履歴（#19）・設定探索順と環境変数（#20）・`search.merge` の統合（#22） | `REF:docs/plans.md#m8-config-quota-merge` |
 | JSON・秘匿情報・ドキュメント（M9） | 完了 | `--json` の統一（#4/#5）・`refine` と対象解決（#7/#9）・表示 URL の伏字化（#12）・ドキュメント整理（#21/#23）（PR #32） | `REF:docs/plans.md#m9-json-and-docs` |
 | 表示言語とエンジン言語（M10） | 完了 | CLI メッセージの全英語化・嘘をつく `ui.locale` の削除・`search.language` の追加 | `REF:docs/plans.md#m10-english-and-language` |
+| 配布互換ゲート（M11） | 完了 | CI の Build & Distribution Compatibility の `E1003`（ステージした `assets/` の入れ子）を直し、同梱既定の解決を配布配置に依存させない | `REF:docs/plans.md#m11-distribution-assets` |
 <!-- SYNC:END project-status -->
 
 ---
 
 ## 2. 現在のブランチ・PR・直近の作業状態
 
-- **ブランチ**: `arena/ecec2b4d-llmsearch`（base: develop `69e3161`）
+- **ブランチ**: `arena/c88de8a7-llmsearch`（base: develop `34c874e`）
 - **PR**: #26（M5）・#28（M6）・#30（M7）・#31（M8）・#32（M9）は develop へマージ済み。M10 の PR は作成前。マージは進行役が行う。
-- **状態**: M10 実装済み。CLI メッセージの全英語化、`ui.locale` の削除（`W1002` で告知）、`search.language` と `--language` の追加、同梱 3 エンジンの言語配線。進捗は `REF:docs/plans.md#m10-english-and-language`。
+- **状態**: M11 実装済み（配布互換ゲートの `E1003` を修正。埋め込み既定と冪等なステージ）。M10 実装済み。CLI メッセージの全英語化、`ui.locale` の削除（`W1002` で告知）、`search.language` と `--language` の追加、同梱 3 エンジンの言語配線。進捗は `REF:docs/plans.md#m10-english-and-language`。
 - **基準検証**: `REF:scripts/verify.sh --quick`（docs / release-gate / fmt-check / lint / test）すべて緑。lib 149 件、`REF:tests/m10.rs` 19 件、`REF:tests/architecture.rs` 16 件を含む全テスト緑、`cargo clippy --all-targets` 警告ゼロ。
 - **作業中検証（M10）**: 実バイナリで `--help` 全 37 画面とエラー `E1001` / `E1002` / `E1004` / `E1007` / `E4002` / `E5001`、`config show` の 29 キー（`ui.locale` なし）、旧 `ui.locale` / `network.acceptLanguage` の `W1002`、疑似 tty の対話メニュー、ローカル HTTP スタブで `--language ja` / `pt-BR` / `de` がクエリの `{{language}}` と `Accept-Language` の両方へ届くことを確認（外部ネットワークは使わない）。M9 時点で `--json` の全サブコマンドが `done` を出すこと、`refine` の `previousQuery` と履歴、`--previous` の拒否、識別子の E5001 / E1006、検索結果・`outline`・`read`・`engines show --raw`・`engines test` の秘匿値を確認（ローカルの HTTP サーバのみ。外部ネットワークは使わない）。
 - **ツールチェーン**: `/home/user/build/env.sh`。再起動時は `REF:docs/developers.md` §2.2 に従い復旧する。未コミット作業を破棄する reset --hard は行わない。

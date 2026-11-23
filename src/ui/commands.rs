@@ -1276,11 +1276,19 @@ fn run_config(
                 done(renderer, "config show", format!("{} keys", rows.len()));
             } else {
                 for row in &rows {
+                    // 埋め込み既定から解決した資源は出所を隠さない（M11）。
+                    let value = if row.origin == crate::usecases::config::Origin::Default
+                        && !row.source.is_empty()
+                    {
+                        format!("{} ({})", row.value, row.source)
+                    } else {
+                        row.value.clone()
+                    };
                     renderer.out(&format!(
                         "{:<26} {:<10} {}",
                         row.key,
                         row.origin.label(),
-                        row.value
+                        value
                     ));
                 }
             }

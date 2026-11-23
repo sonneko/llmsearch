@@ -323,3 +323,13 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
 - 決定: `defaults.locale`・ネットワークの `acceptLanguage`・`ui.locale` は廃止し、残っていても実行を止めず `W1002` で 1 行告知する。`W1002` は `Resolved::checks` から `Resolved::warnings` へ写して開始前に stderr（`--json` では各イベントの `warnings`）へ届ける（それまで `unknown_key_warnings()` がどこからも呼ばれず、警告が出ていなかった）。
 - 決定: DuckDuckGo の `kl` は「地域と言語の固定対」しか取れないため同梱定義から外し、言語は `Accept-Language` で届ける。Brave は `search_lang={{language}}`、SearXNG は `language={{language}}` を定義側で持つ。
 - 検査: `REF:tests/m10.rs`（19 件。既定 `en`、`--language` の解決と `E1004`、`Accept-Language` とクエリの配線、定義側ヘッダの優先、廃止キーの `W1002` と実行継続、英語化）と `REF:tests/architecture.rs` の `no_japanese_in_source_literals` / `no_japanese_in_bundled_display_strings`。実バイナリで `--help` 37 画面、`E1001` / `E1002` / `E1004` / `E1007` / `E4002` / `E5001`、`config show` の 29 キー、旧 `ui.locale` / `acceptLanguage` の `W1002`、疑似 tty の対話メニュー、ローカル HTTP スタブで `--language ja` / `pt-BR` / `de` がクエリと `Accept-Language` の両方に届くことを確認。
+
+### [HIST:SPEC-FIX:F017] 2026-11-23 配布互換ゲートの `E1003` を、ステージの冪等化と埋め込み既定で直す
+[HIST-TAG: category=SPEC-FIX id=F017 topics=distribution,assets,ci,e1003,embedded,idempotent,m11]
+
+- 症状: CI の Build & Distribution Compatibility が `error: E1003 cannot read configuration file / detail: network profile 'default' was not found` で失敗していた。M10 以前（run #47、develop `69e3161`）から同じ失敗で、M10 の変更とは無関係だった。
+- 特定: CI ランナーへ一時的な診断ステップを入れ、ステージ後の実ツリーを GitHub API のアノテーションで読んだ。`target/compatibility-package/assets/assets/network/default.json` にだけ実体があり、`assets/network` と `assets/config` は空だった。`find target` に**ビルド前から** `target/compatibility-package` が存在しており、`Swatinem/rust-cache` が `target/` ごと復元することが原因と判明。旧ステージ手順 `cp -R assets target/compatibility-package/assets` はコピー先が既にあると `assets/assets/` へ入れ子コピーする。
+- 特定（隠蔽）: 最後の砦が `env!("CARGO_MANIFEST_DIR")` だったため、ビルドした機械のソースパスが存在する CI ランナーでは検査をすり抜け、配布物だけで壊れていた。同一コミット 2f6a428 の push 回（success）と PR 回（failure）が 2 秒差で割れていたのもこれで説明できる。
+- 修正: `src/assets.rs` に同梱既定（network / filters / quotas / engines）を `include_str!` で埋め込み、資源の解決でファイルが見つからない ID だけ埋め込みへ落とす。`bundled_root` は「バイナリの隣の `assets/` → 作業ディレクトリから上方探索（`assets/config/settings.json` を条件に完全なアセットだけを拾う）」の 2 段にし、`CARGO_MANIFEST_DIR` 依存を外した（`Env::current_dir` を追加）。`config show` の `source` は埋め込み解決を `embedded` と表示する。
+- 修正（再発防止）: CI のステージを `rm -rf target/compatibility-package` してから行う冪等な手順にし、直後にステージ内容の完全性を検査するステップを足した。`scripts/check-release.sh` は「通常」「`assets/` 無し」「`assets/assets/` のみ（今回の事故形）」の 3 形態を検証する。
+- 検証: 旧バイナリに新ゲートを当てると入れ子形態で `E1003` を再現して失敗し、新バイナリでは 3 形態すべて成功（`config show` は `default (embedded)`）。`tests/m11.rs` 7 件、全 17 スイート緑、`cargo clippy --all-targets -- -D warnings` 警告ゼロ。

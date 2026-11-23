@@ -38,6 +38,9 @@ pub fn engine_dirs(
 }
 
 /// ディレクトリ群を走査して定義を読み込む（同一 `id@variant` は先勝ち）。
+///
+/// 1 件も見つからない場合は埋め込み既定（`crate::assets`）へ落ちる。配布物で
+/// `assets/` が欠けていても既定エンジンで起動できるようにするため。
 pub fn load_registry(dirs: &[PathBuf]) -> Result<LoadedEngines, AppError> {
     let mut registry = EngineRegistry::new();
     let mut sources = Vec::new();
@@ -97,18 +100,38 @@ pub fn load_registry(dirs: &[PathBuf]) -> Result<LoadedEngines, AppError> {
         }
     }
 
+    // ファイルが 1 件も無い場合は埋め込み既定で起動する（`assets/` の欠落に耐える）。
     if registry.is_empty() {
-        return Err(AppError::with_detail(
-            ErrorCode::E4002,
-            format!(
-                "no engine definitions found (searched: {})",
-                dirs.iter()
-                    .map(|d| d.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        ));
+        for (id, text) in crate::assets::Resource::Engines.embedded() {
+            let value: serde_json::Value = serde_json::from_str(text).map_err(|e| {
+                AppError::with_detail(
+                    ErrorCode::E1003,
+                    format!("embedded engine definition '{id}' is unreadable: {e}"),
+                )
+            })?;
+            let def: EngineDef = serde_json::from_value(value).map_err(|e| {
+                AppError::with_detail(
+                    ErrorCode::E1004,
+                    format!("embedded engine definition '{id}': {e}"),
+                )
+            })?;
+            def.ensure_valid()?;
+            registry.insert(def);
+        }
+        if registry.is_empty() {
+            return Err(AppError::with_detail(
+                ErrorCode::E4002,
+                format!(
+                    "no engine definitions found (searched: {})",
+                    dirs.iter()
+                        .map(|d| d.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            ));
+        }
     }
+
     Ok(LoadedEngines {
         registry,
         sources,
@@ -146,9 +169,18 @@ mod tests {
     }
 
     #[test]
-    fn empty_dir_is_an_error() {
+    fn empty_dir_falls_back_to_embedded_definitions() {
+        // 配布物で `assets/engines/` が欠けても既定エンジンで起動する（M11）。
         let dir = tempfile::tempdir().unwrap();
-        let err = load_registry(&[dir.path().to_path_buf()]).unwrap_err();
-        assert_eq!(err.code, ErrorCode::E4002);
+        let loaded = load_registry(&[dir.path().to_path_buf()]).unwrap();
+        assert!(!loaded.registry.is_empty());
+        assert!(loaded.registry.get("duckduckgo").is_some());
+    }
+
+    #[test]
+    fn missing_embedded_definition_is_reported() {
+        // 埋め込みからの読み込みに失敗した場合だけ `E4002` になる。
+        let missing = crate::assets::embedded_json(crate::assets::Resource::Engines, "nope");
+        assert!(missing.is_none());
     }
 }

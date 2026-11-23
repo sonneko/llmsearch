@@ -257,10 +257,17 @@ pub fn resolve_network(
             })?;
             Ok((profile, Some(path)))
         }
-        None => Err(AppError::with_detail(
-            ErrorCode::E1003,
-            format!("network profile '{id}' was not found"),
-        )),
+        None => match crate::assets::embedded_as::<NetworkProfile>(
+            crate::assets::Resource::Network,
+            &id,
+            "network profile",
+        )? {
+            Some(profile) => Ok((profile, None)),
+            None => Err(AppError::with_detail(
+                ErrorCode::E1003,
+                format!("network profile '{id}' was not found"),
+            )),
+        },
     }
 }
 
@@ -292,10 +299,17 @@ pub fn resolve_filters(
             })?;
             Ok((set, Some(path)))
         }
-        None => Err(AppError::with_detail(
-            ErrorCode::E1003,
-            format!("filter set '{id}' was not found"),
-        )),
+        None => match crate::assets::embedded_as::<FilterSet>(
+            crate::assets::Resource::Filters,
+            &id,
+            "filter set",
+        )? {
+            Some(set) => Ok((set, None)),
+            None => Err(AppError::with_detail(
+                ErrorCode::E1003,
+                format!("filter set '{id}' was not found"),
+            )),
+        },
     }
 }
 
@@ -327,10 +341,17 @@ pub fn resolve_quota(
             })?;
             Ok((policy, Some(path)))
         }
-        None => Err(AppError::with_detail(
-            ErrorCode::E1003,
-            format!("quota policy '{id}' was not found"),
-        )),
+        None => match crate::assets::embedded_as::<QuotaPolicy>(
+            crate::assets::Resource::Quota,
+            &id,
+            "quota policy",
+        )? {
+            Some(policy) => Ok((policy, None)),
+            None => Err(AppError::with_detail(
+                ErrorCode::E1003,
+                format!("quota policy '{id}' was not found"),
+            )),
+        },
     }
 }
 

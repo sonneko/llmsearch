@@ -32,7 +32,13 @@
 
 `tests/contract/config_driven.rs` が、`tempfile::TempDir` に定義 JSON を書き出してからユースケースを実行する。エンジン追加は「`engines/extra.json` を置くと `engines list` と `search` の選択肢に現れる」ことを検証する。クォータは偽の `CounterStore` を注入して境界値（上限ちょうど・上限 +1）を検証する。キャッシュは偽 `HttpClient` の呼び出し回数で検証する。
 
-### 1.5 安全性の受入基準
+### 1.5 配布物の受入基準
+
+状態: 実装完了（REF:scripts/check-release.sh, REF:tests/m11.rs）
+
+配布ゲート（`REF:scripts/check-release.sh`）が、ステージしたパッケージに対して「バイナリの隣に `assets/` がある状態」「`assets/` を削除した状態」「`assets/assets/` に入れ子で重複した状態」の 3 通りで `--version` / `engines list` / `config show` を実行する。パッケージ化の再実行で入れ子が出ないことは `REF:scripts/test-check-release.sh` 側で検査する。CI では同じ手順を `REF:.github/workflows/ci.yml` の Build & Distribution Compatibility ジョブが Ubuntu 22.04 / 24.04 のコンテナで実行する。
+
+### 1.6 安全性の受入基準
 
 状態: 実装完了（REF:tests/integration.rs, REF:tests/contract.rs）
 
