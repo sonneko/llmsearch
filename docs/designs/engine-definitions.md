@@ -69,6 +69,12 @@
 
 `core/template.rs` の `expand(tmpl: &str, ctx: &TmplCtx) -> Result<String, AppError>` が 1 パスで `{{name}}` を置換する。未知の変数は `E1004`。`encoding` が `utf-8` 以外の場合は `encode_query` を通してから URL エンコードする（`url::form_urlencoded` は UTF-8 前提のため、独自に `%XX` を組み立てる）。
 
+`TmplCtx` に `language: String`（主言語タグ）を足し、`locale` は同じ `search.language` の正規化後の全体を入れる（M10）。`core/engine.rs` の `ALLOWED_VARS` にも `language` を追加する。`Defaults` は `region` と `#[serde(flatten)] extra` のみとし、`locale` / `language` フィールドを削除する（旧定義では未知キーとして `extra` に落ち、`EngineDef::validate()` が `W1002` を出す。`EngineDef` 側にも `extra` があるため実装はどちらでも温存される）。言語は常に `search.language` が決め、定義からは上書きできない。
+
+`Accept-Language` の補完は `src/adapters/engine/eval.rs` の `evaluate()` で行う。`template::prepare` の結果に `Accept-Language` が無ければ `ctx.locale`（正規化後の全体）を挿入する。`engines test --dry-run` の表示にも同じ補完結果を出す（`usecases::engines::dry_run` が同じ処理を共有する）。
+
+`Defaults` の未知キー（`locale` / `language`）は `Defaults::validate()` で `W1002` とし、`EngineDef::validate()` がそれを取り込む。
+
 ### 3.3 認証情報の参照
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）

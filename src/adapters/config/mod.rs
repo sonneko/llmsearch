@@ -39,7 +39,7 @@ pub struct LoadOptions {
 pub fn load(env: &dyn Env, options: &LoadOptions) -> Result<LoadedSettings, AppError> {
     let candidates = candidate_paths(env, options)?;
     let mut merged = serde_json::to_value(Settings::default())
-        .map_err(|e| AppError::with_detail(ErrorCode::E1003, format!("既定値: {e}")))?;
+        .map_err(|e| AppError::with_detail(ErrorCode::E1003, format!("defaults: {e}")))?;
     let mut sources = Vec::new();
     let mut layers = Vec::new();
     let mut base_dir = PathBuf::from(".");
@@ -68,8 +68,12 @@ pub fn load(env: &dyn Env, options: &LoadOptions) -> Result<LoadedSettings, AppE
         apply_override(&mut merged, key, value.clone())?;
     }
 
-    let settings: Settings = serde_json::from_value(merged)
-        .map_err(|e| AppError::with_detail(ErrorCode::E1004, format!("設定の解釈に失敗: {e}")))?;
+    let settings: Settings = serde_json::from_value(merged).map_err(|e| {
+        AppError::with_detail(
+            ErrorCode::E1004,
+            format!("failed to interpret the configuration: {e}"),
+        )
+    })?;
     Ok(LoadedSettings {
         settings,
         sources,
@@ -88,7 +92,10 @@ fn candidate_paths(env: &dyn Env, options: &LoadOptions) -> Result<Vec<PathBuf>,
         if !path.is_file() {
             return Err(AppError::with_detail(
                 ErrorCode::E1003,
-                format!("--config の指定先が無い: {}", path.display()),
+                format!(
+                    "--config points at a file that does not exist: {}",
+                    path.display()
+                ),
             ));
         }
         return Ok(vec![path.clone()]);
@@ -98,7 +105,7 @@ fn candidate_paths(env: &dyn Env, options: &LoadOptions) -> Result<Vec<PathBuf>,
         if !path.is_file() {
             return Err(AppError::with_detail(
                 ErrorCode::E1003,
-                format!("LLMSEARCH_CONFIG の指定先が無い: {raw}"),
+                format!("LLMSEARCH_CONFIG points at a file that does not exist: {raw}"),
             ));
         }
         return Ok(vec![path]);
@@ -148,7 +155,12 @@ fn read_json(path: &Path) -> Result<Value, AppError> {
     serde_json::from_str(&text).map_err(|e| {
         AppError::with_detail(
             ErrorCode::E1003,
-            format!("{}: 行 {} 桁 {}: {e}", path.display(), e.line(), e.column()),
+            format!(
+                "{}: line {} column {}: {e}",
+                path.display(),
+                e.line(),
+                e.column()
+            ),
         )
     })
 }
@@ -247,7 +259,7 @@ pub fn resolve_network(
         }
         None => Err(AppError::with_detail(
             ErrorCode::E1003,
-            format!("network プロファイル '{id}' が見つからない"),
+            format!("network profile '{id}' was not found"),
         )),
     }
 }
@@ -282,7 +294,7 @@ pub fn resolve_filters(
         }
         None => Err(AppError::with_detail(
             ErrorCode::E1003,
-            format!("filters 集合 '{id}' が見つからない"),
+            format!("filter set '{id}' was not found"),
         )),
     }
 }
@@ -317,7 +329,7 @@ pub fn resolve_quota(
         }
         None => Err(AppError::with_detail(
             ErrorCode::E1003,
-            format!("quota ポリシー '{id}' が見つからない"),
+            format!("quota policy '{id}' was not found"),
         )),
     }
 }

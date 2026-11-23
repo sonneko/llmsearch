@@ -21,6 +21,7 @@
 | `--json` | 無効 | 標準出力を JSON イベント形式にする |
 | `--session <id>` | 自動採番 | 既存セッションを継続する |
 | `--engine <id[@variant]>` | 設定値 | 検索エンジンを一時的に切り替える |
+| `--language <tag>` | 設定値 | 検索エンジンへ送る言語（`search.language`）を一時的に切り替える |
 | `--network <id>` | 設定値 | ネットワークプロファイルを一時的に切り替える |
 | `--filters <id>` | 設定値 | フィルタ集合を一時的に切り替える |
 | `--quota <id>` | 設定値 | クォータポリシーを一時的に切り替える |
@@ -101,13 +102,13 @@ Q: 気候変動 適応策            engine: duckduckgo   表示: 1-7 件目
 節本文は、出所が分かるヘッダ行と、信頼できない外部コンテンツであることを示すマーカーの後に出力する。
 
 ```text
---- D1:S3 | 2. 適応計画の策定 | h2 | 3,560 字 ---
+--- D1:S3 | 2. Adaptation planning | h2 | 3,560 chars ---
 [untrusted] https://example.jp/adaptation
 <節の Markdown 本文>
 --- end ---
 ```
 
-予算超過で切り詰めた場合は、末尾に `[truncated: 表示 8000 / 全体 12000 字]` の形式で、表示した字数と全体の字数を 1 行出力する。見出しの階層を保つため、切り詰めは行境界で行う。
+予算超過で切り詰めた場合は、末尾に `[truncated: shown 8000 / total 12000 chars]` の形式で、表示した字数と全体の字数を 1 行出力する。見出しの階層を保つため、切り詰めは行境界で行う。
 
 ### 2.5 通常の情報行
 
@@ -115,9 +116,9 @@ Q: 気候変動 適応策            engine: duckduckgo   表示: 1-7 件目
 
 | 状況 | 表示例 |
 |---|---|
-| 検索後 | `検索 7 件（フィルタ除外 5 件） / searches 13/50 (session)` |
-| 取得後 | `取得 D1 4,200 字 / fetches 9/100 (session)` |
-| 上限到達 | `上限に達しました: day.searches 500/500（リセット 2026-11-08 00:00）` |
+| 検索後 | `7 results (5 filtered out) / searches 13/50 (session)` |
+| 取得後 | `fetched D1 4,200 chars / fetches 9/100 (session)` |
+| 上限到達 | `quota exhausted: day.searches 500/500 (resets 2026-11-08 00:00)` |
 
 ### 2.6 中断と復帰
 

@@ -44,11 +44,11 @@ impl SessionStore for FsSessionStore {
                 Err(AppError::with_detail(
                     ErrorCode::E5001,
                     format!(
-                        "{} を読めない（{e}）。退避先: {}",
+                        "{} cannot be read ({e}). Moved to: {}",
                         path.display(),
                         moved
                             .map(|p| p.display().to_string())
-                            .unwrap_or_else(|| "（退避できず）".to_string())
+                            .unwrap_or_else(|| "(could not move it aside)".to_string())
                     ),
                 ))
             }
@@ -59,7 +59,7 @@ impl SessionStore for FsSessionStore {
         self.paths.ensure()?;
         let path = self.file(&session.session_id);
         let text = serde_json::to_vec_pretty(session)
-            .map_err(|e| AppError::with_detail(ErrorCode::E5002, format!("直列化: {e}")))?;
+            .map_err(|e| AppError::with_detail(ErrorCode::E5002, format!("serialization: {e}")))?;
         write_atomic(&path, &text)
     }
 
@@ -199,7 +199,7 @@ impl DocumentStore for FsDocumentStore {
             AppError::with_detail(ErrorCode::E5002, format!("{}: {e}", dir.display()))
         })?;
         let meta_text = serde_json::to_vec_pretty(meta)
-            .map_err(|e| AppError::with_detail(ErrorCode::E5002, format!("直列化: {e}")))?;
+            .map_err(|e| AppError::with_detail(ErrorCode::E5002, format!("serialization: {e}")))?;
         write_atomic(&dir.join("meta.json"), &meta_text)?;
         write_atomic(&dir.join("body.md"), markdown.as_bytes())?;
         // 上限を超えた分は古い文書から落とす
@@ -254,7 +254,7 @@ impl CounterStore for FsCounters {
     fn save(&self, counters: &Counters) -> Result<(), AppError> {
         self.paths.ensure()?;
         let text = serde_json::to_vec_pretty(counters)
-            .map_err(|e| AppError::with_detail(ErrorCode::E5002, format!("直列化: {e}")))?;
+            .map_err(|e| AppError::with_detail(ErrorCode::E5002, format!("serialization: {e}")))?;
         write_atomic(&self.paths.counters_file(), &text)
     }
 
@@ -306,11 +306,18 @@ mod tests {
             };
             store.put(&meta, "x".repeat(64).as_str()).unwrap();
         }
-        assert_eq!(store.evict_to_limit().unwrap(), 0, "上限 0 は無制限");
+        assert_eq!(
+            store.evict_to_limit().unwrap(),
+            0,
+            "a limit of 0 means unlimited"
+        );
 
         let bounded = FsDocumentStore::new(paths.clone()).with_max_bytes(1);
         let removed = bounded.evict_to_limit().unwrap();
-        assert_eq!(removed, 2, "上限超過時は全て削除される");
+        assert_eq!(
+            removed, 2,
+            "everything is removed when the limit is exceeded"
+        );
         assert_eq!(bounded.total_bytes().unwrap(), 0);
     }
 

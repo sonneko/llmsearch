@@ -76,7 +76,7 @@ pub fn get(app: &App, selector: &str) -> Result<EngineDef, AppError> {
     app.engines.get(selector).cloned().ok_or_else(|| {
         AppError::with_detail(
             ErrorCode::E4002,
-            format!("エンジン '{selector}' が見つからない"),
+            format!("engine '{selector}' was not found"),
         )
     })
 }
@@ -94,7 +94,7 @@ pub fn validate(app: &App, selectors: &[String]) -> Vec<(String, Vec<Check>)> {
                 None => {
                     out.push((
                         s.clone(),
-                        vec![Check::Fail(format!("E4002: エンジン '{s}' が見つからない"))],
+                        vec![Check::Fail(format!("E4002: engine '{s}' was not found"))],
                     ));
                     None
                 }
@@ -105,14 +105,16 @@ pub fn validate(app: &App, selectors: &[String]) -> Vec<(String, Vec<Check>)> {
         let mut checks = def.validate();
         for env in collect_envs(&def) {
             if app.secrets.contains(&env) {
-                checks.push(Check::Ok(format!("環境変数 {env} は設定済み")));
+                checks.push(Check::Ok(format!("environment variable {env} is set")));
             } else {
-                checks.push(Check::Fail(format!("環境変数 {env} が未設定")));
+                checks.push(Check::Fail(format!(
+                    "environment variable {env} is not set"
+                )));
             }
         }
         if checks.iter().all(|c| !c.is_fail()) && !checks.iter().any(|c| matches!(c, Check::Ok(_)))
         {
-            checks.push(Check::Ok("問題なし".to_string()));
+            checks.push(Check::Ok("no issues".to_string()));
         }
         out.push((def.selector(), checks));
     }
@@ -138,11 +140,21 @@ pub fn dry_run(app: &App, def: &EngineDef, query: &str, page: u32) -> Result<Dry
         offset,
         page: page_number,
         limit,
-        locale: def.defaults.locale.clone().unwrap_or_default(),
+        language: app.language().primary,
+        locale: app.language().tag,
         region: def.defaults.region.clone().unwrap_or_default(),
         ..Default::default()
     };
-    let prepared = template::prepare(def, &ctx, &app.secrets)?;
+    let mut prepared = template::prepare(def, &ctx, &app.secrets)?;
+    if !prepared
+        .headers
+        .keys()
+        .any(|k| k.eq_ignore_ascii_case("accept-language"))
+    {
+        prepared
+            .headers
+            .insert("Accept-Language".to_string(), ctx.locale.clone());
+    }
     let secrets: Vec<String> = app
         .secrets
         .names()
@@ -193,9 +205,9 @@ pub fn describe(def: &EngineDef) -> Vec<(String, String)> {
         (
             "paging".into(),
             match &def.paging {
-                None => "なし".to_string(),
+                None => "none".to_string(),
                 Some(p) => format!(
-                    "{} / {} 件ずつ / 上限 {}",
+                    "{} / {} at a time / limit {}",
                     match p.style {
                         PagingStyle::Offset => "offset",
                         PagingStyle::Page => "page",

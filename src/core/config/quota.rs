@@ -241,7 +241,7 @@ impl ExceedInfo {
             self.limit
         );
         if let Some(at) = &self.resets_at {
-            detail.push_str(&format!("（リセット {at}）"));
+            detail.push_str(&format!(" (resets {at})"));
         }
         AppError::with_detail(ErrorCode::E5005, detail)
     }
@@ -420,19 +420,19 @@ pub fn validate(policy: &QuotaPolicy) -> Vec<Check> {
     let mut out = Vec::new();
     if policy.schema_version != 2 {
         out.push(Check::Fail(format!(
-            "quotas.schemaVersion = {}（対応版は 2）",
+            "quotas.schemaVersion = {} (supported: 2)",
             policy.schema_version
         )));
     }
     for w in &policy.window {
         if w.minutes == 0 || w.minutes > 10080 {
             out.push(Check::Fail(format!(
-                "quotas.window.minutes = {}（許容範囲 1〜10080）",
+                "quotas.window.minutes = {} (allowed range 1..=10080)",
                 w.minutes
             )));
         }
         if w.limits.is_empty() {
-            out.push(Check::Warn("quotas.window に上限が 1 つも無い".into()));
+            out.push(Check::Warn("quotas.window has no limit".into()));
         }
     }
     if out.iter().all(|c| !c.is_fail()) && out.is_empty() {

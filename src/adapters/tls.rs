@@ -81,19 +81,19 @@ pub fn load(env: &dyn Env, ca_file: &str) -> Result<Roots, AppError> {
         let bytes = std::fs::read(&path).map_err(|e| {
             AppError::with_detail(
                 ErrorCode::E2008,
-                format!("tls.caFile を読み込めない（{}）: {}", path.display(), e),
+                format!("cannot read tls.caFile ({}): {}", path.display(), e),
             )
         })?;
         let certs = parse_bundle(&bytes).map_err(|e| {
             AppError::with_detail(
                 ErrorCode::E2008,
-                format!("tls.caFile の解析に失敗（{}）: {}", path.display(), e),
+                format!("cannot parse tls.caFile ({}): {}", path.display(), e),
             )
         })?;
         if certs.is_empty() {
             return Err(AppError::with_detail(
                 ErrorCode::E2008,
-                format!("tls.caFile に証明書が無い（{}）", path.display()),
+                format!("tls.caFile contains no certificate ({})", path.display()),
             ));
         }
         roots.extend(&path.display().to_string(), certs);

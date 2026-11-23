@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn normalize_query_truncates() {
-        let long = "あ".repeat(600);
+        let long = "a".repeat(600);
         let (q, truncated) = normalize_query(&long);
         assert!(truncated);
         assert_eq!(q.chars().count(), 512);

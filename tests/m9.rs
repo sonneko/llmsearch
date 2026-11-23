@@ -4,7 +4,7 @@
 mod support;
 
 use clap::Parser;
-use llmsearch::core::errors::{ErrorCode, Locale};
+use llmsearch::core::errors::ErrorCode;
 use llmsearch::core::history::EventType;
 use llmsearch::ui::render::Renderer;
 use llmsearch::ui::{cli::Cli, commands};
@@ -12,7 +12,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 fn renderer(h: &support::Harness, json: bool) -> Renderer {
-    Renderer::new(json, false, Locale::Ja, true, 80, Arc::clone(&h.app.clock))
+    Renderer::new(json, false, true, 80, Arc::clone(&h.app.clock))
 }
 
 fn parse(args: &[&str]) -> Cli {
@@ -214,15 +214,13 @@ fn envelope_has_z_terminated_timestamp() {
     assert_eq!(event.get("event"), Some(&serde_json::json!("done")));
 }
 
-// --- #23: メッセージのロケール ---------------------------------------------
+// --- #23: メッセージの言語（M10 で英語固定） -----------------------------
 
-/// `message` / `hint` は `ui.locale` に従う（`Display` は日本語固定のまま）。
+/// `message` / `hint` は英語で固定（M10 で `Locale` を廃止）。
 #[test]
-fn message_and_hint_follow_locale() {
-    let ja = llmsearch::core::errors::message(ErrorCode::E5001, Locale::Ja);
-    let en = llmsearch::core::errors::message(ErrorCode::E5001, Locale::En);
-    assert_ne!(ja, en, "locale が反映されていない");
-    let hint_ja = llmsearch::core::errors::hint(ErrorCode::E5001, Locale::Ja);
-    let hint_en = llmsearch::core::errors::hint(ErrorCode::E5001, Locale::En);
-    assert_ne!(hint_ja, hint_en, "hint の locale が反映されていない");
+fn message_and_hint_are_english() {
+    let msg = llmsearch::core::errors::message(ErrorCode::E5001);
+    assert!(msg.is_ascii(), "message should be ASCII: {msg}");
+    let hint = llmsearch::core::errors::hint(ErrorCode::E5001);
+    assert!(hint.is_ascii(), "hint should be ASCII: {hint}");
 }

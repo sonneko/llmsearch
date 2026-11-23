@@ -18,7 +18,8 @@
 | 実運用と仕様同期（M6） | 完了 | システム CA ルート・E4004 耐性・M5 残 Issue の解消・ドキュメント同期（PR #28） | `REF:docs/plans.md#m6-dogfood-sync` |
 | 取得の作法と計測（M7） | 完了 | robots.txt の強制（#13）・`Retry-After`（#15）・`redirectPolicy` の 3xx（#17）・クォータ消費のずれ（#18） | `REF:docs/plans.md#m7-fetch-discipline` |
 | 設定・監査・統合の適合（M8） | 完了 | `config show/path/init`（#11）・`quota reset` の履歴（#19）・設定探索順と環境変数（#20）・`search.merge` の統合（#22） | `REF:docs/plans.md#m8-config-quota-merge` |
-| JSON・秘匿情報・ドキュメント（M9） | 実装中 | `--json` の統一（#4/#5）・`refine` と対象解決（#7/#9）・表示 URL の伏字化（#12）・ドキュメント整理（#21/#23） | `REF:docs/plans.md#m9-json-and-docs` |
+| JSON・秘匿情報・ドキュメント（M9） | 完了 | `--json` の統一（#4/#5）・`refine` と対象解決（#7/#9）・表示 URL の伏字化（#12）・ドキュメント整理（#21/#23）（PR #32） | `REF:docs/plans.md#m9-json-and-docs` |
+| 表示言語とエンジン言語（M10） | 完了 | CLI メッセージの全英語化・嘘をつく `ui.locale` の削除・`search.language` の追加 | `REF:docs/plans.md#m10-english-and-language` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -149,6 +150,19 @@ JSON 全コマンド統一・robots・クォータ計測変更・リダイレク
 - [x] #21: README のクォータ記述と `GUIDE.md` のテンプレート残骸を直し、設計書の TypeScript 時代のパスを実装に合わせる。未実装機能は仕様から外し `REF:docs/plans.md#unplanned` に移す
 - [x] #23: `E2007` を発行しない理由を仕様に明記したまま、`message` / `hint` を `ui.locale` で選び、`Display` は日本語固定であることを設計に記す
 - [x] 回帰試験 `REF:tests/m9.rs`
+
+<a id="m10-english-and-language"></a>
+### M10: CLI の全英語化とエンジン言語の一本化
+
+- [x] 仕様の改訂: `REF:docs/specifications/errors.md` §4.2 / §4.5、`REF:docs/specifications/configuration.md` §3.2.1 / §3.7 / §4 / §6.2、`REF:docs/specifications/engine-definitions.md` §2.1 / §3.2 / §8.3、`REF:docs/specifications/network.md` §2.1 / §7、`REF:docs/specifications/cli-interface.md` §1.3
+- [x] 設計の改訂: `REF:docs/designs/errors.md` §4、`REF:docs/designs/configuration.md` §3.2 / §3.7 / §4、`REF:docs/designs/engine-definitions.md` §3.2、`REF:docs/designs/network.md` §7、`REF:docs/designs/cli-interface.md` §1.3
+- [x] `Locale` の削除とカタログの英語化（`REF:src/core/errors.rs`、`Display` の日本語直書きを含む）
+- [x] `ui.locale` / `LLMSEARCH_UI_LOCALE` / `Settings::locale()` / `App::locale()` / `Renderer::set_locale()` / `peek_locale()` の削除と、旧 `ui.locale` への `W1002` 告知
+- [x] CLI・対話 UI・`doctor`・検証・警告・進捗の全英語化（`REF:src/ui/`・`REF:src/usecases/`・`REF:src/adapters/`）。同梱アセットの `description` も英語化
+- [x] `search.language`（既定 `en`）と `--language` / `LLMSEARCH_SEARCH_LANGUAGE` の追加、`src/core/lang.rs` の正規化、`{{language}}` / `{{locale}}` の配線
+- [x] `Accept-Language` のエンジン段での補完、`NetworkProfile.acceptLanguage` の廃止、同梱 3 エンジン（duckduckgo / brave / searxng）の言語パラメータ配線
+- [x] `REF:tests/architecture.rs` にユーザー可視日本語リテラルの検出を追加し、`tests/m10.rs` に言語設定の配線と `ui.locale` 廃止の回帰試験を追加
+- [x] 実バイナリでの確認（`--help`・エラー・実検索・`config show`・`engines test --dry-run`）と PR（develop 向け）
 
 ---
 

@@ -3,7 +3,7 @@
   "id": "brave",
   "variant": "api",
   "name": "Brave Search API",
-  "description": "API キーが必要。環境変数 BRAVE_API_KEY を value_env で参照する。",
+  "description": "Brave Search API. Requires an API key, referenced via value_env as BRAVE_API_KEY.",
   "enabled": true,
   "tags": ["general", "api"],
   "network": "default",
@@ -14,7 +14,8 @@
       "q": "{{query}}",
       "offset": "{{offset}}",
       "count": "{{limit}}",
-      "country": "{{region}}"
+      "country": "{{region}}",
+      "search_lang": "{{language}}"
     },
     "headers": {
       "Accept": "application/json",
@@ -67,7 +68,6 @@
     "requiresApiKey": true
   },
   "defaults": {
-    "locale": "ja",
     "region": "JP"
   }
 }

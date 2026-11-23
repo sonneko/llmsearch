@@ -21,7 +21,6 @@ fn main() {
     let renderer = std::sync::Arc::new(Renderer::new(
         cli.global.json,
         color,
-        llmsearch::core::errors::Locale::Ja,
         cli.global.quiet,
         deps.1.terminal_width(),
         std::sync::Arc::clone(&deps.0),
@@ -35,7 +34,7 @@ fn main() {
         use llmsearch::ports::Reporter as _;
         reporter.warn(&llmsearch::core::errors::Diagnostic::new(
             llmsearch::core::errors::WarningCode::W1001,
-            "標準出力が端末ではないため装飾を無効化した",
+            "color was requested but stdout is not a terminal; decorations disabled",
         ));
     }
 
@@ -61,6 +60,7 @@ fn main() {
         filters: cli.global.filters.clone(),
         quota: cli.global.quota.clone(),
         engine: cli.global.engine.clone(),
+        language: cli.global.language.clone(),
         no_filter: cli.global.no_filter,
         no_cache: cli.global.no_cache,
         refresh: cli.global.refresh,
@@ -69,13 +69,6 @@ fn main() {
         verbose: cli.global.verbose,
         overrides,
     };
-
-    // 設定の検証で失敗したときも、設定した言語で文言を出す。`build` が返す
-    // エラーは `ui.locale` を解決できない文脈で起きるため、ここで先に読む
-    // （読めない場合は日本語のまま。本来のエラーは `build` が報告する）。
-    if let Some(locale) = config_uc::peek_locale(cli.global.config.as_deref(), deps.1.as_ref()) {
-        renderer.set_locale(locale);
-    }
 
     let (app, resolved) = match config_uc::build(
         &bootstrap,
@@ -90,8 +83,6 @@ fn main() {
             std::process::exit(err.exit_code());
         }
     };
-
-    renderer.set_locale(app.locale());
 
     if app.verbose {
         for check in &resolved.checks {
@@ -135,7 +126,7 @@ fn run_interactive(
     if !app.env.is_stdin_tty() {
         let err = AppError::with_detail(
             ErrorCode::E1001,
-            "標準入力が端末ではない（サブコマンドを使ってください: llmsearch search \"...\")"
+            "stdin is not a terminal (use a subcommand such as: llmsearch search \"...\")"
                 .to_string(),
         );
         renderer.error(&err);

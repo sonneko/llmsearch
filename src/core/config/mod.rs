@@ -68,7 +68,7 @@ pub fn resolve_refs(
                 if target.starts_with("http://") || target.starts_with("https://") {
                     return Err(AppError::with_detail(
                         ErrorCode::E1003,
-                        format!("リモート参照は禁止: {target}"),
+                        format!("remote references are not allowed: {target}"),
                     ));
                 }
                 let path = base_dir.join(target);
@@ -76,7 +76,7 @@ pub fn resolve_refs(
                 if !visited.insert(canonical.clone()) {
                     return Err(AppError::with_detail(
                         ErrorCode::E1003,
-                        format!("$ref の循環参照: {}", path.display()),
+                        format!("circular $ref: {}", path.display()),
                     ));
                 }
                 let mut loaded: Value = read(&path)?;

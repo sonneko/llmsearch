@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "duckduckgo",
   "name": "DuckDuckGo (HTML)",
-  "description": "HTML の結果ページを CSS セレクタで読む既定エンジン。API キー不要。",
+  "description": "Default engine: reads the HTML result page with CSS selectors. No API key required.",
   "enabled": true,
   "tags": ["general", "no-key"],
   "network": "default",
@@ -11,12 +11,10 @@
     "url": "https://html.duckduckgo.com/html/",
     "query": {
       "q": "{{query}}",
-      "s": "{{offset}}",
-      "kl": "jp-jp"
+      "s": "{{offset}}"
     },
     "headers": {
-      "Accept": "text/html,application/xhtml+xml",
-      "Accept-Language": "ja,en;q=0.8"
+      "Accept": "text/html,application/xhtml+xml"
     },
     "encoding": "utf-8"
   },
@@ -55,7 +53,6 @@
     "requiresApiKey": false
   },
   "defaults": {
-    "locale": "ja",
     "region": "jp"
   }
 }

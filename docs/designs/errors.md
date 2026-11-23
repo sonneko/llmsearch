@@ -97,17 +97,21 @@
 
 状態: 実装完了（REF:src/core/errors.rs）
 
-`src/core/errors.rs` に「コード → (message, hint)」の表を `ja` / `en` の 2 言語で持つ。表は `match` で網羅し、`ErrorCode` の追加時にコンパイルエラーで漏れを検出する。
+`src/core/errors.rs` に「コード → (message, hint)」の表を英語 1 言語で持つ。表は `match` で網羅し、`ErrorCode` の追加時にコンパイルエラーで漏れを検出する。
 
 ### 4.2 言語
 
-状態: 実装完了（REF:src/core/errors.rs）
+状態: 実装完了（REF:src/core/errors.rs, REF:src/ui/render.rs）
 
-`enum Locale { Ja, En }` を `Settings.ui.locale` から決め、`catalog::message(code, locale)` で取得する。`&'static str` を返し、実行時に文字列を組み立てない（動的な値は `details` へ）。
+メッセージは英語で固定する。`Locale` の列挙、`message(code, locale)` / `hint(code, locale)` の `locale` 引数、`Settings.ui.locale`、`App::locale()`、`Renderer::set_locale()`、`peek_locale()` は削除した。
 
-`AppError` の `Display` は `ui.locale` を知らないため日本語のカタログ文言を返すが、利用者に見せる文言は `Renderer::error()` が `self.locale()` で選ぶ（JSON の `message` / `hint` と標準エラーが同じ言語になる）。`doctor` や検証結果も `err.message(app.locale())` を使い、`Display` の結果を直接表示しない。個別 `hint`（`AppError::hint`）は生成側が `ui.locale` に合わせて用意し、`Renderer::error()` がカタログの定型より優先する。
+- `pub fn message(code: ErrorCode) -> &'static str` / `pub fn hint(code: ErrorCode) -> &'static str` は `&'static str` を返し、実行時に文字列を組み立てない（動的な値は `details` へ）。
+- `AppError` の `Display` はカタログの英語文言を返す。`Renderer::error()`、`doctor`、検証結果のいずれも同じ文言を使うため、表示経路ごとの差異が無くなる（`ui.locale` を先読みする必要も無いので `main.rs` の `peek_locale` 呼び出しを削除する）。
+- 個別 `hint`（`AppError::hint`）は生成側が英語で用意し、`Renderer::error()` がカタログの定型より優先する。
+- `src/ui/`・`src/usecases/` のユーザー可視文字列リテラル（clap の `about` / doc コメント由来の help、状態表示、対話メニュー、警告、`doctor`、進捗）も英語にする。コメント・doc コメント（`//` / `///` / `//!`）は対象外。
+- 同梱アセット（`assets/engines/*.json` 等）の `description` は `engines list` / `show` に表示されるため英語にする。
 
-設定の読み込み・検証で失敗した場合は `App` が無いため `app.locale()` を使えない。`REF:src/main.rs` が `config_uc::peek_locale(config_path, env)`（`REF:src/usecases/config.rs`）で `ui.locale` だけを先読みし、`Renderer` に反映してから `build` を呼ぶ。先読みに失敗した場合は日本語のまま表示し、本来のエラーを `build` が報告する（先読みの失敗を利用者に見せない）。
+`tests/architecture.rs` に、`src/` の非コメント行に含まれる日本語文字（`U+3000`〜`U+30FF`、`U+4E00`〜`U+9FFF`、全角記号）を検出して失敗させる検査を追加し、回帰を防ぐ。検出対象外は行コメントと doc コメントのみとし、raw 文字列も対象に含める。
 
 ### 4.3 出力先
 
@@ -120,6 +124,12 @@
 状態: 実装完了（REF:src/core/errors.rs）
 
 `details` に動的な値を入れる場合は `redact::url_with_secrets` を通した値のみを使う。`SecretString` を `details` に変換する API を用意しない。
+
+### 4.5 廃止した `ui.locale`
+
+状態: 実装完了（REF:src/core/config/settings.rs, REF:src/usecases/config.rs）
+
+`UiSettings` から `locale` フィールドを削除すると、旧ファイルの `ui.locale` は `Settings.extra` ではなく `ui` オブジェクトの未知キーになる。`UiSettings` に `#[serde(flatten)] extra: serde_json::Map<String, serde_json::Value>` を足して温存し、`Settings::validate()` がキー `locale` を見つけたら `W1002` を出す。文言は廃止の告知（表示は常に英語、検索言語は `search.language`）を含める。`LLMSEARCH_UI_LOCALE` は `ENV_MAPPINGS` から削除し、`PASSTHROUGH_ENVS` にも載せない（設定されていても参照しない）。
 
 ---
 

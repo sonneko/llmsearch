@@ -44,7 +44,7 @@
 | `response` | 必須 | オブジェクト | 応答と抽出の定義（§4） |
 | `paging` | 任意 | オブジェクト | ページング定義（§5） |
 | `limits` | 任意 | オブジェクト | エンジン固有の上限（§6） |
-| `defaults` | 任意 | オブジェクト | 結果に付す既定値（言語・地域等） |
+| `defaults` | 任意 | オブジェクト | 結果に付す既定値。`region` のみを持ち、言語は `search.language` が決める（§3.2） |
 
 ### 2.2 未知キーの扱い
 
@@ -78,10 +78,13 @@
 | `offset` | 結果の開始位置（0 始まり）。`paging.offsetParam` と併用 |
 | `page` | ページ番号（1 始まり） |
 | `limit` | 1 ページの件数 |
-| `locale` | `defaults.locale` の値 |
+| `language` | `search.language` の値（`en`, `ja` 等の主言語タグ） |
+| `locale` | `search.language` の値（`language` の別名。後方互換のため残す） |
 | `region` | `defaults.region` の値 |
 | `apiKey` | 認証情報の値（`value_env` で解決済み）。ヘッダ・クエリの双方で使用可 |
 | `dateFrom` / `dateTo` | 日付指定（`YYYY-MM-DD`）。未指定時は空文字 |
+
+`language` は設定 `search.language`（`configuration.md` §3.2.1）の値で、定義やプロファイルでは上書きできない。`request.headers` に `Accept-Language` が無い場合は `Accept-Language: {{language}}` を付したものとして扱う（定義側で明示した値を優先し、`q` 値は付けない）。ネットワークプロファイルは `Accept-Language` を設定しない（`network.md` §7）。言語パラメータの名前がエンジンごとに異なる（Brave は `search_lang`、SearXNG は `language`）ため、定義側で変数名を対応づける。DuckDuckGo の `kl` は地域と言語の固定対しか取れないため同梱定義では使わず、`Accept-Language` で言語を届ける（`configuration.md` §3.2.1）。
 
 ### 3.3 認証情報の参照
 
@@ -257,7 +260,7 @@
 3. セレクタ・JSON パスの構文
 4. `value_env` の参照先環境変数の有無
 5. `paging` と `limits` の整合（`offsetStep` が 0 でない、`maxPageSize` が 1 以上）
-6. `defaults` の値の妥当性
+6. `defaults` の値の妥当性。`locale` / `language` は廃止したため未知キーとして `W1002` を出し、値は使わない（言語は常に `search.language`）
 
 結果は `[ok]` / `[warn]` / `[fail]` で 1 行ずつ表示し、失敗が 1 件でもあれば終了コード `1` を返す。
 

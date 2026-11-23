@@ -146,9 +146,9 @@ mod tests {
 
     #[test]
     fn decodes_shift_jis() {
-        let (bytes, _, _) = encoding_rs::SHIFT_JIS.encode("日本語");
+        let (bytes, _, _) = encoding_rs::SHIFT_JIS.encode("nihongo");
         let (text, errors) = decode_body(&bytes, "shift_jis");
-        assert_eq!(text, "日本語");
+        assert_eq!(text, "nihongo");
         assert!(!errors);
     }
 

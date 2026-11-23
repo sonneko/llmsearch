@@ -88,6 +88,23 @@
 | `engines` | 文字列配列 | `[]` | `merge=true` のとき統合するエンジン ID |
 | `snippetChars` | 整数 | `120` | スニペットの切り詰め |
 | `titleChars` | 整数 | `100` | タイトルの切り詰め |
+| `language` | 文字列 | `en` | 検索エンジンへ送る言語（§3.2.1） |
+
+#### 3.2.1 `search.language`
+
+検索エンジンへ送る言語を 1 か所で決める。表示言語（常に英語）とは独立である。
+
+- 値は BCP 47 の言語タグ（`en`, `ja`, `de`, `pt-BR` など）を基本とする。大文字小文字は区別しない。
+- 先頭の主言語タグは ISO 639 の 2〜3 文字の英字、続くサブタグは英数字 1〜8 文字の `-` 区切りとする。空文字・空白・上記に合わない値は `E1004`（許容範囲の提示）。
+- 既定値は `en`。同梱のエンジン定義にもネットワークプロファイルにも言語の直書きを残さない。
+
+反映先は次の 3 経路で、いずれも同じ値を使う。
+
+1. **テンプレート変数 `{{language}}`**: エンジン定義のクエリ・ヘッダ・本文で使える。主言語タグ（`en`, `ja`）を渡す。
+2. **`{{locale}}`**: 後方互換のため残し、`search.language` の値を渡す。旧 `defaults.locale` は廃止する（`engine-definitions.md` §2.1）。
+3. **`Accept-Language` ヘッダ**: エンジン定義が `Accept-Language` を指定していない場合、`Accept-Language: <language>` を付す（`q` 値は付けない）。
+
+ネットワークプロファイルの `acceptLanguage` は廃止する（`network.md` §2.1）。エンジンごとに異なる言語パラメータは定義側で表現する（Brave の `search_lang`、SearXNG の `language` など）。DuckDuckGo の `kl` は「地域と言語の固定対」（`jp-jp`, `us-en`）しか取れず言語単独では指定できないため、同梱定義では `kl` を書かず `Accept-Language` で言語を届ける（地域を寄せたい利用者は自前の定義で `kl` を書ける）。地域（`region`）は言語と独立で、従来どおり `defaults.region` で決める。
 
 ### 3.3 `context`
 
@@ -126,8 +143,9 @@
 | キー | 型 | 既定値 | 内容 |
 |---|---|---|---|
 | `color` | 文字列 | `auto` | `auto` / `always` / `never` |
-| `locale` | 文字列 | `ja` | `ja` / `en` |
 | `pageSize` | 整数 | `7` | 対話メニューで一度に表示する件数（`search.limit` と独立） |
+
+表示言語の設定は無い。メッセージは常に英語である（`errors.md` §4.2）。旧版の `ui.locale` は廃止した（同 §4.5）。
 
 ### 3.8 `state`
 
@@ -156,9 +174,11 @@
 | `LLMSEARCH_CONTEXT_MAX_CHARS` | `context.maxChars` | 整数 |
 | `LLMSEARCH_CONTEXT_OUTLINE_DEPTH` | `context.outlineDepth` | 整数 |
 | `LLMSEARCH_HISTORY_ENABLED` | `history.enabled` | `1` / `0` / `true` / `false` |
-| `LLMSEARCH_UI_LOCALE` | `ui.locale` | `ja` / `en` |
+| `LLMSEARCH_SEARCH_LANGUAGE` | `search.language` | 言語タグ。不正値は `E1004` |
 | `LLMSEARCH_UI_COLOR` | `ui.color` | `auto` / `always` / `never` |
 | `NO_COLOR` | `ui.color` | 設定時は `never`。`LLMSEARCH_UI_COLOR` より強い |
+
+`LLMSEARCH_UI_LOCALE` は廃止した。設定されていても無視する（`errors.md` §4.5）。
 
 `LLMSEARCH_CONFIG` は「そのファイルだけを使う」指定であり、指定先が存在しない場合は `E1003` で停止する（黙って既定値へ落ちない）。数値・真偽値として解釈できない値は、その変数を無視せず `E1004` として扱い、キーのパス・指定値・許容範囲を示す。
 
@@ -191,7 +211,7 @@
 
 ### 6.2 未知キーの温存
 
-未知のキーは警告 `W1002` を出して処理を継続し、ファイルへ書き戻す際に保持する。
+未知のキーは警告 `W1002` を出して処理を継続し、ファイルへ書き戻す際に保持する。オブジェクトの下位にある未知キー（`ui.locale` など）も同じ扱いとし、キーのパスを警告に含める。
 
 ### 6.3 参照の解決
 

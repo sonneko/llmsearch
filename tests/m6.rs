@@ -4,7 +4,7 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use clap::Parser;
-use llmsearch::core::errors::{ErrorCode, Locale};
+use llmsearch::core::errors::ErrorCode;
 use llmsearch::ports::{HttpClient, HttpRequest, HttpResponse};
 use llmsearch::ui::{cli::Cli, commands, render::Renderer};
 use serde_json::json;
@@ -60,7 +60,7 @@ impl HttpClient for SeqHttp {
 }
 
 fn renderer(h: &support::Harness, json: bool) -> Renderer {
-    Renderer::new(json, false, Locale::Ja, true, 80, Arc::clone(&h.app.clock))
+    Renderer::new(json, false, true, 80, Arc::clone(&h.app.clock))
 }
 
 fn parse(args: &[&str]) -> Cli {

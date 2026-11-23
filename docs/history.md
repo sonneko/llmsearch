@@ -313,3 +313,13 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
 - 決定: 設計書のパスはすべて実装（`src/core/outline.rs` / `src/core/context.rs` / `src/ui/render.rs` など）へ直した。仕様に残っていた未実装機能（`--profile`、`--no-filter=all`、`read --heading`、`export --with-body`）は `REF:docs/plans.md#unplanned` に移し、仕様からは外した。
 - 決定: `--no-filter` は値なしの真偽フラグとし、既定の除去要素は常に残す（安全性のため無効化手段を提供しない）。設計書が `--no-filter=all` を実装済みのように書いていたのを直した。
 - 検査: `REF:docs/script/verify-docs.py`（見出し一致・状態行・REF の実在・SYNC 一致）と、`docs/designs/` に `.ts` パスが残っていないことの grep。
+
+### [HIST:DECISION:D033] 2026-11-19 表示言語を英語に固定し、エンジンへ送る言語を `search.language` に一本化する
+[HIST-TAG: category=DECISION id=D033 topics=i18n,locale,language,search-language,accept-language,ui-locale]
+
+- 背景: `ui.locale` は存在するのに実際のメッセージは日本語固定で、英語を頼んでも日本語が出ていた（M9 の監査で確認）。またエンジンへ送る言語は `defaults.locale`・ネットワークの `acceptLanguage`・各エンジン定義の直書きに散っており、同じ言語を 3 か所で別々に決めていた。
+- 決定: メッセージ（エラー・警告・検証・進捗・対話 UI）は常に英語とし、`Locale` 型・カタログ・`ui.locale`・`LLMSEARCH_UI_LOCALE`・`App::locale()` / `Renderer::set_locale()` / `peek_locale()` を削除した。`AppError` の `message()` / `hint()` は locale を取らない。
+- 決定: エンジンへ送る言語は `search.language`（既定 `en`、BCP 47）だけが決める。`--language` と `LLMSEARCH_SEARCH_LANGUAGE` で上書きでき、`Bootstrap.language` が `ensure_valid()` の前に設定値へ上書きする。値は `{{language}}`（主言語）/ `{{locale}}`（タグ全体）と、定義が `Accept-Language` を書いていない場合の補完ヘッダの 3 経路で同じものを使う。
+- 決定: `defaults.locale`・ネットワークの `acceptLanguage`・`ui.locale` は廃止し、残っていても実行を止めず `W1002` で 1 行告知する。`W1002` は `Resolved::checks` から `Resolved::warnings` へ写して開始前に stderr（`--json` では各イベントの `warnings`）へ届ける（それまで `unknown_key_warnings()` がどこからも呼ばれず、警告が出ていなかった）。
+- 決定: DuckDuckGo の `kl` は「地域と言語の固定対」しか取れないため同梱定義から外し、言語は `Accept-Language` で届ける。Brave は `search_lang={{language}}`、SearXNG は `language={{language}}` を定義側で持つ。
+- 検査: `REF:tests/m10.rs`（19 件。既定 `en`、`--language` の解決と `E1004`、`Accept-Language` とクエリの配線、定義側ヘッダの優先、廃止キーの `W1002` と実行継続、英語化）と `REF:tests/architecture.rs` の `no_japanese_in_source_literals` / `no_japanese_in_bundled_display_strings`。実バイナリで `--help` 37 画面、`E1001` / `E1002` / `E1004` / `E1007` / `E4002` / `E5001`、`config show` の 29 キー、旧 `ui.locale` / `acceptLanguage` の `W1002`、疑似 tty の対話メニュー、ローカル HTTP スタブで `--language ja` / `pt-BR` / `de` がクエリと `Accept-Language` の両方に届くことを確認。

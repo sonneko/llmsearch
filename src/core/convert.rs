@@ -127,7 +127,7 @@ pub fn convert(
             if mode != ExtractMode::Whole {
                 warnings.push(Diagnostic::new(
                     WarningCode::W3001,
-                    "本文推定に失敗したため本文全体を変換した",
+                    "main content detection failed; the whole body was converted",
                 ));
             }
             cleaned
@@ -139,7 +139,7 @@ pub fn convert(
         .build()
         .convert(&html_fragment)
         .map_err(|e| {
-            AppError::with_detail(ErrorCode::E3004, format!("Markdown 変換に失敗: {e}"))
+            AppError::with_detail(ErrorCode::E3004, format!("Markdown conversion failed: {e}"))
         })?;
 
     // 見出しの無い文書はタイトルを見出しとして補う（節選択を可能にするため）
@@ -159,7 +159,7 @@ pub fn convert(
     if text::chars(&md) < 200 {
         warnings.push(Diagnostic::new(
             WarningCode::W3002,
-            "本文が 200 文字未満。JavaScript 依存のページかもしれない",
+            "the body is shorter than 200 characters; the page may need JavaScript",
         ));
     }
 
@@ -210,7 +210,7 @@ pub fn build_meta(
 }
 
 fn sel(pattern: &str) -> Selector {
-    Selector::parse(pattern).expect("静的セレクタ")
+    Selector::parse(pattern).expect("static selector")
 }
 
 fn meta_content(doc: &Html, key: &str) -> Option<String> {
@@ -365,23 +365,23 @@ fn pick_by_readability(doc: &Html) -> Option<scraper::ElementRef<'_>> {
 mod tests {
     use super::*;
 
-    const PAGE: &str = r#"<html lang="ja"><head>
-        <title>テスト記事</title>
-        <meta property="og:site_name" content="例のサイト">
+    const PAGE: &str = r#"<html lang="en"><head>
+        <title>Test article</title>
+        <meta property="og:site_name" content="Example site">
         <script>var x = 1;</script>
         </head><body>
-        <nav><a href="/">ホーム</a><a href="/b">次へ</a></nav>
+        <nav><a href="/">Home</a><a href="/b">Next</a></nav>
         <article>
-          <h1>記事の題</h1>
-          <p>これは最初の段落である。十分な長さを持たせるために文章を続ける。</p>
-          <h2>第一節</h2>
-          <p>第一節の本文。ここにも十分な長さの文章を置いておく必要がある。</p>
-          <h3>詳細</h3>
-          <p>詳細の本文。</p>
-          <h2>第二節</h2>
-          <p>第二節の本文。</p>
+          <h1>Article title</h1>
+          <p>This is the first paragraph. More sentences follow so that it is long enough to be detected as the main content.</p>
+          <h2>First section</h2>
+          <p>Body of the first section. This paragraph also needs enough length to keep the density check happy.</p>
+          <h3>Details</h3>
+          <p>Body of the details section.</p>
+          <h2>Second section</h2>
+          <p>Body of the second section.</p>
         </article>
-        <footer>著作権表示</footer>
+        <footer>Copyright notice</footer>
         </body></html>"#;
 
     #[test]
@@ -389,13 +389,13 @@ mod tests {
         let url = url::Url::parse("https://example.jp/a").unwrap();
         let out = convert(PAGE, &url, ExtractMode::Density, None).unwrap();
         assert!(
-            out.markdown.contains("# 記事の題") || out.markdown.contains("## 記事の題"),
+            out.markdown.contains("# Article title") || out.markdown.contains("## Article title"),
             "{}",
             out.markdown
         );
-        assert!(out.markdown.contains("第二節"));
-        assert!(!out.markdown.contains("著作権表示"));
-        assert_eq!(out.site.as_deref(), Some("例のサイト"));
+        assert!(out.markdown.contains("Second section"));
+        assert!(!out.markdown.contains("Copyright notice"));
+        assert_eq!(out.site.as_deref(), Some("Example site"));
         let levels: Vec<u8> = out.headings.iter().map(|h| h.level).collect();
         assert!(levels.contains(&2));
     }
@@ -404,7 +404,7 @@ mod tests {
     fn whole_mode_keeps_footer() {
         let url = url::Url::parse("https://example.jp/a").unwrap();
         let out = convert(PAGE, &url, ExtractMode::Whole, None).unwrap();
-        assert!(out.markdown.contains("著作権表示"));
+        assert!(out.markdown.contains("Copyright notice"));
     }
 
     #[test]
@@ -412,6 +412,6 @@ mod tests {
         let url = url::Url::parse("https://example.jp/a").unwrap();
         let out = convert(PAGE, &url, ExtractMode::Density, None).unwrap();
         assert!(!out.markdown.contains("var x"));
-        assert!(!out.markdown.contains("ホーム"));
+        assert!(!out.markdown.contains("Home"));
     }
 }

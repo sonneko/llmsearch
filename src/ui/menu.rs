@@ -47,10 +47,10 @@ impl ResultsChoice {
 
     pub fn label(self) -> &'static str {
         match self {
-            ResultsChoice::Quit => "終了",
-            ResultsChoice::Select => "検索結果の選択（複数可）",
-            ResultsChoice::More => "8 件目以降を見る",
-            ResultsChoice::Refine => "検索ワードを修正する",
+            ResultsChoice::Quit => "Quit",
+            ResultsChoice::Select => "Select results (multiple allowed)",
+            ResultsChoice::More => "Show results from the 8th onward",
+            ResultsChoice::Refine => "Edit the query",
         }
     }
 }
@@ -84,11 +84,11 @@ impl OutlineChoice {
 
     pub fn label(self) -> &'static str {
         match self {
-            OutlineChoice::Quit => "終了",
-            OutlineChoice::Read => "節を選んで読む（複数可）",
-            OutlineChoice::Depth => "見出しの表示深度を変更する",
-            OutlineChoice::Back => "検索結果一覧に戻る",
-            OutlineChoice::History => "履歴を見る",
+            OutlineChoice::Quit => "Quit",
+            OutlineChoice::Read => "Read sections (multiple allowed)",
+            OutlineChoice::Depth => "Change the outline depth",
+            OutlineChoice::Back => "Back to the results",
+            OutlineChoice::History => "Show the history",
         }
     }
 }
@@ -165,19 +165,19 @@ pub fn parse_input(screen: Screen, raw: &str) -> Input {
 
 /// 検索結果メニューの表示テキスト（番号は固定）。
 pub fn results_menu() -> String {
-    let mut out = String::from("  1) 終了\n  2) 検索結果の選択（複数可）\n");
-    out.push_str("  3) 8 件目以降を見る\n  4) 検索ワードを修正する\n> ");
+    let mut out = String::from("  1) Quit\n  2) Select results (multiple allowed)\n");
+    out.push_str("  3) Show results from the 8th onward\n  4) Edit the query\n> ");
     out
 }
 
 /// アウトライン・メニューの表示テキスト。
 pub fn outline_menu() -> String {
     let mut out = String::new();
-    out.push_str("  1) 終了\n");
-    out.push_str("  2) 節を選んで読む（複数可）\n");
-    out.push_str("  3) 見出しの表示深度を変更する\n");
-    out.push_str("  4) 検索結果一覧に戻る\n");
-    out.push_str("  5) 履歴を見る\n> ");
+    out.push_str("  1) Quit\n");
+    out.push_str("  2) Read sections (multiple allowed)\n");
+    out.push_str("  3) Change the outline depth\n");
+    out.push_str("  4) Back to the results\n");
+    out.push_str("  5) Show the history\n> ");
     out
 }
 
@@ -188,10 +188,10 @@ mod tests {
     #[test]
     fn results_menu_numbers_are_fixed() {
         let menu = results_menu();
-        assert!(menu.contains("1) 終了"));
-        assert!(menu.contains("2) 検索結果の選択（複数可）"));
-        assert!(menu.contains("3) 8 件目以降を見る"));
-        assert!(menu.contains("4) 検索ワードを修正する"));
+        assert!(menu.contains("1) Quit"));
+        assert!(menu.contains("2) Select results (multiple allowed)"));
+        assert!(menu.contains("3) Show results from the 8th onward"));
+        assert!(menu.contains("4) Edit the query"));
     }
 
     #[test]
@@ -225,6 +225,6 @@ mod tests {
     #[test]
     fn outline_choice_five_is_history() {
         assert_eq!(OutlineChoice::from_input("5"), Some(OutlineChoice::History));
-        assert!(outline_menu().contains("5) 履歴を見る"));
+        assert!(outline_menu().contains("5) Show the history"));
     }
 }

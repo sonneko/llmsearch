@@ -21,7 +21,7 @@ impl Secret {
     pub fn masked(&self) -> String {
         let n = self.0.chars().count();
         if n == 0 {
-            "（未設定）".to_string()
+            "(not set)".to_string()
         } else if n <= 4 {
             "****".to_string()
         } else {

@@ -169,7 +169,7 @@ impl SessionState {
     /// 品質の要約（1 行）。
     pub fn summary_line(&self) -> String {
         format!(
-            "セッション {} / 検索 {} 回 / 結果 {} 件 / 文書 {} 件",
+            "session {} / {} searches / {} results / {} documents",
             self.session_id,
             self.queries.len(),
             self.results.len(),

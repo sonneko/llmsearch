@@ -8,11 +8,11 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "llmsearch",
     version,
-    about = "Web を人間のように段階的に調べる CLI（LLM のコンテキストを節約する）",
+    about = "Explore the web step by step like a human would, without burning the LLM context",
     long_about = None,
 )]
 pub struct Cli {
-    /// 引数なしで起動すると対話モードになる。
+    /// Run without a subcommand to start interactive mode.
     #[command(subcommand)]
     pub command: Option<Command>,
 
@@ -22,177 +22,181 @@ pub struct Cli {
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct Global {
-    /// 標準出力を JSON Lines にする。
+    /// Emit JSON Lines on stdout.
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// 既存セッションを継続する。
+    /// Continue an existing session.
     #[arg(long, global = true, value_name = "ID")]
     pub session: Option<String>,
 
-    /// 検索エンジンを一時的に切り替える（`id` または `id@variant`）。
+    /// Use another search engine for this run (`id` or `id@variant`).
     #[arg(long, global = true, value_name = "ID")]
     pub engine: Option<String>,
 
-    /// ネットワークプロファイルを切り替える。
+    /// Set the language sent to the search engine (`search.language`).
+    #[arg(long, global = true, value_name = "TAG")]
+    pub language: Option<String>,
+
+    /// Use another network profile.
     #[arg(long, global = true, value_name = "ID")]
     pub network: Option<String>,
 
-    /// フィルタ集合を切り替える。
+    /// Use another filter set.
     #[arg(long, global = true, value_name = "ID")]
     pub filters: Option<String>,
 
-    /// クォータポリシーを切り替える。
+    /// Use another quota policy.
     #[arg(long, global = true, value_name = "ID")]
     pub quota: Option<String>,
 
-    /// 結果・本文フィルタを無効化する。
+    /// Disable the result and content filters.
     #[arg(long, global = true)]
     pub no_filter: bool,
 
-    /// キャッシュの読み書きを行わない。
+    /// Do not read or write the cache.
     #[arg(long, global = true)]
     pub no_cache: bool,
 
-    /// キャッシュを無視して再取得する。
+    /// Ignore the cache and fetch again.
     #[arg(long, global = true)]
     pub refresh: bool,
 
-    /// 設定ファイルを明示指定する。
+    /// Use an explicit configuration file.
     #[arg(long, global = true, value_name = "PATH")]
     pub config: Option<PathBuf>,
 
-    /// 状態ディレクトリを明示指定する。
+    /// Use an explicit state directory.
     #[arg(long, global = true, value_name = "PATH")]
     pub state_dir: Option<PathBuf>,
 
-    /// エンジン定義の追加探索ディレクトリ（複数指定可）。
+    /// Additional engine definition directories (repeatable).
     #[arg(long, global = true, value_name = "PATH")]
     pub engines_dir: Vec<PathBuf>,
 
-    /// 装飾を無効化する。
+    /// Disable decorations.
     #[arg(long, global = true, conflicts_with = "color")]
     pub no_color: bool,
 
-    /// 端末でなくても装飾する。
+    /// Decorate output even when stdout is not a terminal.
     #[arg(long, global = true)]
     pub color: bool,
 
-    /// 進捗表示を抑制する。
+    /// Suppress progress output.
     #[arg(long, global = true)]
     pub quiet: bool,
 
-    /// 診断情報を標準エラーへ追加する。
+    /// Add diagnostics to stderr.
     #[arg(long, global = true)]
     pub verbose: bool,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// 検索して結果一覧を出力する。
+    /// Search the web and print the results.
     Search {
         query: String,
-        /// 1 ページの件数（省略時は設定 `search.limit`）。
+        /// Results per page (defaults to `search.limit`).
         #[arg(long)]
         limit: Option<usize>,
-        /// ページ番号（1 始まり）。
+        /// Page number (1-based).
         #[arg(long, default_value_t = 1)]
         page: u32,
     },
-    /// 同一クエリの次ページを取得する。
+    /// Fetch the next page of the same query.
     Next {
         #[arg(long)]
         query: Option<String>,
     },
-    /// 検索語を変更して再検索する。
+    /// Change the query and search again.
     Refine { query: String },
-    /// 文書を取得・変換し、見出し一覧を出力する。
+    /// Fetch and convert a document, then print its outline.
     Outline {
         target: String,
-        /// 表示深度（2〜4。省略時は設定 `context.outlineDepth`）。
+        /// Outline depth, 2 to 4 (defaults to `context.outlineDepth`).
         #[arg(long)]
         depth: Option<u8>,
     },
-    /// 節本文を出力する。
+    /// Print the text of a section.
     Read {
         target: String,
-        /// 節（`D1:S3` / `S3` / `0` で全文）。複数指定可。
+        /// Section (`D1:S3`, `S3`, or `0` for the whole document). Repeatable.
         #[arg(long = "section", value_name = "ID")]
         sections: Vec<String>,
-        /// 子見出しの本文を含める（既定）。`--no-children` で除外する。
+        /// Include child sections (default). Use `--no-children` to exclude them.
         #[arg(long)]
         children: bool,
-        /// 子見出しの本文を含めない。
+        /// Exclude child sections.
         #[arg(long = "no-children", conflicts_with = "children")]
         no_children: bool,
-        /// 出力の上限文字数。
+        /// Maximum characters to print.
         #[arg(long, value_name = "N")]
         max_chars: Option<usize>,
     },
-    /// 閲覧履歴の参照・出力・削除。
+    /// Browse, export, or clear the history.
     History {
         #[command(subcommand)]
         action: Option<HistoryAction>,
-        /// 表示件数。
+        /// Number of entries to show.
         #[arg(long, default_value_t = 20)]
         limit: usize,
-        /// 絞り込みキーワード。
+        /// Keyword filter.
         #[arg(long)]
         query: Option<String>,
-        /// 種別で絞り込む。
+        /// Filter by event kind (repeatable).
         #[arg(long = "type")]
         kinds: Vec<String>,
-        /// この日時より前。
+        /// Only entries before this time.
         #[arg(long)]
         before: Option<String>,
-        /// 削除を確認なしで実行する。
+        /// Delete without asking for confirmation.
         #[arg(long)]
         yes: bool,
     },
-    /// エンジン定義の参照・検証・試行。
+    /// Inspect, validate, or try engine definitions.
     Engines {
         #[command(subcommand)]
         action: Option<EnginesAction>,
     },
-    /// ネットワークプロファイルの参照・検証。
+    /// Inspect or validate network profiles.
     Network {
         #[command(subcommand)]
         action: Option<NetworkAction>,
     },
-    /// フィルタ集合の参照・検証。
+    /// Inspect or validate filter sets.
     Filters {
         #[command(subcommand)]
         action: Option<FiltersAction>,
     },
-    /// クォータの参照・初期化・事前確認。
+    /// Inspect, reset, or check the quota.
     Quota {
         #[command(subcommand)]
         action: Option<QuotaAction>,
     },
-    /// 設定の表示・初期化・検証。
+    /// Show, initialize, or validate the configuration.
     Config {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
-    /// 環境・ネットワーク・設定の診断。
+    /// Diagnose the environment, network, and configuration.
     Doctor,
 }
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum HistoryAction {
-    /// 一覧（既定）。
+    /// List entries (default).
     List,
-    /// 1 件の詳細。
+    /// Show one entry in detail.
     Show { id: String },
-    /// キーワード検索。
+    /// Search entries by keyword.
     #[command(name = "grep")]
     Grep { query: String },
-    /// Markdown / JSON Lines で出力する。
+    /// Export as Markdown or JSON Lines.
     Export {
         #[arg(long, default_value = "markdown")]
         format: String,
     },
-    /// 全削除。
+    /// Clear all entries.
     Clear {
         #[arg(long)]
         yes: bool,
@@ -201,26 +205,26 @@ pub enum HistoryAction {
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum EnginesAction {
-    /// 一覧。
+    /// List.
     List,
-    /// 定義の表示。
+    /// Show a definition.
     Show {
         id: String,
-        /// 解決前の JSON をそのまま表示する。
+        /// Print the raw JSON before resolution.
         #[arg(long)]
         raw: bool,
     },
-    /// 検証。
+    /// Validate.
     Validate { ids: Vec<String> },
-    /// 1 回だけ試す。
+    /// Run one live search.
     Test {
         id: String,
         #[arg(long)]
         query: String,
-        /// リクエストの組み立て結果のみ表示する。
+        /// Only print the assembled request; do not send it.
         #[arg(long)]
         dry_run: bool,
-        /// 生の応答を先頭のみ表示する。
+        /// Print the head of the raw response.
         #[arg(long)]
         raw: bool,
     },
@@ -272,7 +276,7 @@ pub enum ConfigAction {
         force: bool,
     },
     Validate,
-    /// 個別のキーについて、解決後の値と由来を説明する。
+    /// Explain the resolved value and origin of one key.
     Explain {
         key: String,
     },
@@ -287,7 +291,7 @@ mod tests {
         let cli = Cli::try_parse_from([
             "llmsearch",
             "search",
-            "気候変動",
+            "climate change",
             "--limit",
             "7",
             "--json",
@@ -299,7 +303,7 @@ mod tests {
         assert_eq!(cli.global.engine.as_deref(), Some("duckduckgo"));
         match cli.command {
             Some(Command::Search { query, limit, page }) => {
-                assert_eq!(query, "気候変動");
+                assert_eq!(query, "climate change");
                 assert_eq!(limit, Some(7));
                 assert_eq!(page, 1);
             }
@@ -309,7 +313,7 @@ mod tests {
 
     #[test]
     fn search_limit_defaults_to_none() {
-        let cli = Cli::try_parse_from(["llmsearch", "search", "気候変動"]).unwrap();
+        let cli = Cli::try_parse_from(["llmsearch", "search", "climate change"]).unwrap();
         match cli.command {
             Some(Command::Search { limit, .. }) => assert_eq!(limit, None),
             other => panic!("unexpected: {other:?}"),

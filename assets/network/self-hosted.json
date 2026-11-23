@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "self-hosted",
-  "description": "自前のサービス向け。待機を短くし、間隔を詰める。",
+  "description": "For self-hosted services: shorter waits and tighter intervals.",
   "timeoutConnectMs": 2000,
   "timeoutTotalMs": 15000,
   "maxBytes": 8388608,
@@ -36,6 +36,5 @@
     "userAgentToken": "llmsearch",
     "onError": "allow",
     "maxBytes": 524288
-  },
-  "acceptLanguage": "ja,en;q=0.8"
+  }
 }

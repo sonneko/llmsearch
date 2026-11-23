@@ -63,7 +63,12 @@ pub fn load_registry(dirs: &[PathBuf]) -> Result<LoadedEngines, AppError> {
             let value: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
                 AppError::with_detail(
                     ErrorCode::E1003,
-                    format!("{}: 行 {} 桁 {}: {e}", path.display(), e.line(), e.column()),
+                    format!(
+                        "{}: line {} column {}: {e}",
+                        path.display(),
+                        e.line(),
+                        e.column()
+                    ),
                 )
             })?;
             // 1 ファイルに複数定義（配列）も許す
@@ -80,7 +85,7 @@ pub fn load_registry(dirs: &[PathBuf]) -> Result<LoadedEngines, AppError> {
                     warnings.push(Diagnostic::new(
                         WarningCode::W4002,
                         format!(
-                            "{} の定義 '{}' は既に読み込まれているため無視した",
+                            "ignored the definition '{}' in {} because it is already loaded",
                             path.display(),
                             def.selector()
                         ),
@@ -96,7 +101,7 @@ pub fn load_registry(dirs: &[PathBuf]) -> Result<LoadedEngines, AppError> {
         return Err(AppError::with_detail(
             ErrorCode::E4002,
             format!(
-                "エンジン定義が見つからない（探索: {}）",
+                "no engine definitions found (searched: {})",
                 dirs.iter()
                     .map(|d| d.display().to_string())
                     .collect::<Vec<_>>()

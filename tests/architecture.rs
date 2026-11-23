@@ -299,10 +299,10 @@ fn extract_outcome_carries_typed_diagnostics() {
 #[test]
 fn no_panics_outside_tests() {
     const ALLOWED: &[(&str, &str)] = &[
-        ("src/adapters/http.rs", "tokio ランタイムの生成に失敗"),
-        ("src/core/convert.rs", "静的セレクタ"),
+        ("src/adapters/http.rs", "failed to build the tokio runtime"),
+        ("src/core/convert.rs", "static selector"),
         ("src/core/markdown.rs", "link regex"),
-        ("src/core/select.rs", "静的パターン"),
+        ("src/core/select.rs", "static pattern"),
     ];
 
     let mut violations = Vec::new();
@@ -464,4 +464,128 @@ fn config_explain_reports_value_and_origin() {
     )
     .unwrap_err();
     assert_eq!(missing.code, llmsearch::core::errors::ErrorCode::E1004);
+}
+
+/// 利用者に見える文字列リテラルに日本語を残さない（M10）。
+///
+/// `src/` の各行から行コメント（`//` 以降）を取り除き、日本語文字
+/// （ひらがな・カタカナ・漢字・全角記号）が残っていないかを見る。
+/// doc コメント（`///` / `//!`）は行コメントとして除外されるため対象外である。
+/// 外部から得た日本語（本文・タイトル）はリテラルではないので影響しない。
+///
+/// 表示ではなく入力のゆらぎ吸収（全角の `Ｒ` を `R` として受ける等）や、
+/// 外部コンテンツ中のマーカー様文字列の無害化に日本語を使う箇所だけは、
+/// 行末に `m10:allow-japanese` を書いて明示的に除外する。
+#[test]
+fn no_japanese_in_source_literals() {
+    fn is_japanese(c: char) -> bool {
+        matches!(c as u32,
+            0x3000..=0x303F | 0x3040..=0x30FF | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF | 0xFF01..=0xFF60 | 0xFFE0..=0xFFE6)
+    }
+    /// 行から行コメントを落とす。文字列リテラル中の `//` は対象外にする。
+    fn strip_line_comment(line: &str) -> &str {
+        let bytes = line.as_bytes();
+        let mut in_str = false;
+        let mut in_char = false;
+        let mut escaped = false;
+        let mut i = 0;
+        while i < bytes.len() {
+            let c = bytes[i] as char;
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if in_str {
+                if c == '"' {
+                    in_str = false;
+                }
+            } else if in_char {
+                if c == '\'' {
+                    in_char = false;
+                }
+            } else if c == '"' {
+                in_str = true;
+            } else if c == '\'' {
+                in_char = true;
+            } else if c == '/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                return &line[..i];
+            }
+            i += 1;
+        }
+        line
+    }
+
+    let mut violations = Vec::new();
+    for file in rust_files(&root().join("src")) {
+        let rel = file
+            .strip_prefix(root())
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let text = read(&file);
+        for (i, line) in text.lines().enumerate() {
+            if line.contains("m10:allow-japanese") {
+                continue;
+            }
+            let code = strip_line_comment(line);
+            if code.chars().any(is_japanese) {
+                violations.push(format!("{rel}:{}", i + 1));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "ユーザー可視の日本語リテラルが残っている: {violations:?}"
+    );
+}
+
+/// 同梱アセットの表示用文字列（`name` / `description`）も英語にする（M10）。
+///
+/// フィルタの `titleRegex` や `boilerplate` は外部コンテンツに一致させるための
+/// データであり、利用者へ表示する文言ではないため対象外とする。
+#[test]
+fn no_japanese_in_bundled_display_strings() {
+    fn is_japanese(c: char) -> bool {
+        matches!(c as u32,
+            0x3000..=0x303F | 0x3040..=0x30FF | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF | 0xFF01..=0xFF60 | 0xFFE0..=0xFFE6)
+    }
+    let mut violations = Vec::new();
+    for dir in ["engines", "network", "filters", "quotas", "config"] {
+        let mut files = Vec::new();
+        collect_json(&root().join("assets").join(dir), &mut files);
+        for file in files {
+            let rel = file
+                .strip_prefix(root())
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            for (i, line) in read(&file).lines().enumerate() {
+                let trimmed = line.trim_start();
+                let is_display = trimmed.starts_with("\"name\":")
+                    || trimmed.starts_with("\"description\":")
+                    || trimmed.starts_with("\"userAgent\":");
+                if is_display && line.chars().any(is_japanese) {
+                    violations.push(format!("{rel}:{}", i + 1));
+                }
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "同梱アセットの表示用文字列に日本語が残っている: {violations:?}"
+    );
+}
+
+fn collect_json(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_json(&path, out);
+        } else if path.extension().map(|e| e == "json").unwrap_or(false) {
+            out.push(path);
+        }
+    }
 }

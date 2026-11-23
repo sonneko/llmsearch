@@ -3,7 +3,7 @@
   "id": "searxng",
   "variant": "json",
   "name": "SearXNG (JSON)",
-  "description": "自前の SearXNG の JSON API を読む。接続先 URL は request.url を書き換えて指定する。",
+  "description": "Reads the JSON API of a self-hosted SearXNG. Point request.url at your instance.",
   "enabled": true,
   "tags": ["general", "self-hosted"],
   "network": "self-hosted",
@@ -66,7 +66,6 @@
     "requiresApiKey": false
   },
   "defaults": {
-    "locale": "ja",
     "region": "jp"
   }
 }

@@ -72,8 +72,7 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
     {
         app.reporter.warn(&Diagnostic::new(
             WarningCode::W5002,
-            "状態ディレクトリの容量が上限を超えている（古いキャッシュを削除してください）"
-                .to_string(),
+            "the state directory exceeds its size limit (delete old cache entries)".to_string(),
         ));
     }
 
@@ -178,7 +177,7 @@ pub fn outline(app: &mut App, document: &DocumentRef, depth: u8) -> Result<Outli
         app.reporter.warn(&Diagnostic::new(
             WarningCode::W3004,
             format!(
-                "D{} を再取得したところ見出し数が {} から {} に変化した",
+                "refetching D{} changed the number of headings from {} to {}",
                 loaded.document.id,
                 loaded.document.headings,
                 headings.len()
@@ -264,7 +263,7 @@ pub fn read(
             return Err(AppError::with_detail(
                 ErrorCode::E1006,
                 format!(
-                    "節が見つからない（利用可能: {}）",
+                    "section not found (available: {})",
                     headings
                         .iter()
                         .take(10)
@@ -415,7 +414,7 @@ pub fn record_selection(app: &mut App, selections: &[(u32, u32)]) -> Result<(), 
 /// 節本文の出力ヘッダ。
 pub fn section_header(document: &DocumentRef, body: &SectionBody) -> String {
     format!(
-        "--- D{}:S{} | {} | h{} | {} 字 ---",
+        "--- D{}:S{} | {} | h{} | {} chars ---",
         document.id, body.heading_id, body.heading, body.level, body.chars
     )
 }
@@ -434,7 +433,7 @@ mod tests {
         let body = SectionBody {
             heading_id: 3,
             level: 2,
-            heading: "見出し".into(),
+            heading: "heading".into(),
             text: "x".into(),
             chars: 10,
             truncated: false,

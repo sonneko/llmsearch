@@ -68,9 +68,9 @@ impl RobotsGate {
         if rules.verdict(&profile.robots.user_agent_token, &path) == Verdict::Deny {
             return Err(AppError::with_detail(
                 ErrorCode::E2006,
-                format!("{origin} の robots.txt が {path} を拒否している"),
+                format!("robots.txt on {origin} disallows {path}"),
             )
-            .hint("別の URL を選ぶか、`network.robots.respect` の設定を確認する"));
+            .hint("choose another URL, or check `network.robots.respect`"));
         }
         Ok(())
     }
@@ -79,7 +79,7 @@ impl RobotsGate {
     fn load(&self, profile: &NetworkProfile, origin: &str) -> Result<Robots, AppError> {
         let robots_url = match Url::parse(&format!("{origin}/robots.txt")) {
             Ok(url) => url,
-            Err(_) => return self.on_fetch_failure(profile, origin, "URL を組み立てられない"),
+            Err(_) => return self.on_fetch_failure(profile, origin, "cannot build the URL"),
         };
         let request = HttpRequest::get(robots_url);
         let now = self.clock.now_utc();
@@ -89,7 +89,7 @@ impl RobotsGate {
                 let robots = Robots::parse(&text, profile.robots.max_bytes);
                 self.cache.put(origin, &robots, now);
                 self.reporter.verbose(&format!(
-                    "{origin} の robots.txt を読んだ（規則 {} 群）",
+                    "read robots.txt on {origin} ({} rule groups)",
                     robots.groups.len()
                 ));
                 Ok(robots)
@@ -109,12 +109,12 @@ impl RobotsGate {
         if profile.robots.on_error.trim().eq_ignore_ascii_case("deny") {
             return Err(AppError::with_detail(
                 ErrorCode::E2006,
-                format!("{origin} の robots.txt を取得できない: {reason}"),
+                format!("cannot fetch robots.txt on {origin}: {reason}"),
             )
-            .hint("`network.robots.onError` を `allow` にするか、ネットワーク設定を確認する"));
+            .hint("set `network.robots.onError` to `allow`, or check the network settings"));
         }
         self.reporter.verbose(&format!(
-            "{origin} の robots.txt を取得できないため許可する: {reason}"
+            "allowing because robots.txt on {origin} could not be fetched: {reason}"
         ));
         // 「規則なし」として保持し、同じホストの文書ごとに取り直さない。
         let robots = Robots::default();

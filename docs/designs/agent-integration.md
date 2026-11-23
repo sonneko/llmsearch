@@ -84,7 +84,7 @@
 
 状態: 実装完了（REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
 
-`src/core/errors.rs` に `fn message(code: ErrorCode, locale: Locale) -> &'static str` と `fn hint(code: ErrorCode, locale: Locale) -> &'static str` を置き、`src/ui/render.rs` の `error()` が組み立てる。カタログにないコードはコンパイル時に検出するため、`ErrorCode` は `enum` とし `match` を網羅させる。失敗に至る過程で出た警告は `AppError::warnings` に積み、`error` イベントの `warnings[]` と標準エラーの双方に出す（`REF:src/adapters/engine/eval.rs`。抽出の再試行で出た `W4004` が、最終的な `E4004` と一緒に失われないようにするため）。
+`src/core/errors.rs` に `fn message(code: ErrorCode) -> &'static str` と `fn hint(code: ErrorCode) -> &'static str` を置き（M10 で英語 1 言語に固定）、`src/ui/render.rs` の `error()` が組み立てる。カタログにないコードはコンパイル時に検出するため、`ErrorCode` は `enum` とし `match` を網羅させる。失敗に至る過程で出た警告は `AppError::warnings` に積み、`error` イベントの `warnings[]` と標準エラーの双方に出す（`REF:src/adapters/engine/eval.rs`。抽出の再試行で出た `W4004` が、最終的な `E4004` と一緒に失われないようにするため）。
 
 ---
 

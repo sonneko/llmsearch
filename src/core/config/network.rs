@@ -29,8 +29,9 @@ pub struct NetworkProfile {
     pub robots: RobotsSpec,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub charset: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub accept_language: Option<String>,
+    /// 未知キーの温存（廃止した `acceptLanguage` を警告付きで残すため）。
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -182,7 +183,7 @@ impl Default for NetworkProfile {
             tls: TlsSpec::default(),
             robots: RobotsSpec::default(),
             charset: None,
-            accept_language: None,
+            extra: Default::default(),
         }
     }
 }
@@ -195,7 +196,7 @@ impl NetworkProfile {
         let range = |name: &str, v: u64, min: u64, max: u64, out: &mut Vec<Check>| {
             if v < min || v > max {
                 out.push(Check::Fail(format!(
-                    "{name} = {v}（許容範囲 {min}〜{max}）"
+                    "{name} = {v} (allowed range {min}..={max})"
                 )));
             }
         };
@@ -249,29 +250,40 @@ impl NetworkProfile {
             &mut out,
         );
         if self.user_agent.trim().is_empty() {
-            out.push(Check::Fail("network.userAgent は空にできない".into()));
+            out.push(Check::Fail("network.userAgent must not be empty".into()));
         }
         for h in self.headers.keys() {
             if FORBIDDEN_HEADERS.contains(&h.to_ascii_lowercase().as_str()) {
-                out.push(Check::Fail(format!("network.headers に禁止ヘッダ {h}")));
+                out.push(Check::Fail(format!(
+                    "network.headers contains a forbidden header: {h}"
+                )));
             }
         }
         if !self.tls.verify {
             out.push(Check::Warn(
-                "network.tls.verify = false（証明書を検証しない）".into(),
+                "network.tls.verify = false (certificates are not verified)".into(),
             ));
         }
         if let Some(ProxySpec::Detailed(d)) = &self.proxy
             && let Some(ProxyAuth::Plain { .. }) = &d.auth
         {
             out.push(Check::Warn(
-                "network.proxy.auth に値を直接記述している（value_env を推奨）".into(),
+                "network.proxy.auth contains a literal secret (prefer value_env)".into(),
             ));
         }
         if !self.robots.respect {
             out.push(Check::Warn(
-                "network.robots.respect = false（robots.txt を無視する）".into(),
+                "network.robots.respect = false (robots.txt is ignored)".into(),
             ));
+        }
+        for key in self.extra.keys() {
+            if key == "acceptLanguage" {
+                out.push(Check::Warn(
+                    "network.acceptLanguage was removed: the search language comes from `search.language`".to_string(),
+                ));
+            } else {
+                out.push(Check::Warn(format!("unknown key network.{key} (kept)")));
+            }
         }
         if out.is_empty() {
             out.push(Check::Ok(format!("network profile '{}'", self.id)));

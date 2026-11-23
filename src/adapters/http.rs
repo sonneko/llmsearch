@@ -33,7 +33,7 @@ impl ReqwestClient {
             .worker_threads(2)
             .enable_all()
             .build()
-            .expect("tokio ランタイムの生成に失敗");
+            .expect("failed to build the tokio runtime");
         Self {
             clock,
             env: std::sync::Arc::new(SystemEnv::new()),
@@ -101,9 +101,9 @@ impl ReqwestClient {
         } else if profile.http_version == "2" {
             builder = builder.http2_prior_knowledge();
         }
-        builder
-            .build()
-            .map_err(|e| AppError::with_detail(ErrorCode::E2001, format!("クライアント生成: {e}")))
+        builder.build().map_err(|e| {
+            AppError::with_detail(ErrorCode::E2001, format!("client construction: {e}"))
+        })
     }
 
     /// `tls.caFile` とシステムルートストアを合わせた追加のルート証明書。
@@ -124,7 +124,7 @@ impl ReqwestClient {
             && !roots.sources.is_empty()
         {
             reporter.verbose(&format!(
-                "TLS ルート証明書を追加した: {}（{} 件）",
+                "added TLS root certificates: {} ({} items)",
                 roots.sources.join("; "),
                 roots.len()
             ));
@@ -155,7 +155,7 @@ impl ReqwestClient {
                 if let Some(reporter) = &self.reporter {
                     reporter.warn(&Diagnostic::new(
                         WarningCode::W2001,
-                        format!("{host} への送信を {remaining} ms 待機した（レート制限）"),
+                        format!("waited {remaining} ms before sending to {host} (rate limit)"),
                     ));
                 }
                 self.clock.sleep(Duration::from_millis(remaining));
@@ -185,9 +185,6 @@ impl ReqwestClient {
         }
         for (k, v) in &profile.headers {
             builder = builder.header(k, v);
-        }
-        if let Some(lang) = &profile.accept_language {
-            builder = builder.header("Accept-Language", lang);
         }
         if let Some(body) = &request.body {
             builder = builder.body(body.clone());
@@ -231,7 +228,7 @@ impl ReqwestClient {
                     // `Location` が解決できない 3xx は追えないのでエラーにする。
                     return Err(AppError::with_detail(
                         ErrorCode::E2004,
-                        format!("HTTP {status}（Location を解決できない）"),
+                        format!("HTTP {status} (cannot resolve Location)"),
                     )
                     .status(status));
                 }
@@ -240,7 +237,9 @@ impl ReqwestClient {
                     let max = profile.max_redirects;
                     return Err(AppError::with_detail(
                         ErrorCode::E2004,
-                        format!("HTTP {status}（{max} 回まで追従する設定で追いきれない）"),
+                        format!(
+                            "HTTP {status} (cannot follow within the configured limit of {max})"
+                        ),
                     )
                     .status(status));
                 }
@@ -270,7 +269,7 @@ impl ReqwestClient {
                 Err(e) => {
                     return Err(AppError::with_detail(
                         ErrorCode::E2002,
-                        format!("本文の読み込みに失敗: {}", e.without_url()),
+                        format!("failed to read the body: {}", e.without_url()),
                     ));
                 }
             }
@@ -299,7 +298,7 @@ fn resolve_proxy(
     let invalid = || {
         AppError::with_detail(
             ErrorCode::E1004,
-            "proxy.url は有効な HTTP(S) プロキシ URL が必要",
+            "proxy.url must be a valid HTTP(S) proxy URL",
         )
     };
     let mut url = Url::parse(&raw).map_err(|_| invalid())?;
@@ -310,7 +309,10 @@ fn resolve_proxy(
         && detail.auth.is_some()
     {
         let password = proxy_password(profile, env).ok_or_else(|| {
-            AppError::with_detail(ErrorCode::E1004, "proxy.auth.value_env の環境変数が未設定")
+            AppError::with_detail(
+                ErrorCode::E1004,
+                "the environment variable named by proxy.auth.value_env is not set",
+            )
         })?;
         url.set_password(Some(&password)).map_err(|_| invalid())?;
     }
@@ -343,8 +345,8 @@ fn map_reqwest_error(err: reqwest::Error, request: &HttpRequest) -> AppError {
     if err.is_connect() {
         // TLS を含む接続失敗は、原因の切り分けに CA の確認が要る旨を必ず添える。
         return AppError::with_detail(ErrorCode::E2001, format!("{host}: {text}")).hint(
-            "接続先・プロキシの設定を確認する。TLS の検証が原因なら `tls.caFile` か \
-             システムの CA ストア（`SSL_CERT_FILE`）を確認する",
+            "check the host and proxy settings; if TLS verification is the cause, check `tls.caFile` \
+             or the system CA store (`SSL_CERT_FILE`)",
         );
     }
     if err.is_redirect() {
@@ -353,7 +355,7 @@ fn map_reqwest_error(err: reqwest::Error, request: &HttpRequest) -> AppError {
     let lower = text.to_lowercase();
     if lower.contains("certificate") || lower.contains("tls") {
         return AppError::with_detail(ErrorCode::E2008, host.to_string())
-            .hint("`tls.caFile` に CA 証明書（PEM）を指定するか、システムの CA ストアを確認する");
+            .hint("point `tls.caFile` at a CA certificate (PEM), or check the system CA store");
     }
     AppError::with_detail(ErrorCode::E2001, format!("{host}: {text}"))
 }
@@ -374,7 +376,7 @@ fn http_status_error(
 ) -> AppError {
     let retry_after = retry_after_header(headers);
     let detail = match retry_after {
-        Some(v) => format!("HTTP {status}（Retry-After: {v}）"),
+        Some(v) => format!("HTTP {status} (Retry-After: {v})"),
         None => format!("HTTP {status}"),
     };
     let wait_ms = retry_after.and_then(|v| crate::core::retry::parse_retry_after_ms(v, now));
@@ -390,10 +392,10 @@ fn http_status_error(
 fn redirect_error(status: u16) -> AppError {
     AppError::with_detail(
         ErrorCode::E2003,
-        format!("HTTP {status}（リダイレクトを許可しない: redirectPolicy=never）"),
+        format!("HTTP {status} (redirects are not allowed: redirectPolicy=never)"),
     )
     .status(status)
-    .hint("`network.redirectPolicy` を `follow` にするか、最終 URL を直接指定する")
+    .hint("set `network.redirectPolicy` to `follow`, or use the final URL directly")
 }
 
 impl HttpClient for ReqwestClient {
@@ -451,7 +453,7 @@ impl HttpClient for ReqwestClient {
 
     fn describe(&self, profile: &NetworkProfile) -> String {
         format!(
-            "{}: timeout {}ms / max {} bytes / {} 並列 / 間隔 {}ms",
+            "{}: timeout {}ms / max {} bytes / {} concurrent / interval {}ms",
             profile.id,
             profile.timeout_total_ms,
             profile.max_bytes,
@@ -505,9 +507,9 @@ fn too_long_wait_error(err: &AppError) -> AppError {
     let wait = err.retry_after_ms.unwrap_or_default();
     AppError::with_detail(
         ErrorCode::E4003,
-        format!("再試行に {wait} ms の待機が必要なため打ち切った"),
+        format!("gave up because the retry would need to wait {wait} ms"),
     )
-    .hint("`network.retry.maxBackoffMs` を広げるか、時間を置いて再実行する")
+    .hint("raise `network.retry.maxBackoffMs`, or try again later")
     .warnings(err.warnings.clone())
 }
 
@@ -517,7 +519,7 @@ pub fn profile_warnings(profile: &NetworkProfile) -> Vec<Diagnostic> {
     if !profile.tls.verify {
         out.push(Diagnostic::new(
             WarningCode::W1005,
-            format!("network '{}' は TLS 検証を無効にしている", profile.id),
+            format!("network '{}' has TLS verification disabled", profile.id),
         ));
     }
     if let Some(crate::core::config::network::ProxySpec::Detailed(d)) = &profile.proxy
@@ -529,7 +531,7 @@ pub fn profile_warnings(profile: &NetworkProfile) -> Vec<Diagnostic> {
         out.push(Diagnostic::new(
             WarningCode::W1004,
             format!(
-                "network '{}' のプロキシ認証に値を直接記述している",
+                "network '{}' stores the proxy credentials as a literal value",
                 profile.id
             ),
         ));
@@ -607,12 +609,12 @@ mod tests {
         // 詳細文に `Retry-After` が混ざっても状態番号で判定する
         assert!(retryable(
             &NetworkProfile::default(),
-            &AppError::with_detail(ErrorCode::E2003, "HTTP 503（Retry-After: 1）").status(503)
+            &AppError::with_detail(ErrorCode::E2003, "HTTP 503 (Retry-After: 1)").status(503)
         ));
         // 状態番号が無い場合は再試行しない（解析に頼らない）
         assert!(!retryable(
             &NetworkProfile::default(),
-            &AppError::with_detail(ErrorCode::E2003, "HTTP 503（Retry-After: 1）")
+            &AppError::with_detail(ErrorCode::E2003, "HTTP 503 (Retry-After: 1)")
         ));
     }
 }

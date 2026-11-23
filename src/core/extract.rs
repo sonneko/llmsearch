@@ -27,7 +27,7 @@ pub struct ExtractOutcome {
 
 fn selector_of(pattern: &str) -> Result<Selector, AppError> {
     Selector::parse(pattern)
-        .map_err(|e| AppError::with_detail(ErrorCode::E1004, format!("セレクタ {pattern}: {e:?}")))
+        .map_err(|e| AppError::with_detail(ErrorCode::E1004, format!("selector {pattern}: {e:?}")))
 }
 
 /// 応答本文から結果を取り出す。
@@ -65,7 +65,7 @@ fn extract_html(
     let Some(item_selector) = &spec.items.selector else {
         return Err(AppError::with_detail(
             ErrorCode::E1004,
-            "response.items.selector が無い",
+            "response.items.selector is missing",
         ));
     };
     let item_sel = selector_of(item_selector)?;
@@ -153,8 +153,9 @@ fn extract_json(
     base_url: &url::Url,
     tracking: &[String],
 ) -> Result<ExtractOutcome, AppError> {
-    let value: serde_json::Value = serde_json::from_str(body)
-        .map_err(|e| AppError::with_detail(ErrorCode::E4004, format!("JSON の解析に失敗: {e}")))?;
+    let value: serde_json::Value = serde_json::from_str(body).map_err(|e| {
+        AppError::with_detail(ErrorCode::E4004, format!("failed to parse the JSON: {e}"))
+    })?;
     let mut out = ExtractOutcome::default();
 
     for cond in &spec.error_when {
@@ -556,7 +557,7 @@ fn normalize_date(value: &str, formats: &[String]) -> String {
         vec![
             "%Y-%m-%d",
             "%Y/%m/%d",
-            "%Y年%m月%d日",
+            "%Y-%m-%d",
             "%d %b %Y",
             "%b %d, %Y",
             "%Y-%m-%dT%H:%M:%S%z",
@@ -593,7 +594,7 @@ fn finalize(out: &mut ExtractOutcome) {
         out.warnings.push(Diagnostic::new(
             WarningCode::W4001,
             format!(
-                "抽出に失敗した結果を {} 件破棄した（title / url が空）",
+                "discarded {} results that could not be extracted (empty title / url)",
                 out.dropped
             ),
         ));

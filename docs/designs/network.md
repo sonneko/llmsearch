@@ -122,7 +122,7 @@
 
 状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
-`core::net::headers::compose(profile, engine, accept) -> HeaderMap` が 4 段の合成を 1 か所で行い、禁止ヘッダの検査（`E1004`）もここで行う。`reqwest::Client::builder().default_headers()` にはプロファイル分のみを設定し、エンジン固有ヘッダはリクエスト単位で付す（クライアントの再利用で混線しないようにするため）。
+`core::net::headers::compose(profile, engine, accept) -> HeaderMap` が段階的な合成を 1 か所で行い、禁止ヘッダの検査（`E1004`）もここで行う。`search.language` の `Accept-Language` 補完はエンジン定義の段で行う（`REF:docs/designs/engine-definitions.md` §3.2）ため、プロファイルは `Accept-Language` を設定しない。`NetworkProfile.accept_language` フィールドと `adapters/http.rs` の `Accept-Language` 上書き分岐は M10 で削除した。旧プロファイルに `acceptLanguage` が残っている場合は未知キーとして `W1002` を出す。`reqwest::Client::builder().default_headers()` にはプロファイル分のみを設定し、エンジン固有ヘッダはリクエスト単位で付す（クライアントの再利用で混線しないようにするため）。
 
 `3xx` の扱いは `REF:src/adapters/http.rs` の `send_once` で `status` を見て分岐する（`reqwest` の `Policy::none()` は `manual` と `never` で同じ動きになるため、分岐は自前で行う）。
 

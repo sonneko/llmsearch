@@ -15,6 +15,9 @@ pub struct TmplCtx {
     pub offset: u32,
     pub page: u32,
     pub limit: u32,
+    /// 言語タグの主言語（`{{language}}`）。
+    pub language: String,
+    /// 正規化した言語タグ全体（`{{locale}}` の別名）。
     pub locale: String,
     pub region: String,
     pub api_key: Option<String>,
@@ -30,6 +33,7 @@ impl TmplCtx {
             "offset" => self.offset.to_string(),
             "page" => self.page.to_string(),
             "limit" => self.limit.to_string(),
+            "language" => self.language.clone(),
             "locale" => self.locale.clone(),
             "region" => self.region.clone(),
             "apiKey" => self.api_key.clone().unwrap_or_default(),
@@ -126,7 +130,7 @@ pub fn prepare(
     let req = &def.request;
     let base = resolve_tmpl(&TmplValue::Value(req.url.clone()), ctx, secrets)?;
     let mut url = Url::parse(&base).map_err(|e| {
-        AppError::with_detail(ErrorCode::E1004, format!("request.url を解釈できない: {e}"))
+        AppError::with_detail(ErrorCode::E1004, format!("cannot parse request.url: {e}"))
     })?;
     crate::core::url::validate_scheme(&url)?;
 
@@ -176,7 +180,7 @@ fn resolve_tmpl(
             Some(secret) => Ok(secret.expose().to_string()),
             None => Err(AppError::with_detail(
                 ErrorCode::E4002,
-                format!("環境変数 {value_env} が未設定"),
+                format!("environment variable {value_env} is not set"),
             )),
         },
     }
@@ -242,8 +246,19 @@ mod tests {
 
     #[test]
     fn encodes_euc_jp() {
-        let out = encode_query("日本", "euc-jp");
-        assert!(out.starts_with("%C6%FC"), "{out}");
+        // 日本語は EUC-JP で複数バイトになる（例: 日本 = %C6%FC%CB%DC）。
+        let out = encode_query("\u{65e5}\u{672c}", "euc-jp");
+        assert_eq!(out, "%C6%FC%CB%DC");
+    }
+
+    #[test]
+    fn exposes_language_variables() {
+        let ctx = TmplCtx {
+            language: "ja".into(),
+            locale: "ja".into(),
+            ..Default::default()
+        };
+        assert_eq!(expand("{{language}}/{{locale}}", &ctx).unwrap(), "ja/ja");
     }
 
     #[test]

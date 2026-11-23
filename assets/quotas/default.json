@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "default",
-  "description": "既定のクォータ。セッション・日次・合計の 3 段で制限する。",
+  "description": "Default quota: limits searches and fetches per session, per day and in total.",
   "enabled": true,
   "session": {
     "searches": 50,

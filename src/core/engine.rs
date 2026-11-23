@@ -76,12 +76,30 @@ impl Default for EngineDef {
     }
 }
 
+/// 定義が持つ既定値。言語は設定 `search.language` が決めるため持たない。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Defaults {
-    pub locale: Option<String>,
     pub region: Option<String>,
-    pub language: Option<String>,
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+impl Defaults {
+    /// 廃止したキー（`locale` / `language`）を含む未知キーを警告する。
+    pub fn validate(&self) -> Vec<Check> {
+        let mut out = Vec::new();
+        for key in self.extra.keys() {
+            if key == "locale" || key == "language" {
+                out.push(Check::Warn(format!(
+                    "defaults.{key} was removed from the schema and is ignored; the search language comes from `search.language`"
+                )));
+            } else {
+                out.push(Check::Warn(format!("unknown key {key} (kept)")));
+            }
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -202,20 +220,21 @@ fn get_str(obj: &serde_json::Map<String, serde_json::Value>, key: &str) -> Optio
 
 impl FieldSpec {
     pub fn from_json(v: &serde_json::Value) -> Result<Self, String> {
-        let obj = v
-            .as_object()
-            .ok_or("フィールド定義はオブジェクトであること")?;
+        let obj = v.as_object().ok_or("field spec must be an object")?;
         let transform = match obj.get("transform") {
             None => Vec::new(),
             Some(serde_json::Value::Array(items)) => {
                 let mut out = Vec::new();
                 for item in items {
-                    let name = item.as_str().ok_or("transform の要素は文字列であること")?;
-                    out.push(Transform::parse(name).ok_or_else(|| format!("未知の変換 {name}"))?);
+                    let name = item.as_str().ok_or("transform elements must be strings")?;
+                    out.push(
+                        Transform::parse(name)
+                            .ok_or_else(|| format!("unknown transform {name}"))?,
+                    );
                 }
                 out
             }
-            Some(_) => return Err("transform は配列であること".into()),
+            Some(_) => return Err("transform must be an array".into()),
         };
         if let Some(selector) = get_str(obj, "selector") {
             return Ok(FieldSpec::Selector {
@@ -227,12 +246,12 @@ impl FieldSpec {
         if let Some(join) = obj.get("join") {
             let items: Vec<String> = join
                 .as_array()
-                .ok_or("join は配列であること")?
+                .ok_or("join must be an array")?
                 .iter()
                 .map(|v| {
                     v.as_str()
                         .map(|s| s.to_string())
-                        .ok_or("join の要素は文字列であること")
+                        .ok_or("join elements must be strings")
                 })
                 .collect::<Result<_, _>>()?;
             return Ok(FieldSpec::Join {
@@ -250,7 +269,7 @@ impl FieldSpec {
         if let Some(value) = get_str(obj, "const") {
             return Ok(FieldSpec::Const { value });
         }
-        Err("selector / path / from / const / join のいずれかが必要".into())
+        Err("one of selector / path / from / const / join is required".into())
     }
 
     fn to_json(&self) -> serde_json::Value {
@@ -399,7 +418,8 @@ impl serde::Serialize for Transform {
 impl<'de> serde::Deserialize<'de> for Transform {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let s = String::deserialize(d)?;
-        Transform::parse(&s).ok_or_else(|| serde::de::Error::custom(format!("未知の変換 {s}")))
+        Transform::parse(&s)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown transform {s}")))
     }
 }
 
@@ -425,9 +445,7 @@ pub enum ErrorCond {
 
 impl ErrorCond {
     pub fn from_json(v: &serde_json::Value) -> Result<Self, String> {
-        let obj = v
-            .as_object()
-            .ok_or("errorWhen の要素はオブジェクトであること")?;
+        let obj = v.as_object().ok_or("errorWhen entries must be objects")?;
         if let Some(field) = get_str(obj, "field") {
             let empty = obj.get("empty").and_then(|b| b.as_bool()).unwrap_or(true);
             if empty {
@@ -448,7 +466,7 @@ impl ErrorCond {
                 status: status as u16,
             });
         }
-        Err("field / contains / path / status のいずれかが必要".into())
+        Err("one of field / contains / path / status is required".into())
     }
 
     fn to_json(&self) -> serde_json::Value {
@@ -537,8 +555,8 @@ pub fn split_selector(selector: &str) -> (String, String) {
 }
 
 const ALLOWED_VARS: &[&str] = &[
-    "query", "queryRaw", "offset", "page", "limit", "locale", "region", "apiKey", "dateFrom",
-    "dateTo",
+    "query", "queryRaw", "offset", "page", "limit", "language", "locale", "region", "apiKey",
+    "dateFrom", "dateTo",
 ];
 
 fn template_vars(s: &str) -> Vec<String> {
@@ -563,7 +581,7 @@ impl EngineDef {
         let mut out = Vec::new();
         if self.schema_version != SUPPORTED_SCHEMA_VERSION {
             out.push(Check::Fail(format!(
-                "schemaVersion = {}（対応版は {SUPPORTED_SCHEMA_VERSION}）",
+                "schemaVersion = {} (supported: {SUPPORTED_SCHEMA_VERSION})",
                 self.schema_version
             )));
         }
@@ -579,28 +597,24 @@ impl EngineDef {
             });
         if !id_ok {
             out.push(Check::Fail(format!(
-                "id = '{}' は [a-z0-9._-] のみ使用できる",
+                "id = '{}' may only use [a-z0-9._-]",
                 self.id
             )));
         }
         if self.request.url.is_empty() {
-            out.push(Check::Fail("request.url は必須".into()));
+            out.push(Check::Fail("request.url is required".into()));
         } else if !(self.request.url.starts_with("http://")
             || self.request.url.starts_with("https://")
             || self.request.url.contains("{{"))
         {
-            out.push(Check::Fail(
-                "request.url は http(s) で始まる必要がある".into(),
-            ));
+            out.push(Check::Fail("request.url must start with http(s)".into()));
         }
         if !matches!(self.request.method.as_str(), "GET" | "POST") {
-            out.push(Check::Fail(
-                "request.method は GET または POST が必要".into(),
-            ));
+            out.push(Check::Fail("request.method must be GET or POST".into()));
         }
         if crate::core::template::query_encoding(&self.request.encoding).is_none() {
             out.push(Check::Fail(format!(
-                "request.encoding が未対応: {}",
+                "unsupported request.encoding: {}",
                 self.request.encoding
             )));
         }
@@ -619,14 +633,16 @@ impl EngineDef {
         for t in tmpls {
             for var in template_vars(t) {
                 if !ALLOWED_VARS.contains(&var.as_str()) {
-                    out.push(Check::Fail(format!("未知のテンプレート変数 {{{{{var}}}}}")));
+                    out.push(Check::Fail(format!(
+                        "unknown template variable {{{{{var}}}}}"
+                    )));
                 }
             }
         }
         let uses_api_key = template_vars(&self.request.url).contains(&"apiKey".to_string());
         if self.limits.requires_api_key && !uses_api_key && self.request.query.is_empty() {
             out.push(Check::Warn(
-                "requiresApiKey だが {{apiKey}} を使用していない".into(),
+                "requiresApiKey is set but {{apiKey}} is not used".into(),
             ));
         }
         // items と kind の整合
@@ -634,48 +650,48 @@ impl EngineDef {
             ResponseKind::Html => {
                 if self.response.items.selector.is_none() {
                     out.push(Check::Fail(
-                        "response.kind=html には items.selector が必要".into(),
+                        "response.kind=html requires items.selector".into(),
                     ));
                 }
             }
             ResponseKind::Json => {
                 if self.response.items.path.is_none() {
-                    out.push(Check::Fail(
-                        "response.kind=json には items.path が必要".into(),
-                    ));
+                    out.push(Check::Fail("response.kind=json requires items.path".into()));
                 }
             }
         }
         // 必須フィールド
         for required in ["title", "url"] {
             if !self.response.fields.contains_key(required) {
-                out.push(Check::Fail(format!("response.fields.{required} は必須")));
+                out.push(Check::Fail(format!(
+                    "response.fields.{required} is required"
+                )));
             }
         }
         // セレクタの構文
         if let Some(sel) = &self.response.items.selector
             && scraper::Selector::parse(sel).is_err()
         {
-            out.push(Check::Fail(format!("items.selector が不正: {sel}")));
+            out.push(Check::Fail(format!("invalid items.selector: {sel}")));
         }
         for (name, field) in &self.response.fields {
             if let FieldSpec::Selector { selector, .. } = field
                 && scraper::Selector::parse(selector).is_err()
             {
                 out.push(Check::Fail(format!(
-                    "fields.{name}.selector が不正: {selector}"
+                    "invalid fields.{name}.selector: {selector}"
                 )));
             }
             for t in field.transform() {
                 match t {
                     Transform::Truncate if self.response.transform_args.chars.is_none() => {
                         out.push(Check::Fail(format!(
-                            "fields.{name}: truncate には chars が必要"
+                            "fields.{name}: truncate requires chars"
                         )));
                     }
                     Transform::Replace if self.response.transform_args.pattern.is_none() => {
                         out.push(Check::Fail(format!(
-                            "fields.{name}: replace には pattern が必要"
+                            "fields.{name}: replace requires pattern"
                         )));
                     }
                     _ => {}
@@ -687,24 +703,27 @@ impl EngineDef {
             && self.response.items.path.is_some()
         {
             out.push(Check::Warn(
-                "response.kind=html で items.path が指定されている".into(),
+                "items.path is set for response.kind=html".into(),
             ));
         }
         // ページング整合
         if let Some(p) = &self.paging {
             if p.style == PagingStyle::Offset && p.offset_step == Some(0) {
-                out.push(Check::Fail("paging.offsetStep は 1 以上".into()));
+                out.push(Check::Fail("paging.offsetStep must be 1 or greater".into()));
             }
             if p.max_results == 0 {
-                out.push(Check::Fail("paging.maxResults は 1 以上".into()));
+                out.push(Check::Fail("paging.maxResults must be 1 or greater".into()));
             }
         }
         if self.limits.max_page_size == 0 {
-            out.push(Check::Fail("limits.maxPageSize は 1 以上".into()));
+            out.push(Check::Fail(
+                "limits.maxPageSize must be 1 or greater".into(),
+            ));
         }
         for key in self.extra.keys() {
-            out.push(Check::Warn(format!("未知キー {key}（保持される）")));
+            out.push(Check::Warn(format!("unknown key {key} (kept)")));
         }
+        out.extend(self.defaults.validate());
         out
     }
 

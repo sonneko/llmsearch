@@ -75,7 +75,7 @@ pub fn truncate_to_budget(text: &str, limit: usize) -> (String, bool, usize) {
 
 /// 切り詰めの注記。
 pub fn truncation_note(shown: usize, total: usize) -> String {
-    format!("[truncated: 表示 {shown} / 全体 {total} 字]")
+    format!("[truncated: shown {shown} / total {total} chars]")
 }
 
 #[cfg(test)]
