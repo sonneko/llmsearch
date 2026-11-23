@@ -7,6 +7,7 @@ pub mod engine;
 pub mod errors;
 pub mod extract;
 pub mod history;
+pub mod lang;
 pub mod markdown;
 pub mod model;
 pub mod outline;

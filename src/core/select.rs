@@ -2,6 +2,9 @@
 
 use crate::core::errors::{AppError, ErrorCode};
 
+/// 選択子の区切り。半角カンマに加え、全角読点も受ける（入力のゆらぎ吸収）。
+const SEPARATORS: [char; 2] = [',', '、']; // m10:allow-japanese
+
 /// 選択の対象種別。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Ref {
@@ -25,14 +28,14 @@ pub struct Selection {
 pub fn parse(input: &str) -> Result<Vec<Selection>, AppError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return Err(AppError::with_detail(ErrorCode::E1005, "入力が空"));
+        return Err(AppError::with_detail(ErrorCode::E1005, "input is empty"));
     }
     let mut out = Vec::new();
     // 明らかに別のコマンド（`q`, `n`, `h`, `r` 等の単語）はここでは扱わない
     let normalized = trimmed
-        .replace('Ｒ', "R")
-        .replace('Ｓ', "S")
-        .replace('Ｄ', "D");
+        .replace('Ｒ', "R") // m10:allow-japanese (full-width input tolerance)
+        .replace('Ｓ', "S") // m10:allow-japanese
+        .replace('Ｄ', "D"); // m10:allow-japanese
     // `D` 指定が無い連続した項目は 1 つの選択（同一文書の複数節／複数結果）にまとめる
     let mut loose: Vec<Ref> = Vec::new();
     for chunk in split_chunks(&normalized) {
@@ -60,7 +63,7 @@ pub fn parse(input: &str) -> Result<Vec<Selection>, AppError> {
         });
     }
     if out.is_empty() {
-        return Err(AppError::with_detail(ErrorCode::E1005, "入力が空"));
+        return Err(AppError::with_detail(ErrorCode::E1005, "input is empty"));
     }
     Ok(out)
 }
@@ -69,11 +72,11 @@ pub fn parse(input: &str) -> Result<Vec<Selection>, AppError> {
 ///
 /// `D1:S3,S5` は 1 つの指定として扱い、`D1:S3,D2:S5` は 2 つに分ける。
 fn split_chunks(input: &str) -> Vec<String> {
-    let pattern = regex::Regex::new(r"[Dd]\s*\d+\s*:").expect("静的パターン");
+    let pattern = regex::Regex::new(r"[Dd]\s*\d+\s*:").expect("static pattern");
     let starts: Vec<usize> = pattern.find_iter(input).map(|m| m.start()).collect();
     if starts.is_empty() {
         return input
-            .split([',', '、', ' ', '\u{3000}'])
+            .split([',', '、', ' ', '\u{3000}']) // m10:allow-japanese (input tolerance)
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
@@ -82,7 +85,7 @@ fn split_chunks(input: &str) -> Vec<String> {
     let head = input[..starts[0]].trim();
     if !head.is_empty() {
         out.extend(
-            head.split([',', '、', ' ', '\u{3000}'])
+            head.split([',', '、', ' ', '\u{3000}']) // m10:allow-japanese
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
         );
@@ -116,7 +119,7 @@ fn parse_chunk(chunk: &str) -> Result<Selection, AppError> {
             }],
             Some(list) => {
                 let mut refs = Vec::new();
-                for part in list.split([',', '、']) {
+                for part in list.split(SEPARATORS) {
                     let part = part.trim();
                     if part.is_empty() {
                         continue;
@@ -139,7 +142,7 @@ fn parse_chunk(chunk: &str) -> Result<Selection, AppError> {
 
     // R / S 指定・数値
     let mut refs = Vec::new();
-    for part in chunk.split([',', '、']) {
+    for part in chunk.split(SEPARATORS) {
         let part = part.trim();
         if part.is_empty() {
             continue;
@@ -164,7 +167,7 @@ fn strip_prefix(s: &str, default_prefix: char) -> Result<(char, String), AppErro
             if !matches!(prefix, 'R' | 'S' | 'D') {
                 return Err(AppError::with_detail(
                     ErrorCode::E1005,
-                    format!("未知の接頭辞 {prefix}"),
+                    format!("unknown prefix {prefix}"),
                 ));
             }
             Ok((prefix, trimmed[c.len_utf8()..].trim().to_string()))
@@ -181,7 +184,7 @@ fn parse_range(part: &str, default_prefix: char) -> Result<Vec<Ref>, AppError> {
     let parse_num = |s: &str| -> Result<u32, AppError> {
         s.trim()
             .parse::<u32>()
-            .map_err(|_| AppError::with_detail(ErrorCode::E1005, format!("数値 {part}")))
+            .map_err(|_| AppError::with_detail(ErrorCode::E1005, format!("not a number: {part}")))
     };
     if let Some((a, b)) = body.split_once('-') {
         let start = parse_num(&strip_prefix(a, prefix)?.1)?;
@@ -189,13 +192,13 @@ fn parse_range(part: &str, default_prefix: char) -> Result<Vec<Ref>, AppError> {
         if end < start {
             return Err(AppError::with_detail(
                 ErrorCode::E1005,
-                format!("範囲 {part} が逆順"),
+                format!("range {part} is reversed"),
             ));
         }
         if end - start > 200 {
             return Err(AppError::with_detail(
                 ErrorCode::E1005,
-                format!("範囲 {part} が広すぎる（最大 200 件）"),
+                format!("range {part} is too wide (at most 200 items)"),
             ));
         }
         return Ok((start..=end).map(|id| Ref::Id { prefix, id }).collect());
@@ -253,7 +256,7 @@ mod tests {
 
     #[test]
     fn accepts_full_width_commas_and_space() {
-        let s = parse("1、2").unwrap();
+        let s = parse("1、2").unwrap(); // m10:allow-japanese
         assert_eq!(s[0].refs.len(), 2);
         let s = parse("1 2").unwrap();
         assert_eq!(s.len(), 1);

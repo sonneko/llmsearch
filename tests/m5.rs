@@ -2,7 +2,7 @@
 mod support;
 
 use clap::Parser;
-use llmsearch::core::errors::{ErrorCode, Locale};
+use llmsearch::core::errors::ErrorCode;
 use llmsearch::core::history::EventType;
 use llmsearch::ui::{cli::Cli, commands, render::Renderer};
 use llmsearch::usecases::{document, engines};
@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 fn renderer(h: &support::Harness) -> Renderer {
-    Renderer::new(false, false, Locale::Ja, true, 80, Arc::clone(&h.app.clock))
+    Renderer::new(false, false, true, 80, Arc::clone(&h.app.clock))
 }
 
 fn execute(h: &mut support::Harness, args: &[&str]) {

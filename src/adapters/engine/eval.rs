@@ -41,6 +41,18 @@ pub fn evaluate(
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+    // `Accept-Language` は設定 `search.language` を 1 か所で補完する
+    // （仕様 engine-definitions.md §3.2）。定義が明示した値を優先する。
+    if !request
+        .headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("accept-language"))
+        && !ctx.locale.is_empty()
+    {
+        request
+            .headers
+            .push(("Accept-Language".to_string(), ctx.locale.clone()));
+    }
     request.body = prepared.body.as_ref().map(|b| b.clone().into_bytes());
     request.timeout_ms = prepared.timeout_ms;
     request.secrets = secrets
@@ -79,7 +91,7 @@ pub fn evaluate(
         if response.truncated {
             outcome.warnings.push(Diagnostic::new(
                 WarningCode::W3003,
-                "応答サイズの上限で打ち切った",
+                "truncated at the response size limit",
             ));
         }
         if outcome.hits.is_empty() && outcome.items_seen == 0 && !body.trim().is_empty() {
@@ -87,7 +99,10 @@ pub fn evaluate(
             let head: String = body.chars().take(2048).collect();
             carried.push(Diagnostic::new(
                 WarningCode::W4004,
-                format!("応答が想定形式と異なる可能性: {}", head.replace('\n', " ")),
+                format!(
+                    "the response may not match the expected shape: {}",
+                    head.replace('\n', " ")
+                ),
             ));
             last_error = Some(unmatched_response_error(&body).warnings(carried.clone()));
             continue;
@@ -119,11 +134,11 @@ fn unmatched_response_error(body: &str) -> AppError {
     AppError::with_detail(
         ErrorCode::E4004,
         format!(
-            "抽出規則に一致する要素が 1 件も無かった（応答先頭: {}）",
+            "no element matched the extraction rules (response head: {})",
             short.replace(['\n', '\r'], " ")
         ),
     )
-    .hint("`engines test` で抽出規則を確認するか、時間を置いて再実行する")
+    .hint("check the extraction rules with `engines test`, or try again later")
 }
 
 fn decode(response: &HttpResponse, def: &EngineDef) -> (String, bool) {

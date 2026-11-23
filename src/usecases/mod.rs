@@ -84,9 +84,9 @@ impl App {
         &self.tracking
     }
 
-    /// 日本語か。
-    pub fn locale(&self) -> crate::core::errors::Locale {
-        self.settings.locale()
+    /// 検索エンジンへ送る言語（設定 `search.language`）。
+    pub fn language(&self) -> crate::core::lang::Language {
+        crate::core::lang::parse(&self.settings.search.language).unwrap_or_default()
     }
 
     /// 現行セッションの識別子（未作成なら空）。

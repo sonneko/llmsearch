@@ -200,8 +200,8 @@ impl AppError {
     }
 
     /// 利用者向けの 1 文。
-    pub fn message(&self, locale: Locale) -> &'static str {
-        message(self.code, locale)
+    pub fn message(&self) -> &'static str {
+        message(self.code)
     }
 
     pub fn exit_code(&self) -> i32 {
@@ -211,12 +211,7 @@ impl AppError {
 
 impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} {}",
-            self.code.as_str(),
-            message(self.code, Locale::Ja)
-        )?;
+        write!(f, "{} {}", self.code.as_str(), message(self.code))?;
         if let Some(d) = &self.detail {
             write!(f, ": {d}")?;
         }
@@ -228,469 +223,77 @@ impl std::error::Error for AppError {}
 
 pub type Result<T> = std::result::Result<T, AppError>;
 
-/// メッセージの言語。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Locale {
-    #[default]
-    Ja,
-    En,
-}
-
-impl Locale {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "ja" => Some(Locale::Ja),
-            "en" => Some(Locale::En),
-            _ => None,
-        }
-    }
-}
-
 /// コードごとの定型メッセージ。
-pub fn message(code: ErrorCode, locale: Locale) -> &'static str {
-    let ja = matches!(locale, Locale::Ja);
+pub fn message(code: ErrorCode) -> &'static str {
     match code {
-        ErrorCode::E1001 => {
-            if ja {
-                "対話モードは端末でのみ利用できる"
-            } else {
-                "interactive mode requires a terminal"
-            }
-        }
-        ErrorCode::E1002 => {
-            if ja {
-                "不明な引数またはサブコマンド"
-            } else {
-                "unknown argument or subcommand"
-            }
-        }
-        ErrorCode::E1003 => {
-            if ja {
-                "設定・定義ファイルを読み込めない"
-            } else {
-                "cannot read configuration file"
-            }
-        }
-        ErrorCode::E1004 => {
-            if ja {
-                "設定・定義の値が不正"
-            } else {
-                "invalid configuration value"
-            }
-        }
-        ErrorCode::E1005 => {
-            if ja {
-                "選択の指定を解釈できない"
-            } else {
-                "cannot parse the selection"
-            }
-        }
-        ErrorCode::E1006 => {
-            if ja {
-                "対象の識別子が見つからない"
-            } else {
-                "target identifier not found"
-            }
-        }
-        ErrorCode::E1007 => {
-            if ja {
-                "検索語が空である"
-            } else {
-                "query is empty"
-            }
-        }
-        ErrorCode::E1008 => {
-            if ja {
-                "テンプレート変数が未知"
-            } else {
-                "unknown template variable"
-            }
-        }
-        ErrorCode::E2001 => {
-            if ja {
-                "接続に失敗した"
-            } else {
-                "connection failed"
-            }
-        }
-        ErrorCode::E2002 => {
-            if ja {
-                "タイムアウトした"
-            } else {
-                "request timed out"
-            }
-        }
-        ErrorCode::E2003 => {
-            if ja {
-                "HTTP エラー応答を受け取った"
-            } else {
-                "HTTP error response"
-            }
-        }
-        ErrorCode::E2004 => {
-            if ja {
-                "リダイレクトが多すぎる"
-            } else {
-                "too many redirects"
-            }
-        }
-        ErrorCode::E2005 => {
-            if ja {
-                "対応していないスキームまたは形式"
-            } else {
-                "unsupported scheme or content type"
-            }
-        }
-        ErrorCode::E2006 => {
-            if ja {
-                "robots.txt により拒否された"
-            } else {
-                "denied by robots.txt"
-            }
-        }
-        ErrorCode::E2007 => {
-            if ja {
-                "応答サイズが上限を超えた"
-            } else {
-                "response exceeded size limit"
-            }
-        }
-        ErrorCode::E2008 => {
-            if ja {
-                "TLS の検証に失敗した"
-            } else {
-                "TLS verification failed"
-            }
-        }
-        ErrorCode::E3001 => {
-            if ja {
-                "本文を抽出できない"
-            } else {
-                "cannot extract the main content"
-            }
-        }
-        ErrorCode::E3002 => {
-            if ja {
-                "非対応のファイル形式"
-            } else {
-                "unsupported document type"
-            }
-        }
-        ErrorCode::E3003 => {
-            if ja {
-                "文字コードを判定できない"
-            } else {
-                "cannot determine the charset"
-            }
-        }
-        ErrorCode::E3004 => {
-            if ja {
-                "Markdown への変換に失敗した"
-            } else {
-                "markdown conversion failed"
-            }
-        }
-        ErrorCode::E4001 => {
-            if ja {
-                "検索結果が 0 件"
-            } else {
-                "no search results"
-            }
-        }
-        ErrorCode::E4002 => {
-            if ja {
-                "検索エンジンを利用できない"
-            } else {
-                "search engine is unavailable"
-            }
-        }
-        ErrorCode::E4003 => {
-            if ja {
-                "レート制限または拒否"
-            } else {
-                "rate limited or blocked"
-            }
-        }
-        ErrorCode::E4004 => {
-            if ja {
-                "応答を解析できない（抽出ルール不一致）"
-            } else {
-                "cannot parse response (extraction rules mismatch)"
-            }
-        }
-        ErrorCode::E4005 => {
-            if ja {
-                "エンジン定義の ID が重複している"
-            } else {
-                "duplicate engine definition id"
-            }
-        }
-        ErrorCode::E4006 => {
-            if ja {
-                "抽出結果が不正（相対 URL など）"
-            } else {
-                "invalid extraction result"
-            }
-        }
-        ErrorCode::E5001 => {
-            if ja {
-                "セッションが存在しないか期限切れ"
-            } else {
-                "session not found or expired"
-            }
-        }
-        ErrorCode::E5002 => {
-            if ja {
-                "状態ディレクトリに書き込めない"
-            } else {
-                "cannot write the state directory"
-            }
-        }
-        ErrorCode::E5003 => {
-            if ja {
-                "同時更新の衝突"
-            } else {
-                "concurrent update conflict"
-            }
-        }
-        ErrorCode::E5004 => {
-            if ja {
-                "履歴ファイルが破損している"
-            } else {
-                "history file is corrupted"
-            }
-        }
-        ErrorCode::E5005 => {
-            if ja {
-                "クォータの上限に達した"
-            } else {
-                "quota exceeded"
-            }
-        }
+        ErrorCode::E1001 => "interactive mode requires a terminal",
+        ErrorCode::E1002 => "unknown argument or subcommand",
+        ErrorCode::E1003 => "cannot read configuration file",
+        ErrorCode::E1004 => "invalid configuration value",
+        ErrorCode::E1005 => "cannot parse the selection",
+        ErrorCode::E1006 => "target identifier not found",
+        ErrorCode::E1007 => "query is empty",
+        ErrorCode::E1008 => "unknown template variable",
+        ErrorCode::E2001 => "connection failed",
+        ErrorCode::E2002 => "request timed out",
+        ErrorCode::E2003 => "HTTP error response",
+        ErrorCode::E2004 => "too many redirects",
+        ErrorCode::E2005 => "unsupported scheme or content type",
+        ErrorCode::E2006 => "denied by robots.txt",
+        ErrorCode::E2007 => "response exceeded size limit",
+        ErrorCode::E2008 => "TLS verification failed",
+        ErrorCode::E3001 => "cannot extract the main content",
+        ErrorCode::E3002 => "unsupported document type",
+        ErrorCode::E3003 => "cannot determine the charset",
+        ErrorCode::E3004 => "markdown conversion failed",
+        ErrorCode::E4001 => "no search results",
+        ErrorCode::E4002 => "search engine is unavailable",
+        ErrorCode::E4003 => "rate limited or blocked",
+        ErrorCode::E4004 => "cannot parse response (extraction rules mismatch)",
+        ErrorCode::E4005 => "duplicate engine definition id",
+        ErrorCode::E4006 => "invalid extraction result",
+        ErrorCode::E5001 => "session not found or expired",
+        ErrorCode::E5002 => "cannot write the state directory",
+        ErrorCode::E5003 => "concurrent update conflict",
+        ErrorCode::E5004 => "history file is corrupted",
+        ErrorCode::E5005 => "quota exceeded",
     }
 }
 
 /// コードごとの回復手順。
-pub fn hint(code: ErrorCode, locale: Locale) -> &'static str {
-    let ja = matches!(locale, Locale::Ja);
+pub fn hint(code: ErrorCode) -> &'static str {
     match code {
-        ErrorCode::E1001 => {
-            if ja {
-                "`llmsearch --help` でサブコマンドを確認する"
-            } else {
-                "see `llmsearch --help`"
-            }
-        }
-        ErrorCode::E1002 => {
-            if ja {
-                "`llmsearch --help` を見る"
-            } else {
-                "run `llmsearch --help`"
-            }
-        }
-        ErrorCode::E1003 => {
-            if ja {
-                "`config path` で探索先を確認し、`config init` で雛形を作る"
-            } else {
-                "check `config path`, or run `config init`"
-            }
-        }
-        ErrorCode::E1004 => {
-            if ja {
-                "`config validate` / `engines validate` で詳細を確認する"
-            } else {
-                "run `config validate` / `engines validate`"
-            }
-        }
-        ErrorCode::E1005 => {
-            if ja {
-                "`1`、`1,3`、`1-3`、`R1` の形式で指定する"
-            } else {
-                "use forms like `1`, `1,3`, `1-3`, `R1`"
-            }
-        }
-        ErrorCode::E1006 => {
-            if ja {
-                "`search` を実行し、有効な識別子を確認する"
-            } else {
-                "run `search` and use a valid identifier"
-            }
-        }
-        ErrorCode::E1007 => {
-            if ja {
-                "検索語を指定する"
-            } else {
-                "provide a query"
-            }
-        }
-        ErrorCode::E1008 => {
-            if ja {
-                "`engines validate` で使用可能な変数を確認する"
-            } else {
-                "run `engines validate` to see allowed variables"
-            }
-        }
-        ErrorCode::E2001 => {
-            if ja {
-                "別の結果を選ぶか、時間を置いて再実行する"
-            } else {
-                "choose another result or retry later"
-            }
-        }
-        ErrorCode::E2002 => {
-            if ja {
-                "ネットワークプロファイルの timeout を延ばす"
-            } else {
-                "increase the network profile timeout"
-            }
-        }
-        ErrorCode::E2003 => {
-            if ja {
-                "4xx は別 URL、5xx は時間を置いた再実行を試す"
-            } else {
-                "for 4xx pick another URL; for 5xx retry later"
-            }
-        }
-        ErrorCode::E2004 => {
-            if ja {
-                "元 URL を確認する"
-            } else {
-                "check the original URL"
-            }
-        }
-        ErrorCode::E2005 => {
-            if ja {
-                "HTML のページを選ぶ"
-            } else {
-                "choose an HTML page"
-            }
-        }
-        ErrorCode::E2006 => {
-            if ja {
-                "別の結果を選ぶ"
-            } else {
-                "choose another result"
-            }
-        }
-        ErrorCode::E2007 => {
-            if ja {
-                "`network.maxBytes` を大きくする"
-            } else {
-                "increase `network.maxBytes`"
-            }
-        }
-        ErrorCode::E2008 => {
-            if ja {
-                "`tls.caFile` を設定する"
-            } else {
-                "configure `tls.caFile`"
-            }
-        }
-        ErrorCode::E3001 => {
-            if ja {
-                "`--refresh` で再取得する"
-            } else {
-                "retry with `--refresh`"
-            }
-        }
-        ErrorCode::E3002 => {
-            if ja {
-                "別の結果を選ぶ"
-            } else {
-                "choose another result"
-            }
-        }
-        ErrorCode::E3003 => {
-            if ja {
-                "`network.charset` を指定する"
-            } else {
-                "set `network.charset`"
-            }
-        }
-        ErrorCode::E3004 => {
-            if ja {
-                "抽出方式を変更する"
-            } else {
-                "change the extraction engine"
-            }
-        }
-        ErrorCode::E4001 => {
-            if ja {
-                "検索語を変えるか、別のエンジンを指定する"
-            } else {
-                "change the query or choose another engine"
-            }
-        }
-        ErrorCode::E4002 => {
-            if ja {
-                "`engines list` で利用可能なエンジンを確認する"
-            } else {
-                "run `engines list`"
-            }
-        }
-        ErrorCode::E4003 => {
-            if ja {
-                "待機してから再実行する"
-            } else {
-                "wait and retry"
-            }
-        }
-        ErrorCode::E4004 => {
-            if ja {
-                "`engines test` でセレクタを確認する"
-            } else {
-                "use `engines test` to inspect selectors"
-            }
-        }
-        ErrorCode::E4005 => {
-            if ja {
-                "重複した定義を整理する"
-            } else {
-                "remove the duplicate definition"
-            }
-        }
-        ErrorCode::E4006 => {
-            if ja {
-                "抽出ルールに `absolutize` を追加する"
-            } else {
-                "add `absolutize` to the extraction rules"
-            }
-        }
-        ErrorCode::E5001 => {
-            if ja {
-                "`search` で新しいセッションを開始する"
-            } else {
-                "run `search` to start a new session"
-            }
-        }
-        ErrorCode::E5002 => {
-            if ja {
-                "権限と空き容量を確認する"
-            } else {
-                "check permissions and free space"
-            }
-        }
-        ErrorCode::E5003 => {
-            if ja {
-                "同じ操作を再実行する"
-            } else {
-                "retry the same operation"
-            }
-        }
-        ErrorCode::E5004 => {
-            if ja {
-                "`history export` で退避してから作り直す"
-            } else {
-                "export then recreate the history file"
-            }
-        }
-        ErrorCode::E5005 => {
-            if ja {
-                "`quota show` で残量を確認し、待機するか設定を変更する"
-            } else {
-                "check `quota show`, then wait or change the policy"
-            }
-        }
+        ErrorCode::E1001 => "see `llmsearch --help`",
+        ErrorCode::E1002 => "run `llmsearch --help`",
+        ErrorCode::E1003 => "check `config path`, or run `config init`",
+        ErrorCode::E1004 => "run `config validate` / `engines validate`",
+        ErrorCode::E1005 => "use forms like `1`, `1,3`, `1-3`, `R1`",
+        ErrorCode::E1006 => "run `search` and use a valid identifier",
+        ErrorCode::E1007 => "provide a query",
+        ErrorCode::E1008 => "run `engines validate` to see allowed variables",
+        ErrorCode::E2001 => "choose another result or retry later",
+        ErrorCode::E2002 => "increase the network profile timeout",
+        ErrorCode::E2003 => "for 4xx pick another URL; for 5xx retry later",
+        ErrorCode::E2004 => "check the original URL",
+        ErrorCode::E2005 => "choose an HTML page",
+        ErrorCode::E2006 => "choose another result",
+        ErrorCode::E2007 => "increase `network.maxBytes`",
+        ErrorCode::E2008 => "configure `tls.caFile`",
+        ErrorCode::E3001 => "retry with `--refresh`",
+        ErrorCode::E3002 => "choose another result",
+        ErrorCode::E3003 => "set `network.charset`",
+        ErrorCode::E3004 => "change the extraction engine",
+        ErrorCode::E4001 => "change the query or choose another engine",
+        ErrorCode::E4002 => "run `engines list`",
+        ErrorCode::E4003 => "wait and retry",
+        ErrorCode::E4004 => "use `engines test` to inspect selectors",
+        ErrorCode::E4005 => "remove the duplicate definition",
+        ErrorCode::E4006 => "add `absolutize` to the extraction rules",
+        ErrorCode::E5001 => "run `search` to start a new session",
+        ErrorCode::E5002 => "check permissions and free space",
+        ErrorCode::E5003 => "retry the same operation",
+        ErrorCode::E5004 => "export then recreate the history file",
+        ErrorCode::E5005 => "check `quota show`, then wait or change the policy",
     }
 }
 

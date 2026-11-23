@@ -42,13 +42,13 @@ impl FilterStats {
 
     pub fn summary_line(&self) -> String {
         if self.disabled {
-            return "（フィルタ: 無効）".to_string();
+            return "(filters: disabled)".to_string();
         }
         if self.removed == 0 {
-            return format!("（フィルタ: {} 件すべて表示）", self.kept);
+            return format!("(filters: all {} shown)", self.kept);
         }
         format!(
-            "（フィルタ: {} 件中 {} 件を表示、除外 {} 件）",
+            "(filters: showing {} of {} results, {} filtered out)",
             self.kept + self.removed,
             self.kept,
             self.removed
@@ -133,7 +133,7 @@ impl CompiledRule {
             match pat {
                 None => Ok(None),
                 Some(p) => regex::Regex::new(p).map(Some).map_err(|e| {
-                    AppError::with_detail(ErrorCode::E1004, format!("正規表現 {p}: {e}"))
+                    AppError::with_detail(ErrorCode::E1004, format!("regular expression {p}: {e}"))
                 }),
             }
         };
@@ -675,7 +675,7 @@ mod tests {
             "schemaVersion": 2, "id": "t",
             "content": {"stripLines": [{"boilerplate": ["cookie"]}]}
         }));
-        let (out, _) = apply_content(&f, "本文\nCookie の利用について\n", false);
+        let (out, _) = apply_content(&f, "body\nAbout cookie usage\n", false);
         assert!(!out.to_lowercase().contains("cookie"));
     }
 }

@@ -91,8 +91,9 @@ impl JsonlHistory {
         }
         let mut text = String::new();
         for entry in &kept {
-            let line = serde_json::to_string(entry)
-                .map_err(|e| AppError::with_detail(ErrorCode::E5004, format!("直列化: {e}")))?;
+            let line = serde_json::to_string(entry).map_err(|e| {
+                AppError::with_detail(ErrorCode::E5004, format!("serialization: {e}"))
+            })?;
             text.push_str(&line);
             text.push('\n');
         }
@@ -147,7 +148,7 @@ impl HistoryStore for JsonlHistory {
             })?;
         }
         let line = serde_json::to_string(entry)
-            .map_err(|e| AppError::with_detail(ErrorCode::E5004, format!("直列化: {e}")))?;
+            .map_err(|e| AppError::with_detail(ErrorCode::E5004, format!("serialization: {e}")))?;
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -281,7 +282,11 @@ mod tests {
         store.append(&dated("H1", "2026-01-01T00:00:00Z")).unwrap();
         store.append(&dated("H2", "2026-11-01T00:00:00Z")).unwrap();
         let all = store.read_all().unwrap();
-        assert_eq!(all.len(), 1, "保持期間を超えた行が残っている: {all:?}");
+        assert_eq!(
+            all.len(),
+            1,
+            "lines older than the retention window are still present: {all:?}"
+        );
         assert_eq!(all[0].id, "H2");
     }
 
@@ -296,8 +301,11 @@ mod tests {
             store.append(&dated(&format!("H{i}"), &at)).unwrap();
         }
         let all = store.read_all().unwrap();
-        assert_eq!(all.len(), 3, "上限件数が効いていない: {all:?}");
-        assert!(all.iter().all(|e| e.id != "H1"), "古い行が残っている");
+        assert_eq!(all.len(), 3, "the entry limit is not enforced: {all:?}");
+        assert!(
+            all.iter().all(|e| e.id != "H1"),
+            "old lines are still present"
+        );
     }
 
     #[test]

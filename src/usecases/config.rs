@@ -10,7 +10,7 @@ use crate::adapters::state::StatePaths;
 use crate::adapters::state::history_jsonl::JsonlHistory;
 use crate::adapters::state::session_store::{FsCounters, FsDocumentStore, FsSessionStore};
 use crate::core::config::filter::CompiledFilters;
-use crate::core::errors::{AppError, Check, Diagnostic, ErrorCode, Locale, WarningCode};
+use crate::core::errors::{AppError, Check, Diagnostic, ErrorCode, WarningCode};
 use crate::core::secret::Secrets;
 use crate::ports::system::{SystemClock, SystemEnv, SystemIdGen};
 use crate::ports::{Clock, Env, IdGen, Reporter};
@@ -26,6 +26,8 @@ pub struct Bootstrap {
     pub filters: Option<String>,
     pub quota: Option<String>,
     pub engine: Option<String>,
+    /// 検索エンジンへ送る言語（`search.language` の上書き）。
+    pub language: Option<String>,
     pub no_filter: bool,
     pub no_cache: bool,
     pub refresh: bool,
@@ -59,19 +61,6 @@ pub struct Resolved {
 }
 
 /// 同梱リソースのディレクトリ。
-/// 設定の検証に踏み込まずに `ui.locale` だけを先読みする。
-///
-/// `build` が失敗すると `ui.locale` を解決できないため、エラー文言の言語を
-/// 決めるためだけに使う。読めない場合は `None`（日本語のまま表示する）。
-pub fn peek_locale(config_path: Option<&std::path::Path>, env: &dyn Env) -> Option<Locale> {
-    let options = cfg::LoadOptions {
-        config_path: config_path.map(std::path::Path::to_path_buf),
-        overrides: Vec::new(),
-    };
-    let loaded = cfg::load(env, &options).ok()?;
-    Some(loaded.settings.locale())
-}
-
 pub fn bundled_root(env: &dyn Env) -> PathBuf {
     if let Some(dir) = env.executable_dir() {
         let assets = dir.join("assets");
@@ -99,6 +88,17 @@ pub fn build(
             overrides: bootstrap.overrides.clone(),
         },
     )?;
+    let mut loaded = loaded;
+    if let Some(tag) = &bootstrap.language {
+        // 引数は最も強い指定なので、検証の前に設定値へ重ねる。
+        if crate::core::lang::parse(tag).is_none() {
+            return Err(AppError::with_detail(
+                ErrorCode::E1004,
+                format!("--language {tag} (expected a language tag such as `en` or `pt-BR`)"),
+            ));
+        }
+        loaded.settings.search.language = tag.clone();
+    }
     loaded.settings.ensure_valid()?;
 
     let mut resolved = Resolved {
@@ -189,12 +189,12 @@ pub fn build(
                 .map(|e| e.selector())
         })
         .ok_or_else(|| {
-            AppError::with_detail(ErrorCode::E4002, "利用可能なエンジンが無い".to_string())
+            AppError::with_detail(ErrorCode::E4002, "no engine is available".to_string())
         })?;
     if loaded_engines.registry.get(&default_engine).is_none() {
         return Err(AppError::with_detail(
             ErrorCode::E4002,
-            format!("エンジン '{default_engine}' が見つからない"),
+            format!("engine '{default_engine}' was not found"),
         ));
     }
 
@@ -255,6 +255,18 @@ pub fn build(
         default_engine,
         session_id: std::sync::Mutex::new(String::new()),
     };
+    // 検証で出た警告（未知キー・廃止したキーなど）は開始前に利用者へ知らせる。
+    // 仕様 configuration.md §6.2 と errors.md §4.5。
+    let from_checks: Vec<Diagnostic> = resolved
+        .checks
+        .iter()
+        .filter_map(|c| match c {
+            Check::Warn(t) => Some(Diagnostic::new(WarningCode::W1002, t.clone())),
+            _ => None,
+        })
+        .collect();
+    resolved.warnings.extend(from_checks);
+
     Ok((app, resolved))
 }
 
@@ -386,8 +398,8 @@ pub const ENV_MAPPINGS: &[EnvMapping] = &[
         invert: false,
     },
     EnvMapping {
-        name: "LLMSEARCH_UI_LOCALE",
-        key: "ui.locale",
+        name: "LLMSEARCH_SEARCH_LANGUAGE",
+        key: "search.language",
         kind: Kind::Text,
         invert: false,
     },
@@ -458,7 +470,7 @@ fn parse_env_number(name: &str, key: &str, raw: &str) -> Result<u64, AppError> {
     raw.trim().parse::<u64>().map_err(|_| {
         AppError::with_detail(
             ErrorCode::E1004,
-            format!("{name} = '{raw}'（{key} は正の整数）"),
+            format!("{name} = '{raw}' ({key} must be a positive integer)"),
         )
     })
 }
@@ -469,7 +481,7 @@ fn parse_env_bool(name: &str, key: &str, raw: &str) -> Result<bool, AppError> {
         "0" | "false" => Ok(false),
         other => Err(AppError::with_detail(
             ErrorCode::E1004,
-            format!("{name} = '{other}'（{key} は 1 / 0 / true / false）"),
+            format!("{name} = '{other}' ({key} must be 1 / 0 / true / false)"),
         )),
     }
 }
@@ -498,7 +510,7 @@ pub fn network_env_overrides(
         if raw.trim().is_empty() {
             return Err(AppError::with_detail(
                 ErrorCode::E1004,
-                "LLMSEARCH_USER_AGENT に空文字は指定できない".to_string(),
+                "LLMSEARCH_USER_AGENT must not be empty".to_string(),
             ));
         }
         profile.user_agent = raw;
@@ -563,7 +575,7 @@ pub fn describe(app: &App, resolved: &Resolved) -> Vec<ConfigRow> {
         (
             "search.fallback",
             if s.search.fallback.is_empty() {
-                "(なし)".to_string()
+                "(none)".to_string()
             } else {
                 s.search.fallback.join(",")
             },
@@ -572,13 +584,14 @@ pub fn describe(app: &App, resolved: &Resolved) -> Vec<ConfigRow> {
         (
             "search.engines",
             if s.search.engines.is_empty() {
-                "(なし)".to_string()
+                "(none)".to_string()
             } else {
                 s.search.engines.join(",")
             },
         ),
         ("search.snippetChars", s.search.snippet_chars.to_string()),
         ("search.titleChars", s.search.title_chars.to_string()),
+        ("search.language", s.search.language.clone()),
         ("context.maxChars", s.context.max_chars.to_string()),
         ("context.outlineDepth", s.context.outline_depth.to_string()),
         (
@@ -602,7 +615,6 @@ pub fn describe(app: &App, resolved: &Resolved) -> Vec<ConfigRow> {
         ("session.ttlDays", s.session.ttl_days.to_string()),
         ("session.maxSessions", s.session.max_sessions.to_string()),
         ("ui.color", effective_color(&s.ui.color, app.env.as_ref())),
-        ("ui.locale", s.ui.locale.clone()),
         ("ui.pageSize", s.ui.page_size.to_string()),
         ("state.dir", app.paths.root.display().to_string()),
         ("network", app.network.id.clone()),
@@ -649,6 +661,7 @@ fn origin_of(app: &App, resolved: &Resolved, key: &str) -> (Origin, String) {
         "network" => argv.network.clone(),
         "filters" => argv.filters.clone(),
         "quota" => argv.quota.clone(),
+        "search.language" => argv.language.clone(),
         "state.dir" => argv.state_dir.as_ref().map(|p| p.display().to_string()),
         _ => None,
     };
@@ -764,10 +777,10 @@ pub fn explain(
         None => {
             let candidates = near_keys(key, describe(app, resolved).iter().map(|r| r.key.clone()));
             let detail = if candidates.is_empty() {
-                format!("キー '{key}' は説明できない")
+                format!("key '{key}' cannot be explained")
             } else {
                 format!(
-                    "キー '{key}' は説明できない（候補: {}）",
+                    "key '{key}' cannot be explained (did you mean: {})",
                     candidates.join(", ")
                 )
             };
@@ -931,17 +944,6 @@ pub fn init(state_dir: &Path, force: bool) -> Result<InitReport, AppError> {
 }
 
 /// 環境変数の警告（未知キー等）。
-pub fn unknown_key_warnings(app: &App) -> Vec<Diagnostic> {
-    app.settings
-        .validate()
-        .into_iter()
-        .filter_map(|c| match c {
-            Check::Warn(t) => Some(Diagnostic::new(WarningCode::W1002, t)),
-            _ => None,
-        })
-        .collect()
-}
-
 /// 既定の依存一式を作る（実環境向けの入口）。
 pub fn default_deps() -> (Arc<dyn Clock>, Arc<dyn Env>, Arc<dyn IdGen>) {
     (
@@ -991,7 +993,7 @@ mod tests {
         }
         let mut map = std::collections::BTreeMap::new();
         map.insert("LLMSEARCH_SEARCH_LIMIT".to_string(), "5".to_string());
-        map.insert("LLMSEARCH_UI_LOCALE".to_string(), "en".to_string());
+        map.insert("LLMSEARCH_SEARCH_LANGUAGE".to_string(), "de".to_string());
         map.insert("LLMSEARCH_NO_CACHE".to_string(), "1".to_string());
         let overrides = env_overrides(&FakeEnv(map)).unwrap();
         assert_eq!(overrides.len(), 3);
@@ -1004,7 +1006,13 @@ mod tests {
             overrides
                 .iter()
                 .any(|(k, v)| k == "cache.enabled" && v == &serde_json::json!(false)),
-            "LLMSEARCH_NO_CACHE=1 は cache.enabled=false へ写す"
+            "LLMSEARCH_NO_CACHE=1 maps to cache.enabled=false"
+        );
+        assert!(
+            overrides
+                .iter()
+                .any(|(k, v)| k == "search.language" && v == &serde_json::json!("de")),
+            "LLMSEARCH_SEARCH_LANGUAGE maps to search.language"
         );
     }
 
@@ -1077,7 +1085,7 @@ mod tests {
         map.insert("NO_COLOR".to_string(), "1".to_string());
         let overrides = env_overrides(&FakeEnv(map)).unwrap();
         let color: Vec<_> = overrides.iter().filter(|(k, _)| k == "ui.color").collect();
-        assert_eq!(color.len(), 1, "同じキーは 1 件に畳む");
+        assert_eq!(color.len(), 1, "the same key must collapse to one entry");
         assert_eq!(color[0].1, serde_json::json!("never"));
     }
 }

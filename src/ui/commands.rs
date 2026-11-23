@@ -56,7 +56,7 @@ pub fn run(
                 let start = (outcome.page.page as usize - 1) * limit + 1;
                 let end = start + outcome.hits.len().saturating_sub(1);
                 renderer.out(&format!(
-                    "Q: {query}    engine: {}    表示: {start}-{end} 件目",
+                    "Q: {query}    engine: {}    showing: {start}-{end}",
                     outcome.engine
                 ));
                 let secrets = secret_values(app);
@@ -65,11 +65,17 @@ pub fn run(
                 }
                 renderer.out(&outcome.filtered.summary_line());
                 if outcome.has_more {
-                    renderer.out("（続きは `next` または 3) 8 件目以降を見る）");
+                    renderer.out(
+                        "(continue with `next`, or choose 3) Show results from the 8th onward)",
+                    );
                 }
             }
             if renderer.json {
-                done(renderer, "search", format!("{} 件", outcome.hits.len()));
+                done(
+                    renderer,
+                    "search",
+                    format!("{} results", outcome.hits.len()),
+                );
             }
             Ok(0)
         }
@@ -79,8 +85,8 @@ pub fn run(
             let session_id = app.current_session_id();
             if session_id.is_empty() {
                 return Err(AppError::new(ErrorCode::E5001)
-                    .detail("`next` は継続する検索が無い")
-                    .hint("`search` で新しいセッションを開始する"));
+                    .detail("`next` has no search to continue")
+                    .hint("start a new session with `search`"));
             }
             let session = app
                 .sessions
@@ -90,8 +96,8 @@ pub fn run(
                 .clone()
                 .or_else(|| session.queries.last().map(|q| q.query.clone()))
                 .ok_or_else(|| {
-                    AppError::with_detail(ErrorCode::E5001, "セッションに検索語が無い")
-                        .hint("`search` で新しいセッションを開始する")
+                    AppError::with_detail(ErrorCode::E5001, "the session has no query")
+                        .hint("start a new session with `search`")
                 })?;
             let outcome = search_uc::next(app, &query, &session.page)?;
             let session = search_uc::apply_to_session(app, &outcome, &query)?;
@@ -118,11 +124,11 @@ pub fn run(
                     renderer.out(&renderer.hit_line_with(hit, &display_url(&hit.url, &secrets)));
                 }
                 if !outcome.has_more {
-                    renderer.out("これ以上の結果はありません");
+                    renderer.out("No more results.");
                 }
             }
             if renderer.json {
-                done(renderer, "next", format!("+{} 件", outcome.hits.len()));
+                done(renderer, "next", format!("+{} results", outcome.hits.len()));
             }
             Ok(0)
         }
@@ -135,8 +141,8 @@ pub fn run(
                 .map(|s| s.last_query)
                 .filter(|q| !q.is_empty())
                 .ok_or_else(|| {
-                    AppError::with_detail(ErrorCode::E5001, "`refine` は変更前の検索語を要する")
-                        .hint("`search` で新しいセッションを開始してから `refine` を使う")
+                    AppError::with_detail(ErrorCode::E5001, "`refine` needs the previous query")
+                        .hint("run `search` to start a session before using `refine`")
                 })?;
             let outcome = search_uc::refine(app, &previous, query)?;
             let session = search_uc::apply_to_session(app, &outcome, query)?;
@@ -155,7 +161,11 @@ pub fn run(
                         "quota": quota_json(app),
                     }),
                 ));
-                done(renderer, "refine", format!("{} 件", outcome.hits.len()));
+                done(
+                    renderer,
+                    "refine",
+                    format!("{} results", outcome.hits.len()),
+                );
             } else {
                 let secrets = secret_values(app);
                 for hit in &outcome.hits {
@@ -201,7 +211,7 @@ pub fn run(
                 done(
                     renderer,
                     "outline",
-                    format!("{} 見出し", view.headings.len()),
+                    format!("{} headings", view.headings.len()),
                 );
             } else {
                 let secrets = secret_values(app);
@@ -255,7 +265,7 @@ pub fn run(
                         }),
                     ));
                 }
-                done(renderer, "read", format!("{} 字", outcome.total_chars));
+                done(renderer, "read", format!("{} chars", outcome.total_chars));
             } else {
                 let secrets = secret_values(app);
                 let shown = display_document(&doc, &secrets);
@@ -275,7 +285,7 @@ pub fn run(
                     ));
                 }
                 renderer.out(&format!(
-                    "（出力 {} 字 / 予算 {} 字）",
+                    "(output {} chars / budget {} chars)",
                     outcome.total_chars, outcome.budget
                 ));
             }
@@ -322,12 +332,7 @@ pub fn run(
                 done(
                     renderer,
                     "doctor",
-                    if failed {
-                        "失敗あり"
-                    } else {
-                        "問題なし"
-                    }
-                    .to_string(),
+                    if failed { "issues found" } else { "no issues" }.to_string(),
                 );
             } else {
                 renderer.out(&renderer.doctor_lines(&results));
@@ -355,8 +360,8 @@ fn resolve_target(app: &App, t: &str) -> Result<(String, url::Url), AppError> {
     let session_id = app.current_session_id();
     if session_id.is_empty() {
         return Err(AppError::new(ErrorCode::E5001)
-            .detail("セッションが無いため識別子を解決できない")
-            .hint("`search` を実行してから識別子を指定する"));
+            .detail("no session, so the identifier cannot be resolved")
+            .hint("run `search` before naming a target"));
     }
     let session = app
         .sessions
@@ -391,7 +396,7 @@ fn parse_sections(
                     _ => {
                         return Err(AppError::with_detail(
                             ErrorCode::E1005,
-                            format!("{s} は節の指定ではない"),
+                            format!("{s} is not a section reference"),
                         ));
                     }
                 }
@@ -443,13 +448,13 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                         "total": entries.len(),
                     }),
                 ));
-                done(renderer, "history", format!("{} 件", entries.len()));
+                done(renderer, "history", format!("{} entries", entries.len()));
             } else {
                 for entry in &entries {
                     renderer.out(&renderer.history_line(entry));
                 }
                 if entries.is_empty() {
-                    renderer.out("履歴はありません");
+                    renderer.out("No history entries.");
                 }
             }
             Ok(0)
@@ -495,7 +500,11 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                         "total": entries.len(),
                     }),
                 ));
-                done(renderer, "history grep", format!("{} 件", entries.len()));
+                done(
+                    renderer,
+                    "history grep",
+                    format!("{} entries", entries.len()),
+                );
             } else {
                 for entry in &entries {
                     renderer.out(&renderer.history_line(entry));
@@ -516,7 +525,11 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                             "total": ordered.len(),
                         }),
                     ));
-                    done(renderer, "history export", format!("{} 件", ordered.len()));
+                    done(
+                        renderer,
+                        "history export",
+                        format!("{} entries", ordered.len()),
+                    );
                 } else {
                     for entry in entries.iter().rev() {
                         renderer.out(&serde_json::to_string(entry).unwrap_or_default());
@@ -533,7 +546,11 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                         "total": ordered.len(),
                     }),
                 ));
-                done(renderer, "history export", format!("{} 件", ordered.len()));
+                done(
+                    renderer,
+                    "history export",
+                    format!("{} entries", ordered.len()),
+                );
             } else {
                 renderer.out(&history_uc::export(app, Some(200))?);
             }
@@ -543,7 +560,7 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
             if !(yes || *action_yes) {
                 return Err(AppError::with_detail(
                     ErrorCode::E1004,
-                    "--yes が必要".to_string(),
+                    "--yes is required".to_string(),
                 ));
             }
             let removed = history_uc::clear(app, None)?;
@@ -556,9 +573,9 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                         "total": 0,
                     }),
                 ));
-                done(renderer, "history clear", format!("{removed} 件"));
+                done(renderer, "history clear", format!("{removed} entries"));
             } else {
-                renderer.out(&format!("履歴を削除した（{removed} 件）"));
+                renderer.out(&format!("Cleared the history ({removed} entries)"));
             }
             Ok(0)
         }
@@ -592,7 +609,7 @@ fn run_engines(
                         })).collect::<Vec<_>>(),
                     }),
                 ));
-                done(renderer, "engines", format!("{} 件", rows.len()));
+                done(renderer, "engines", format!("{} engines", rows.len()));
             } else {
                 for r in &rows {
                     renderer.out(&format!(
@@ -600,7 +617,7 @@ fn run_engines(
                         r.id,
                         r.variant,
                         r.kind,
-                        if r.enabled { "有効" } else { "無効" },
+                        if r.enabled { "enabled" } else { "disabled" },
                         r.tags.join(","),
                         api_key_label(r)
                     ));
@@ -658,7 +675,7 @@ fn run_engines(
                 done(
                     renderer,
                     "engines validate",
-                    format!("{} 件", results.len()),
+                    format!("{} engines", results.len()),
                 );
             } else {
                 for (id, checks) in &results {
@@ -709,7 +726,7 @@ fn run_engines(
                 if let Some(body) = &run.body {
                     renderer.out(body);
                 }
-                renderer.info("--dry-run のため送信していません");
+                renderer.info("--dry-run: the request was not sent");
                 return Ok(0);
             }
             let guard = app.guard()?;
@@ -734,7 +751,7 @@ fn run_engines(
                 done(
                     renderer,
                     "engines test",
-                    format!("{} 件", outcome.hits.len()),
+                    format!("{} results", outcome.hits.len()),
                 );
                 return Ok(0);
             }
@@ -750,7 +767,7 @@ fn run_engines(
                 }
             } else {
                 renderer.out(&format!(
-                    "{}: {} 件（抽出できず破棄 {} 件）",
+                    "{}: {} results ({} discarded as unextractable)",
                     def.selector(),
                     outcome.hits.len(),
                     outcome.filtered.removed
@@ -803,7 +820,7 @@ fn run_network(
                         "active": app.network.id,
                     }),
                 ));
-                done(renderer, "network", format!("{} 件", ids.len()));
+                done(renderer, "network", format!("{} profiles", ids.len()));
             } else {
                 for id in &ids {
                     renderer.out(id);
@@ -845,7 +862,7 @@ fn run_network(
                     None => {
                         checks.push((
                             id.clone(),
-                            crate::core::errors::Check::Fail(format!("{id} が見つからない")),
+                            crate::core::errors::Check::Fail(format!("{id} not found")),
                         ));
                         failed = true;
                         continue;
@@ -881,7 +898,11 @@ fn run_network(
                         })).collect::<Vec<_>>(),
                     }),
                 ));
-                done(renderer, "network validate", format!("{} 件", checks.len()));
+                done(
+                    renderer,
+                    "network validate",
+                    format!("{} checks", checks.len()),
+                );
             } else {
                 let mut last = String::new();
                 for (id, check) in &checks {
@@ -932,7 +953,7 @@ fn run_filters(
                         "active": app.filters.set.id,
                     }),
                 ));
-                done(renderer, "filters", format!("{} 件", ids.len()));
+                done(renderer, "filters", format!("{} filter sets", ids.len()));
             } else {
                 for id in &ids {
                     renderer.out(id);
@@ -974,7 +995,7 @@ fn run_filters(
                     None => {
                         checks.push((
                             id.clone(),
-                            crate::core::errors::Check::Fail(format!("{id} が見つからない")),
+                            crate::core::errors::Check::Fail(format!("{id} not found")),
                         ));
                         failed = true;
                         continue;
@@ -993,10 +1014,7 @@ fn run_filters(
                             )),
                             Err(e) => {
                                 failed = true;
-                                crate::core::errors::Check::Fail(format!(
-                                    "{id}: {}",
-                                    e.message(app.locale())
-                                ))
+                                crate::core::errors::Check::Fail(format!("{id}: {}", e.message()))
                             }
                         };
                         checks.push((id, check));
@@ -1021,7 +1039,11 @@ fn run_filters(
                         })).collect::<Vec<_>>(),
                     }),
                 ));
-                done(renderer, "filters validate", format!("{} 件", checks.len()));
+                done(
+                    renderer,
+                    "filters validate",
+                    format!("{} checks", checks.len()),
+                );
             } else {
                 for (id, check) in &checks {
                     renderer.out(&format!("[{id}]"));
@@ -1067,7 +1089,7 @@ fn run_quota(
                     ));
                 }
                 if metrics.is_empty() {
-                    renderer.out("上限は設定されていません");
+                    renderer.out("No limits are configured.");
                 }
             }
             Ok(0)
@@ -1076,7 +1098,7 @@ fn run_quota(
             if !yes {
                 return Err(AppError::with_detail(
                     ErrorCode::E1004,
-                    "--yes が必要".to_string(),
+                    "--yes is required".to_string(),
                 ));
             }
             let before = app.counters.load().ok();
@@ -1086,7 +1108,7 @@ fn run_quota(
             if let Err(err) = record_quota_reset(app, scope, before, after) {
                 app.reporter.warn(&crate::core::errors::Diagnostic::new(
                     crate::core::errors::WarningCode::W5001,
-                    format!("クォータのリセットを履歴に記録できなかった: {err}"),
+                    format!("could not record the quota reset in the history: {err}"),
                 ));
             }
             if renderer.json {
@@ -1102,7 +1124,7 @@ fn run_quota(
                 ));
                 done(renderer, "quota reset", format!("scope={scope}"));
             } else {
-                renderer.out(&format!("クォータを初期化した（scope={scope}）"));
+                renderer.out(&format!("Reset the quota (scope={scope})"));
             }
             Ok(0)
         }
@@ -1135,9 +1157,9 @@ fn run_quota(
                                 })).collect::<Vec<_>>(),
                             }),
                         ));
-                        done(renderer, "quota check", "実行できます".to_string());
+                        done(renderer, "quota check", "allowed".to_string());
                     } else {
-                        renderer.out("実行できます");
+                        renderer.out("Allowed.");
                     }
                     Ok(0)
                 }
@@ -1248,9 +1270,10 @@ fn run_config(
                             "origin": row.origin.kind(),
                             "source": row.source,
                         })).collect::<Vec<_>>(),
+                        "warnings": crate::ui::render::warnings_json(&resolved.warnings),
                     }),
                 ));
-                done(renderer, "config show", format!("{} 件", rows.len()));
+                done(renderer, "config show", format!("{} keys", rows.len()));
             } else {
                 for row in &rows {
                     renderer.out(&format!(
@@ -1297,7 +1320,7 @@ fn run_config(
                 done(renderer, "config path", rows.len().to_string());
             } else {
                 for row in &rows {
-                    let mark = if row.used { "[使用]" } else { "[候補]" };
+                    let mark = if row.used { "[used]" } else { "[candidate]" };
                     renderer.out(&format!("{mark} {:<10} {}", row.label, row.path.display()));
                 }
             }
@@ -1316,15 +1339,15 @@ fn run_config(
                 done(
                     renderer,
                     "config init",
-                    format!("{} 件", report.written.len()),
+                    format!("{} files", report.written.len()),
                 );
             } else {
                 for path in &report.written {
-                    renderer.out(&format!("{} を書き出した", path.display()));
+                    renderer.out(&format!("wrote {}", path.display()));
                 }
                 for path in &report.skipped {
                     renderer.out(&format!(
-                        "{} は既に存在するため書き出さない（--force で上書き）",
+                        "{} already exists; not written (use --force to overwrite)",
                         path.display()
                     ));
                 }
@@ -1360,12 +1383,7 @@ fn run_config(
                 done(
                     renderer,
                     "config validate",
-                    if failed {
-                        "失敗あり"
-                    } else {
-                        "問題なし"
-                    }
-                    .to_string(),
+                    if failed { "issues found" } else { "no issues" }.to_string(),
                 );
             } else {
                 for check in &checks {
@@ -1392,9 +1410,9 @@ fn entry_json(entry: &crate::core::history::HistoryEntry) -> serde_json::Value {
 /// `engines list` のテキスト表示に使う API キー状態の見出し。
 fn api_key_label(row: &crate::usecases::engines::EngineRow) -> String {
     match row.api_key_state.as_str() {
-        "not-required" => "不要".to_string(),
-        "configured" => format!("設定済み（{}）", row.api_key_envs.join(",")),
-        _ => format!("未設定（{}）", row.api_key_envs.join(",")),
+        "not-required" => "not required".to_string(),
+        "configured" => format!("configured ({})", row.api_key_envs.join(",")),
+        _ => format!("not set ({})", row.api_key_envs.join(",")),
     }
 }
 

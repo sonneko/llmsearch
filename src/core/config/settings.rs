@@ -35,6 +35,8 @@ pub struct SearchSettings {
     pub engines: Vec<String>,
     pub snippet_chars: usize,
     pub title_chars: usize,
+    /// 検索エンジンへ送る言語（既定 `en`）。表示言語とは独立。
+    pub language: String,
 }
 
 impl Default for SearchSettings {
@@ -48,6 +50,7 @@ impl Default for SearchSettings {
             engines: Vec::new(),
             snippet_chars: 120,
             title_chars: 100,
+            language: "en".into(),
         }
     }
 }
@@ -130,16 +133,18 @@ impl Default for SessionSettings {
 #[serde(rename_all = "camelCase", default)]
 pub struct UiSettings {
     pub color: String,
-    pub locale: String,
     pub page_size: usize,
+    /// 未知キーの温存（旧 `locale` を警告付きで残すため）。
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
             color: "auto".into(),
-            locale: "ja".into(),
             page_size: 7,
+            extra: Default::default(),
         }
     }
 }
@@ -172,7 +177,7 @@ impl Default for Settings {
 fn range(name: &str, value: u64, min: u64, max: u64, out: &mut Vec<Check>) {
     if value < min || value > max {
         out.push(Check::Fail(format!(
-            "{name} = {value}（許容範囲 {min}〜{max}）"
+            "{name} = {value} (allowed range {min}..={max})"
         )));
     }
 }
@@ -182,7 +187,7 @@ impl Settings {
         let mut out = Vec::new();
         if self.schema_version != 2 {
             out.push(Check::Fail(format!(
-                "settings.schemaVersion = {}（対応版は 2）",
+                "settings.schemaVersion = {} (supported: 2)",
                 self.schema_version
             )));
         }
@@ -227,25 +232,32 @@ impl Settings {
         range("session.ttlDays", self.session.ttl_days, 1, 3650, &mut out);
         if !matches!(self.ui.color.as_str(), "auto" | "always" | "never") {
             out.push(Check::Fail(format!(
-                "ui.color = {}（auto / always / never）",
+                "ui.color = {} (auto / always / never)",
                 self.ui.color
             )));
         }
-        if crate::core::errors::Locale::parse(&self.ui.locale).is_none() {
+        if crate::core::lang::parse(&self.search.language).is_none() {
             out.push(Check::Fail(format!(
-                "ui.locale = {}（ja / en）",
-                self.ui.locale
+                "search.language = {} (expected a language tag such as `en` or `pt-BR`)",
+                self.search.language
             )));
+        }
+        for key in self.ui.extra.keys() {
+            if key == "locale" {
+                out.push(Check::Warn(
+                    "ui.locale was removed: messages are always in English now; use `search.language` to set the search engine language".to_string(),
+                ));
+            } else {
+                out.push(Check::Warn(format!("unknown key ui.{key} (kept)")));
+            }
         }
         if self.search.merge && self.search.engines.is_empty() {
             out.push(Check::Fail(
-                "search.merge = true のとき search.engines に 1 件以上必要".into(),
+                "search.engines needs at least one entry when search.merge = true".into(),
             ));
         }
         for key in self.extra.keys() {
-            out.push(Check::Warn(format!(
-                "settings に未知キー {key}（保持される）"
-            )));
+            out.push(Check::Warn(format!("unknown key {key} in settings (kept)")));
         }
         out
     }
@@ -264,10 +276,6 @@ impl Settings {
                 fail.text().to_string(),
             )),
         }
-    }
-
-    pub fn locale(&self) -> crate::core::errors::Locale {
-        crate::core::errors::Locale::parse(&self.ui.locale).unwrap_or_default()
     }
 }
 

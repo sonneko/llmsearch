@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Parser;
-use llmsearch::core::errors::{ErrorCode, Locale};
+use llmsearch::core::errors::ErrorCode;
 use llmsearch::ports::Env;
 use llmsearch::ui::{cli::Cli, commands, render::Renderer};
 use llmsearch::usecases::config::{Bootstrap, Origin, Resolved, build, describe, paths};
@@ -124,14 +124,7 @@ fn context(env: TestEnv, extra_engines: Option<&str>, bootstrap: Bootstrap) -> C
 }
 
 fn renderer(ctx: &Ctx) -> Renderer {
-    Renderer::new(
-        false,
-        false,
-        Locale::Ja,
-        true,
-        100,
-        Arc::clone(&ctx.app.clock),
-    )
+    Renderer::new(false, false, true, 100, Arc::clone(&ctx.app.clock))
 }
 
 fn execute(ctx: &mut Ctx, args: &[&str]) {

@@ -54,13 +54,13 @@ impl Interactive {
         }
         self.app.set_session(&id);
         if !self.app.quiet {
-            writeln!(out, "セッション {id}（継続するには --session {id}）").map_err(io_error)?;
+            writeln!(out, "session {id} (resume with --session {id})").map_err(io_error)?;
         }
 
         loop {
             match self.screen {
                 Screen::Query => {
-                    write!(out, "検索語: ").map_err(io_error)?;
+                    write!(out, "query: ").map_err(io_error)?;
                     out.flush().map_err(io_error)?;
                     let Some(line) = read_line(input)? else {
                         return Ok(());
@@ -102,7 +102,7 @@ impl Interactive {
                     }
                 }
                 Screen::SelectResults => {
-                    write!(out, "選択（例: 1,3 / 1-3 / R1）: ").map_err(io_error)?;
+                    write!(out, "selection (e.g. 1,3 / 1-3 / R1): ").map_err(io_error)?;
                     out.flush().map_err(io_error)?;
                     let Some(line) = read_line(input)? else {
                         return Ok(());
@@ -139,7 +139,7 @@ impl Interactive {
                         Input::Choice(1) => return Ok(()),
                         Input::Choice(2) => next = Some(Screen::SelectSections),
                         Input::Choice(3) => {
-                            write!(out, "深度（2〜4）: ").map_err(io_error)?;
+                            write!(out, "depth (2-4): ").map_err(io_error)?;
                             out.flush().map_err(io_error)?;
                             if let Some(depth_line) = read_line(input)? {
                                 match menu::parse_input(Screen::Outline, &depth_line) {
@@ -148,7 +148,7 @@ impl Interactive {
                                         self.app.settings.context.outline_depth = n;
                                     }
                                     _ => {
-                                        writeln!(out, "2〜4 の数値を入力してください")
+                                        writeln!(out, "enter a number between 2 and 4")
                                             .map_err(io_error)?;
                                     }
                                 }
@@ -169,7 +169,7 @@ impl Interactive {
                     }
                 }
                 Screen::SelectSections => {
-                    write!(out, "節（例: D1:S3 / S3）: ").map_err(io_error)?;
+                    write!(out, "section (e.g. D1:S3 / S3): ").map_err(io_error)?;
                     out.flush().map_err(io_error)?;
                     let Some(line) = read_line(input)? else {
                         return Ok(());
@@ -208,7 +208,7 @@ impl Interactive {
                 self.documents.clear();
                 writeln!(
                     out,
-                    "検索 {} 件{} / {}",
+                    "search: {} results {} / {}",
                     outcome.hits.len(),
                     outcome.filtered.summary_line(),
                     self.quota_text(Metric::Searches)
@@ -275,10 +275,11 @@ impl Interactive {
                 self.session = session;
                 writeln!(
                     out,
-                    "追加 {} 件（{} ページ目）/ {}",
+                    "added {} results (page {}); searches {}/{}",
                     outcome.hits.len(),
                     outcome.page.page,
-                    self.quota_text(Metric::Searches)
+                    self.quota_used(Metric::Searches),
+                    self.quota_limit(Metric::Searches)
                 )
                 .map_err(io_error)?;
                 self.screen = Screen::Results;
@@ -307,13 +308,13 @@ impl Interactive {
             }
         }
         if ids.is_empty() {
-            writeln!(out, "結果を選択してください（例: 1,3）").map_err(io_error)?;
+            writeln!(out, "select results (e.g. 1,3)").map_err(io_error)?;
             return Ok(());
         }
         self.documents.clear();
         for id in ids {
             let Some(hit) = self.session.find_result(id) else {
-                writeln!(out, "R{id} は一覧にありません").map_err(io_error)?;
+                writeln!(out, "R{id} is not in the list").map_err(io_error)?;
                 continue;
             };
             let url = crate::core::url::parse(&hit.url)?;
@@ -324,7 +325,7 @@ impl Interactive {
                     }
                     writeln!(
                         out,
-                        "取得 D{} {} 字 / {}",
+                        "fetched D{} {} chars / {}",
                         fetched.document.id,
                         fetched.document.chars,
                         self.quota_text(Metric::Fetches)
@@ -354,8 +355,11 @@ impl Interactive {
                     );
                     write!(out, "{text}").map_err(io_error)?;
                     if view.whole_body {
-                        writeln!(out, "  （見出しが見つからない。本文全体は S0 で読めます）")
-                            .map_err(io_error)?;
+                        writeln!(
+                            out,
+                            "  (no headings found; the whole body is available as S0)"
+                        )
+                        .map_err(io_error)?;
                     }
                 }
                 Err(err) => self.renderer.error(&err),
@@ -379,7 +383,7 @@ impl Interactive {
         for selection in selections {
             let document_id = selection.document.or(single);
             let Some(document_id) = document_id else {
-                writeln!(out, "文書を指定してください（例: D1:S3）").map_err(io_error)?;
+                writeln!(out, "specify a document (e.g. D1:S3)").map_err(io_error)?;
                 continue;
             };
             let mut sections = Vec::new();
@@ -404,7 +408,7 @@ impl Interactive {
         let mut chosen: Vec<(DocumentRef, Vec<u32>)> = Vec::new();
         for (document_id, sections) in by_doc {
             let Some(doc) = self.session.find_document(document_id).cloned() else {
-                writeln!(out, "D{document_id} は取得済みではありません").map_err(io_error)?;
+                writeln!(out, "D{document_id} has not been fetched").map_err(io_error)?;
                 continue;
             };
             chosen.push((doc, sections));
@@ -437,7 +441,7 @@ impl Interactive {
                     }
                     writeln!(
                         out,
-                        "（出力 {} 字 / 予算 {} 字 / {}）",
+                        "(output {} chars / budget {} chars / {})",
                         outcome.total_chars,
                         outcome.budget,
                         self.quota_text(Metric::Chars)
@@ -457,7 +461,7 @@ impl Interactive {
         match history_uc::list(&self.app, Some(20), None) {
             Ok(entries) => {
                 if entries.is_empty() {
-                    writeln!(out, "履歴はありません").map_err(io_error)?;
+                    writeln!(out, "no history entries").map_err(io_error)?;
                     return Ok(());
                 }
                 for entry in entries {
@@ -472,7 +476,7 @@ impl Interactive {
     fn show_help(&mut self, out: &mut dyn Write) -> Result<(), AppError> {
         writeln!(
             out,
-            "コマンド: q=終了  n=次のページ  r=検索語の修正  s=履歴  h=ヘルプ"
+            "commands: q=quit  n=next page  r=edit query  s=history  h=help"
         )
         .map_err(io_error)?;
         Ok(())
@@ -483,7 +487,7 @@ impl Interactive {
         self.invalid += 1;
         writeln!(
             out,
-            "入力を解釈できません（{} 回目 / 3 回で戻ります）",
+            "cannot parse the input (attempt {} of 3 before returning)",
             self.invalid
         )
         .map_err(io_error)?;
@@ -509,6 +513,27 @@ impl Interactive {
         }
     }
 
+    /// セッション内の消費量（表示用）。
+    fn quota_used(&self, metric: Metric) -> u64 {
+        match self.app.guard() {
+            Ok(guard) => guard.session_usage().get(metric),
+            Err(_) => 0,
+        }
+    }
+
+    /// セッション上限（`None` は無制限なので `0`）。
+    fn quota_limit(&self, metric: Metric) -> u64 {
+        match self.app.guard() {
+            Ok(guard) => guard
+                .metrics()
+                .into_iter()
+                .find(|m| m.name == format!("session.{}", metric.as_str()))
+                .and_then(|m| m.limit)
+                .unwrap_or(0),
+            Err(_) => 0,
+        }
+    }
+
     /// 画面（テスト用）。
     pub fn screen(&self) -> Screen {
         self.screen
@@ -527,13 +552,13 @@ fn read_line(input: &mut dyn BufRead) -> Result<Option<String>, AppError> {
         Ok(_) => Ok(Some(line)),
         Err(e) => Err(AppError::with_detail(
             ErrorCode::E1001,
-            format!("入力の読み取りに失敗: {e}"),
+            format!("failed to read the input: {e}"),
         )),
     }
 }
 
 fn io_error(e: std::io::Error) -> AppError {
-    AppError::with_detail(ErrorCode::E1001, format!("出力に失敗: {e}"))
+    AppError::with_detail(ErrorCode::E1001, format!("failed to write the output: {e}"))
 }
 
 /// 表示用 URL（秘匿パラメータを伏字化する）。

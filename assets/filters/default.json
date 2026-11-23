@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "default",
-  "description": "一般的な調査向けの既定フィルタ。広告・まとめ・PDF を除き、同一ホストの偏りを抑える。",
+  "description": "Default filter set for general research: drops ads, aggregator pages and PDFs, and limits per-host bias.",
   "mode": "default",
   "results": {
     "deny": [

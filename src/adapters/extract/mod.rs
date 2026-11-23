@@ -88,7 +88,7 @@ impl HttpFetcher {
                 ErrorCode::E3002,
                 response
                     .content_type()
-                    .unwrap_or("(Content-Type なし)")
+                    .unwrap_or("(no Content-Type)")
                     .to_string(),
             ));
         }
@@ -103,7 +103,7 @@ impl HttpFetcher {
             self.reporter.warn(&Diagnostic::new(
                 WarningCode::W3003,
                 format!(
-                    "文字コードを {} と推定した（置換文字あり: {had_errors}）",
+                    "assumed charset {} (replacement characters: {had_errors})",
                     charset
                 ),
             ));
@@ -122,7 +122,7 @@ impl HttpFetcher {
         if response.truncated {
             converted.warnings.push(Diagnostic::new(
                 WarningCode::W3003,
-                "応答サイズの上限で打ち切った",
+                "truncated at the response size limit",
             ));
         }
         let mut meta = meta;

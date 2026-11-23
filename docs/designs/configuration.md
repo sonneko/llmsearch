@@ -70,6 +70,14 @@
 
 既定値は `impl Default for Settings` に集約し、`search.engine` のみ `Option<String>`（未設定時は同梱の `duckduckgo` を解決）。`limit` は 1〜30、`maxResults` は 1〜200 の検証属性を `validate()` で行う。
 
+`search.language`（既定 `en`）は `src/core/config/settings.rs` の `SearchSettings.language` に持ち、`Settings::validate()` が言語タグの形を検査する（空・不正は `E1004`）。`--language <tag>` は `Bootstrap.language` → `settings.search.language` の順で重ね、`LLMSEARCH_SEARCH_LANGUAGE` は `ENV_MAPPINGS` の `Kind::Text` として `search.language` へ写す。由来は `config show` の `origin_of` に `--language` / `search.language` の枝を足して表示する。
+
+正規化は `src/core/lang.rs` の `normalize_language(tag) -> Option<Language>` に集約する。`Language { tag, primary }` を返し、`tag` は小文字化した全体（`pt-BR` → `pt-br`）、`primary` は主言語タグ（`pt`）である。受理する形は `<主言語>[-<サブタグ>...]`、主言語は英字 2〜3 文字、サブタグは英数字 1〜8 文字。空・記号混入・4 文字以上の主言語は `None` とし、`Settings::validate()` と `parse_env` の双方で `E1004` にする。
+
+消費側は 1 か所に集約する。`src/usecases/search.rs` の `call_engine` と `src/usecases/engines.rs` の `dry_run` が `TmplCtx { language: primary, locale: tag, .. }` を組み立てる。`{{language}}` は主言語タグ、`{{locale}}` は正規化後の全体（旧定義との互換のため残す）。`Accept-Language` の補完は `src/adapters/engine/eval.rs` で `prepared.headers` に `Accept-Language` が無い場合だけ `tag` を挿入する（ネットワークプロファイルからの `Accept-Language` 上書きは廃止し、`src/adapters/http.rs` の `profile.accept_language` 分岐と `NetworkProfile.accept_language` フィールドを削除する）。
+
+DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列挙した値で、言語だけを表す形が無い。同梱定義から `kl` の直書きを削除し、言語は `Accept-Language` で届ける（`REF:docs/specifications/engine-definitions.md` §3.2）。地域を寄せたい利用者は自前の定義で `{{region}}` を使って `kl` を書ける。Brave は `search_lang={{language}}`、SearXNG は `language={{locale}}` を使う。
+
 ### 3.3 `context`
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
@@ -123,6 +131,8 @@
 - `LLMSEARCH_NO_CACHE`: `cache.enabled` の逆として `env_overrides` に入れる。`--no-cache` も同じキーを上書きする。
 - `LLMSEARCH_TIMEOUT_MS` / `LLMSEARCH_USER_AGENT`: 設定 `network` がインライン定義のときだけ `settings.network` のインライン値へ重ねる（ID 参照のときは解決後の `NetworkProfile` へ上書きする）。空の `LLMSEARCH_USER_AGENT` は `E1004`。
 - `NO_COLOR` / `LLMSEARCH_UI_COLOR`: `ui.color` へ写す。`NO_COLOR` が最優先。
+- `LLMSEARCH_SEARCH_LANGUAGE`: `search.language` へ写す（`Kind::Text`）。不正な言語タグは `E1004`。
+- `LLMSEARCH_UI_LOCALE`: 廃止。表から削除し、設定されていても参照しない。
 
 ---
 

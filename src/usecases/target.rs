@@ -25,16 +25,16 @@ impl Target {
 pub fn resolve(input: &str, session: Option<&SessionState>) -> Result<Target, AppError> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return Err(AppError::with_detail(ErrorCode::E1002, "対象が空"));
+        return Err(AppError::with_detail(ErrorCode::E1002, "target is empty"));
     }
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
         return crate::core::url::parse(trimmed).map(Target::Url);
     }
     let normalized = trimmed
-        .replace('Ｒ', "R")
-        .replace('Ｄ', "D")
-        .replace('ｒ', "r")
-        .replace('ｄ', "d");
+        .replace('Ｒ', "R") // m10:allow-japanese (full-width input tolerance)
+        .replace('Ｄ', "D") // m10:allow-japanese
+        .replace('ｒ', "r") // m10:allow-japanese
+        .replace('ｄ', "d"); // m10:allow-japanese
     let lower = normalized.to_ascii_lowercase();
     if let Some(rest) = lower.strip_prefix('r') {
         let id = rest
@@ -47,7 +47,7 @@ pub fn resolve(input: &str, session: Option<&SessionState>) -> Result<Target, Ap
             return Err(AppError::with_detail(
                 ErrorCode::E1006,
                 format!(
-                    "R{id} は現行セッションに無い（利用可能: {})",
+                    "R{id} is not in the current session (available: {})",
                     available_results(session)
                 ),
             ));
@@ -65,7 +65,7 @@ pub fn resolve(input: &str, session: Option<&SessionState>) -> Result<Target, Ap
             return Err(AppError::with_detail(
                 ErrorCode::E1006,
                 format!(
-                    "D{id} は現行セッションに無い（利用可能: {})",
+                    "D{id} is not in the current session (available: {})",
                     available_documents(session)
                 ),
             ));
@@ -79,7 +79,7 @@ pub fn resolve(input: &str, session: Option<&SessionState>) -> Result<Target, Ap
             return Err(AppError::with_detail(
                 ErrorCode::E1006,
                 format!(
-                    "{n} は現行セッションに無い（利用可能: {})",
+                    "{n} is not in the current session (available: {})",
                     available_results(session)
                 ),
             ));
@@ -88,14 +88,14 @@ pub fn resolve(input: &str, session: Option<&SessionState>) -> Result<Target, Ap
     }
     Err(AppError::with_detail(
         ErrorCode::E1002,
-        format!("{trimmed} を対象として解釈できない"),
+        format!("cannot interpret {trimmed} as a target"),
     ))
 }
 
 fn available_results(session: &SessionState) -> String {
     let ids: Vec<String> = session.results.iter().take(20).map(|r| r.label()).collect();
     if ids.is_empty() {
-        "（なし）".to_string()
+        "(none)".to_string()
     } else {
         ids.join(", ")
     }
@@ -109,7 +109,7 @@ fn available_documents(session: &SessionState) -> String {
         .map(|d| format!("D{}", d.id))
         .collect();
     if ids.is_empty() {
-        "（なし）".to_string()
+        "(none)".to_string()
     } else {
         ids.join(", ")
     }

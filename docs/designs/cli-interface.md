@@ -26,7 +26,7 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`GlobalOptions` 構造体に集約し、`resolve` 層への入力とする。`--engines-dir` は `Vec<PathBuf>` で複数指定を受け付ける。`--no-filter` は `Option<Option<String>>`（値なしは `results+content`、`all` は既定除去要素も対象）として解釈する。
+`GlobalOptions` 構造体に集約し、`resolve` 層への入力とする。`--engines-dir` は `Vec<PathBuf>` で複数指定を受け付ける。`--language <tag>` を追加し（M10）、`Bootstrap.language` として `search.language` を上書きする。`--language` を指定できるのは全体設定の一時上書きとして扱い、`--json` の `config show` でも由来 `argv` として出る。`--no-filter` は `Option<Option<String>>`（値なしは `results+content`、`all` は既定除去要素も対象）として解釈する。
 
 ---
 
@@ -115,6 +115,8 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
 描画関数は `src/ui/render/*.rs` に集約し、`Reporter::data` に渡す文字列を組み立てる。色は `ui/render/color.rs` の `Paint` を通す。
+
+文言は英語で固定する（M10）。`[untrusted] <url>` マーカー、`[truncated: ...]`、件数・クォータの行など既存の書式は変えず、語だけを英語にする。`[使用]` / `[候補]` の接頭辞は `[used]` / `[candidate]` にする。外部から得た文字列（タイトル・本文・`description`）は翻訳しない。日本語リテラルの混入は `REF:tests/architecture.rs` の検査で防ぐ。
 
 ### 4.3 JSON 出力の規則
 

@@ -38,7 +38,7 @@ pub fn prepare_query(input: &str) -> Result<(String, Vec<Diagnostic>), AppError>
         warnings.push(Diagnostic::new(
             WarningCode::W1003,
             format!(
-                "検索語が上限を超えたため {} 文字に切り詰めた（入力 {} 文字）",
+                "query exceeded the length limit and was truncated to {} chars (input was {} chars)",
                 crate::core::text::chars(&query),
                 crate::core::text::chars(input)
             ),
@@ -104,9 +104,9 @@ fn search_once(
             WarningCode::W4006,
             match &example {
                 Some(first) => {
-                    format!("エンジンのリダイレクト URL を {unwrapped} 件展開した（例: {first}）")
+                    format!("unwrapped {unwrapped} engine redirect URLs (e.g. {first})")
                 }
-                None => format!("エンジンのリダイレクト URL を {unwrapped} 件展開した"),
+                None => format!("unwrapped {unwrapped} engine redirect URLs"),
             },
         ));
     }
@@ -114,7 +114,7 @@ fn search_once(
     if removed > 0 {
         warnings.push(Diagnostic::new(
             WarningCode::W4005,
-            format!("重複 URL を {removed} 件除去した"),
+            format!("removed {removed} duplicate URLs"),
         ));
     }
     warnings.extend(call.outcome.warnings.iter().cloned());
@@ -156,7 +156,7 @@ fn finish(
     if let Some(from) = &fallback_from {
         warnings.push(Diagnostic::new(
             WarningCode::W4003,
-            format!("{from} の代わりに {engine} を使用した"),
+            format!("used {engine} instead of {from}"),
         ));
     }
 
@@ -281,7 +281,7 @@ fn run_merge(
         // `Settings::validate()` が先に `E1004` とするが、防御的に弾く
         return Err(AppError::with_detail(
             ErrorCode::E4002,
-            "search.merge = true だが search.engines が空".to_string(),
+            "search.merge = true but search.engines is empty".to_string(),
         ));
     }
 
@@ -299,7 +299,7 @@ fn run_merge(
         let Some(def) = app.engines.get(selector) else {
             warnings.push(Diagnostic::new(
                 WarningCode::W4004,
-                format!("エンジン '{selector}' が見つからないため統合から除いた"),
+                format!("engine '{selector}' was not found and is excluded from the merge"),
             ));
             continue;
         };
@@ -318,7 +318,7 @@ fn run_merge(
                 warnings.push(Diagnostic::new(
                     WarningCode::W4004,
                     format!(
-                        "{} は失敗したため統合から除いた（{}: {}）",
+                        "{} failed and is excluded from the merge ({}: {})",
                         def.selector(),
                         err.code.as_str(),
                         err.detail.clone().unwrap_or_default()
@@ -341,7 +341,7 @@ fn run_merge(
     if removed > 0 {
         warnings.push(Diagnostic::new(
             WarningCode::W4005,
-            format!("マージ時に重複 URL を {removed} 件除去した"),
+            format!("removed {removed} duplicate URLs while merging"),
         ));
     }
 
@@ -416,11 +416,8 @@ fn call_engine(
         offset,
         page: page_number,
         limit: def.limits.max_page_size.min(limit),
-        locale: def
-            .defaults
-            .locale
-            .clone()
-            .unwrap_or_else(|| app.settings.ui.locale.clone()),
+        language: app.language().primary.clone(),
+        locale: app.language().tag.clone(),
         region: def.defaults.region.clone().unwrap_or_default(),
         api_key: None,
         date_from: String::new(),
@@ -467,7 +464,7 @@ pub fn next(app: &mut App, query: &str, current: &PageState) -> Result<SearchOut
     if current.exhausted {
         return Err(AppError::with_detail(
             ErrorCode::E4001,
-            "これ以上の結果はない".to_string(),
+            "no more results".to_string(),
         ));
     }
     run(app, query, current.next_page)
@@ -486,7 +483,7 @@ pub fn refine(app: &mut App, previous: &str, new_query: &str) -> Result<SearchOu
     let _ = app.history.append(&entry);
     outcome.warnings.push(Diagnostic::new(
         WarningCode::W4001,
-        format!("検索語を '{previous}' から '{new_query}' に変更した"),
+        format!("changed the query from '{previous}' to '{new_query}'"),
     ));
     Ok(outcome)
 }
@@ -554,10 +551,10 @@ pub fn recent_queries(app: &App, limit: usize) -> Vec<String> {
 /// ページング様式の表示名（`engines show` 用）。
 pub fn paging_label(def: &EngineDef) -> String {
     match &def.paging {
-        None => "なし".to_string(),
+        None => "none".to_string(),
         Some(p) => match p.style {
-            PagingStyle::Offset => format!("offset（{} 件ずつ）", p.page_size.unwrap_or(10)),
-            PagingStyle::Page => format!("page（{} 件ずつ）", p.page_size.unwrap_or(10)),
+            PagingStyle::Offset => format!("offset ({} at a time)", p.page_size.unwrap_or(10)),
+            PagingStyle::Page => format!("page ({} at a time)", p.page_size.unwrap_or(10)),
         },
     }
 }
@@ -573,7 +570,7 @@ mod tests {
 
     #[test]
     fn long_query_is_truncated_with_warning() {
-        let long = "あ".repeat(600);
+        let long = "a".repeat(600);
         let (query, warnings) = prepare_query(&long).unwrap();
         assert_eq!(crate::core::text::chars(&query), 512);
         assert_eq!(warnings.len(), 1);

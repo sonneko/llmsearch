@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
   "id": "default",
-  "description": "一般的な公開サイト向けの既定プロファイル。",
+  "description": "Default profile for general public sites.",
   "timeoutConnectMs": 5000,
   "timeoutTotalMs": 20000,
   "maxBytes": 5242880,
@@ -36,6 +36,5 @@
     "userAgentToken": "llmsearch",
     "onError": "allow",
     "maxBytes": 524288
-  },
-  "acceptLanguage": "ja,en;q=0.8"
+  }
 }

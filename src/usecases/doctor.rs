@@ -29,7 +29,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
         check: if state_ok {
             Check::Ok(state.display().to_string())
         } else {
-            Check::Fail(format!("{} が無い", state.display()))
+            Check::Fail(format!("{} does not exist", state.display()))
         },
     });
 
@@ -45,9 +45,9 @@ pub fn run(app: &App) -> Vec<CheckResult> {
     out.push(CheckResult {
         name: "state.writable".into(),
         check: if writable {
-            Check::Ok("書き込み可能".into())
+            Check::Ok("writable".into())
         } else {
-            Check::Fail(format!("{} に書き込めない", state.display()))
+            Check::Fail(format!("cannot write to {}", state.display()))
         },
     });
 
@@ -71,7 +71,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
     out.push(CheckResult {
         name: "filters".into(),
         check: Check::Ok(format!(
-            "{} 件の規則（deny {} / allow {} / require {}）",
+            "{} rules (deny {} / allow {} / require {})",
             app.filters.deny.len() + app.filters.allow.len() + app.filters.require.len(),
             app.filters.deny.len(),
             app.filters.allow.len(),
@@ -90,7 +90,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
     out.push(CheckResult {
         name: "engines".into(),
         check: Check::Ok(format!(
-            "{} 件（有効 {} 件）",
+            "{} entries ({} enabled)",
             app.engines.len(),
             app.engines.enabled().count()
         )),
@@ -109,7 +109,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
         if metrics.is_empty() {
             out.push(CheckResult {
                 name: "quota.usage".into(),
-                check: Check::Ok("上限は未設定".into()),
+                check: Check::Ok("no limit configured".into()),
             });
         } else {
             for m in metrics {
@@ -120,7 +120,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
                         m.used,
                         m.limit
                             .map(|l| l.to_string())
-                            .unwrap_or_else(|| "無制限".into())
+                            .unwrap_or_else(|| "unlimited".into())
                     )),
                 });
             }
@@ -128,7 +128,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
     } else {
         out.push(CheckResult {
             name: "quota.usage".into(),
-            check: Check::Fail("カウンタを読めない".into()),
+            check: Check::Fail("cannot read the counters".into()),
         });
     }
 
@@ -151,17 +151,13 @@ pub fn run(app: &App) -> Vec<CheckResult> {
                 }),
                 Err(err) => out.push(CheckResult {
                     name: "network.reachability".into(),
-                    check: Check::Warn(format!(
-                        "{}: {}",
-                        err.code.as_str(),
-                        err.message(app.locale())
-                    )),
+                    check: Check::Warn(format!("{}: {}", err.code.as_str(), err.message())),
                 }),
             }
         }
         None => out.push(CheckResult {
             name: "network.reachability".into(),
-            check: Check::Warn("確認先の URL を決められない".into()),
+            check: Check::Warn("cannot determine the URL to check".into()),
         }),
     }
 
@@ -171,24 +167,23 @@ pub fn run(app: &App) -> Vec<CheckResult> {
             limit: Some(1),
             ..Default::default()
         }) {
-            Ok(entries) => Check::Ok(format!("{} 件以上を読める", entries.len())),
-            Err(err) => Check::Fail(format!(
-                "{}: {}",
-                err.code.as_str(),
-                err.message(app.locale())
-            )),
+            Ok(entries) => Check::Ok(format!("read at least {} entries", entries.len())),
+            Err(err) => Check::Fail(format!("{}: {}", err.code.as_str(), err.message())),
         },
     });
 
     if app.settings.cache.enabled {
         out.push(CheckResult {
             name: "cache".into(),
-            check: Check::Ok(format!("有効（TTL {} 時間）", app.settings.cache.ttl_hours)),
+            check: Check::Ok(format!(
+                "enabled (TTL {} hours)",
+                app.settings.cache.ttl_hours
+            )),
         });
     } else {
         out.push(CheckResult {
             name: "cache".into(),
-            check: Check::Warn("無効".into()),
+            check: Check::Warn("disabled".into()),
         });
     }
 
@@ -196,9 +191,9 @@ pub fn run(app: &App) -> Vec<CheckResult> {
     out.push(CheckResult {
         name: "session".into(),
         check: Check::Ok(format!(
-            "{} / 既定エンジン {}",
+            "{} / default engine {}",
             if session.is_empty() {
-                "(未作成)"
+                "(not created)"
             } else {
                 session.as_str()
             },
@@ -210,7 +205,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
         out.push(CheckResult {
             name: "summary".into(),
             check: Check::Fail(format!(
-                "{} 件の失敗（{}）",
+                "{} failures ({})",
                 out.iter().filter(|r| r.check.is_fail()).count(),
                 ErrorCode::E1004.as_str()
             )),
@@ -218,7 +213,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
     } else {
         out.push(CheckResult {
             name: "summary".into(),
-            check: Check::Ok("重大な問題は無い".into()),
+            check: Check::Ok("no critical issues".into()),
         });
     }
 
@@ -226,5 +221,5 @@ pub fn run(app: &App) -> Vec<CheckResult> {
 }
 
 fn rustc_version() -> &'static str {
-    option_env!("RUSTC_VERSION").unwrap_or("(不明)")
+    option_env!("RUSTC_VERSION").unwrap_or("(unknown)")
 }

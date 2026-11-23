@@ -19,23 +19,24 @@
 | 実運用と仕様同期（M6） | 完了 | システム CA ルート・E4004 耐性・M5 残 Issue の解消・ドキュメント同期（PR #28） | `REF:docs/plans.md#m6-dogfood-sync` |
 | 取得の作法と計測（M7） | 完了 | robots.txt の強制（#13）・`Retry-After`（#15）・`redirectPolicy` の 3xx（#17）・クォータ消費のずれ（#18） | `REF:docs/plans.md#m7-fetch-discipline` |
 | 設定・監査・統合の適合（M8） | 完了 | `config show/path/init`（#11）・`quota reset` の履歴（#19）・設定探索順と環境変数（#20）・`search.merge` の統合（#22） | `REF:docs/plans.md#m8-config-quota-merge` |
-| JSON・秘匿情報・ドキュメント（M9） | 実装中 | `--json` の統一（#4/#5）・`refine` と対象解決（#7/#9）・表示 URL の伏字化（#12）・ドキュメント整理（#21/#23） | `REF:docs/plans.md#m9-json-and-docs` |
+| JSON・秘匿情報・ドキュメント（M9） | 完了 | `--json` の統一（#4/#5）・`refine` と対象解決（#7/#9）・表示 URL の伏字化（#12）・ドキュメント整理（#21/#23）（PR #32） | `REF:docs/plans.md#m9-json-and-docs` |
+| 表示言語とエンジン言語（M10） | 完了 | CLI メッセージの全英語化・嘘をつく `ui.locale` の削除・`search.language` の追加 | `REF:docs/plans.md#m10-english-and-language` |
 <!-- SYNC:END project-status -->
 
 ---
 
 ## 2. 現在のブランチ・PR・直近の作業状態
 
-- **ブランチ**: `arena/596879f2-llmsearch`（base: develop 8e564f0）
-- **PR**: #26（M5）・#28（M6）・#30（M7）・#31（M8）は develop へマージ済み。M9 の PR は作成前。マージは進行役が行う。
-- **状態**: M9 実装中。`--json` の生テキスト経路の解消（#4/#5）、`refine` と対象解決（#7/#9）、表示 URL の伏字化（#12）、ドキュメント整理（#21/#23）に対応済み。進捗は `REF:docs/plans.md#m9-json-and-docs`、経緯は `REF:docs/history.md` の F015・F016・D031・D032。
-- **基準検証**: `REF:scripts/verify.sh --quick`（docs / release-gate / fmt-check / lint / test）すべて緑。lib 146 件、`REF:tests/m9.rs` 14 件を含む全テスト緑。
-- **作業中検証**: 実バイナリで `--json` の全サブコマンドが `done` を出すこと、`refine` の `previousQuery` と履歴、`--previous` の拒否、識別子の E5001 / E1006、検索結果・`outline`・`read`・`engines show --raw`・`engines test` の秘匿値、`ui.locale=en` の文言を確認（ローカルの HTTP サーバのみ。外部ネットワークは使わない）。
+- **ブランチ**: `arena/ecec2b4d-llmsearch`（base: develop `69e3161`）
+- **PR**: #26（M5）・#28（M6）・#30（M7）・#31（M8）・#32（M9）は develop へマージ済み。M10 の PR は作成前。マージは進行役が行う。
+- **状態**: M10 実装済み。CLI メッセージの全英語化、`ui.locale` の削除（`W1002` で告知）、`search.language` と `--language` の追加、同梱 3 エンジンの言語配線。進捗は `REF:docs/plans.md#m10-english-and-language`。
+- **基準検証**: `REF:scripts/verify.sh --quick`（docs / release-gate / fmt-check / lint / test）すべて緑。lib 149 件、`REF:tests/m10.rs` 19 件、`REF:tests/architecture.rs` 16 件を含む全テスト緑、`cargo clippy --all-targets` 警告ゼロ。
+- **作業中検証（M10）**: 実バイナリで `--help` 全 37 画面とエラー `E1001` / `E1002` / `E1004` / `E1007` / `E4002` / `E5001`、`config show` の 29 キー（`ui.locale` なし）、旧 `ui.locale` / `network.acceptLanguage` の `W1002`、疑似 tty の対話メニュー、ローカル HTTP スタブで `--language ja` / `pt-BR` / `de` がクエリの `{{language}}` と `Accept-Language` の両方へ届くことを確認（外部ネットワークは使わない）。M9 時点で `--json` の全サブコマンドが `done` を出すこと、`refine` の `previousQuery` と履歴、`--previous` の拒否、識別子の E5001 / E1006、検索結果・`outline`・`read`・`engines show --raw`・`engines test` の秘匿値を確認（ローカルの HTTP サーバのみ。外部ネットワークは使わない）。
 - **ツールチェーン**: `/home/user/build/env.sh`。再起動時は `REF:docs/developers.md` §2.2 に従い復旧する。未コミット作業を破棄する reset --hard は行わない。
 
 ## 3. 次の作業
 
-1. M9 の PR 作成・レビュー・マージは進行役が行う（エージェントは行わない）。PR 本文で #4 / #5 / #7 / #9 / #12 / #21 / #23 を `Closes` で紐付ける。
+1. M10 の PR は作成済み。レビューとマージは進行役が行う（エージェントは行わない）。
 2. 既存 v0.1.0 / v0.1.1 添付物は未変更。配布には新しいタグで `REF:.github/workflows/release.yml` を実行する。
 3. MITM 環境での実 HTTPS 通信（Muse 等）は進行役が確認する。サンドボックス側の検証はローカルのプライベート CA まで。
 4. 未計画の機能（`--profile`、`read --heading`、`--no-filter=all`、`history export --with-body` 等）は `REF:docs/plans.md#unplanned` に集約した。安全性の方針を独断で変更しない。

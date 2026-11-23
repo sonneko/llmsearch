@@ -43,7 +43,7 @@ impl Guard {
             .window
             .retain(|w| quota::window_active(w, now) || w.used == Usage::default());
         if !policy.enabled {
-            reporter.verbose("クォータは無効（全ての上限を適用しない）");
+            reporter.verbose("the quota is disabled (no limits are applied)");
         }
         let session = counters.session;
         Ok(Self {
@@ -71,7 +71,7 @@ impl Guard {
                 if warn {
                     self.reporter.warn(&Diagnostic::new(
                         WarningCode::W5005,
-                        format!("クォータ {} の上限に達している（継続中）", metric.as_str()),
+                        format!("quota {} is over its limit (continuing)", metric.as_str()),
                     ));
                 }
                 Ok(())

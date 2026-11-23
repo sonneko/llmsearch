@@ -135,27 +135,27 @@ impl HistoryEntry {
                 let q = get("query");
                 let n = p.get("results").and_then(|v| v.as_u64()).unwrap_or(0);
                 let dropped = p.get("filtered").and_then(|v| v.as_u64()).unwrap_or(0);
-                format!("{q}  {n} 件（除外 {dropped} 件）")
+                format!("{q}  {n} results ({dropped} filtered out)")
             }
             EventType::Next => {
                 let n = p.get("added").and_then(|v| v.as_u64()).unwrap_or(0);
-                format!("+{n} 件")
+                format!("+{n} results")
             }
             EventType::Fetch => {
                 let url = get("url");
                 let chars = p.get("chars").and_then(|v| v.as_u64()).unwrap_or(0);
-                format!("{url}  ({chars} 字)")
+                format!("{url}  ({chars} chars)")
             }
             EventType::Outline => {
                 let n = p.get("headings").and_then(|v| v.as_u64()).unwrap_or(0);
                 let depth = p.get("depth").and_then(|v| v.as_u64()).unwrap_or(0);
-                format!("見出し {n} 件 (depth={depth})")
+                format!("{n} headings (depth={depth})")
             }
             EventType::Read => {
                 let sec = get("section");
                 let head = get("heading");
                 let chars = p.get("chars").and_then(|v| v.as_u64()).unwrap_or(0);
-                format!("{sec}  {head}  ({chars} 字)")
+                format!("{sec}  {head}  ({chars} chars)")
             }
             EventType::Select => p
                 .get("items")
@@ -170,18 +170,14 @@ impl HistoryEntry {
             EventType::Engine => {
                 let id = get("engine");
                 let fb = p.get("fallback").and_then(|v| v.as_bool()).unwrap_or(false);
-                if fb {
-                    format!("{id}（フォールバック）")
-                } else {
-                    id
-                }
+                if fb { format!("{id} (fallback)") } else { id }
             }
             EventType::Quota => get("note"),
             EventType::Config => get("path"),
             EventType::Delete => {
                 let kind = get("target");
                 let n = p.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
-                format!("{kind}  {n} 件")
+                format!("{kind}  {n} entries")
             }
         }
     }
@@ -251,7 +247,7 @@ pub fn export_markdown(entries: &[HistoryEntry]) -> String {
                 out.push('\n');
             }
             current = e.session.clone();
-            out.push_str(&format!("## セッション {current}\n\n"));
+            out.push_str(&format!("## session {current}\n\n"));
         }
         out.push_str(&format!(
             "- `{}` **{}** {}\n",
@@ -283,9 +279,9 @@ mod tests {
     fn summarizes_search() {
         let e = entry(
             EventType::Search,
-            serde_json::json!({"query": "気候", "results": 7, "filtered": 5}),
+            serde_json::json!({"query": "climate", "results": 7, "filtered": 5}),
         );
-        assert_eq!(e.summary(), "気候  7 件（除外 5 件）");
+        assert_eq!(e.summary(), "climate  7 results (5 filtered out)");
         assert_eq!(e.at, "2026-11-07T05:00:00Z");
     }
 
@@ -293,10 +289,10 @@ mod tests {
     fn filter_matches_query_and_kind() {
         let e = entry(
             EventType::Read,
-            serde_json::json!({"section": "D1:S3", "heading": "適応"}),
+            serde_json::json!({"section": "D1:S3", "heading": "adaptation"}),
         );
         let ok = Filter {
-            query: Some("適応"),
+            query: Some("adaptation"),
             kind: Some(EventType::Read),
             session: None,
             engine: None,
@@ -305,7 +301,7 @@ mod tests {
         };
         assert!(ok.matches(&e));
         let ng = Filter {
-            query: Some("適応"),
+            query: Some("adaptation"),
             kind: Some(EventType::Search),
             session: None,
             engine: None,
@@ -319,7 +315,7 @@ mod tests {
     fn export_groups_by_session() {
         let e = entry(EventType::Search, serde_json::json!({"query": "q"}));
         let md = export_markdown(&[e]);
-        assert!(md.contains("## セッション s1"));
+        assert!(md.contains("## session s1"));
         assert!(md.contains("**search**"));
     }
 }
