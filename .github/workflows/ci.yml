@@ -158,9 +158,28 @@ jobs:
 
       - name: Stage portable distribution
         run: |
+          # 冪等にする。rust-cache が target/ ごと復元するため、前回の
+          # target/compatibility-package が残っていると `cp -R assets .../assets`
+          # が `assets/assets/` へ入れ子コピーし、既定値が空になる（M11）。
+          rm -rf target/compatibility-package
           mkdir -p target/compatibility-package
           cp target/x86_64-unknown-linux-gnu/release-dist/llmsearch target/compatibility-package/
           cp -R assets target/compatibility-package/assets
+
+      - name: Verify staging is complete
+        run: |
+          set -euo pipefail
+          for f in assets/config/settings.json assets/network/default.json \
+                   assets/filters/default.json assets/quotas/default.json \
+                   assets/engines/duckduckgo.json; do
+            test -f "target/compatibility-package/$f" \
+              || { echo "error: staged package is missing $f" >&2; exit 1; }
+          done
+          if [ -d target/compatibility-package/assets/assets ]; then
+            echo "error: staged package has nested assets/assets (staging is not idempotent)" >&2
+            exit 1
+          fi
+          echo "staged package is complete"
 
       - name: Compatibility gate (Ubuntu 22.04 and 24.04)
         run: |

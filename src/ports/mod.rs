@@ -45,6 +45,10 @@ pub trait Env: Send + Sync {
     fn executable_dir(&self) -> Option<PathBuf> {
         None
     }
+    /// 実行時の作業ディレクトリ（リポジトリから実行したときの `assets/` 探索用）。
+    fn current_dir(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 /// 進行・警告の通知。

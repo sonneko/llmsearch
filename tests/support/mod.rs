@@ -89,6 +89,10 @@ impl Reporter for SilentReporter {
 pub struct FakeEnv {
     pub vars: BTreeMap<String, String>,
     pub state_dir: PathBuf,
+    /// `executable_dir()` が返す値（配布物の `assets/` 探索用）。
+    pub executable_dir: Option<PathBuf>,
+    /// `current_dir()` が返す値（上方探索用）。
+    pub current_dir: Option<PathBuf>,
 }
 
 impl FakeEnv {
@@ -96,11 +100,23 @@ impl FakeEnv {
         Self {
             vars: BTreeMap::new(),
             state_dir,
+            executable_dir: None,
+            current_dir: None,
         }
     }
 
     pub fn with(mut self, key: &str, value: &str) -> Self {
         self.vars.insert(key.to_string(), value.to_string());
+        self
+    }
+
+    pub fn with_executable_dir(mut self, dir: PathBuf) -> Self {
+        self.executable_dir = Some(dir);
+        self
+    }
+
+    pub fn with_current_dir(mut self, dir: PathBuf) -> Self {
+        self.current_dir = Some(dir);
         self
     }
 }
@@ -139,6 +155,14 @@ impl Env for FakeEnv {
 
     fn config_home(&self) -> Option<PathBuf> {
         None
+    }
+
+    fn executable_dir(&self) -> Option<PathBuf> {
+        self.executable_dir.clone()
+    }
+
+    fn current_dir(&self) -> Option<PathBuf> {
+        self.current_dir.clone()
     }
 }
 
@@ -232,7 +256,12 @@ pub fn harness(extra_engines: Option<&str>) -> Harness {
         engines_dirs.push(engine_dir);
     }
 
-    let env = Arc::new(FakeEnv::new(state_dir));
+    // 同梱アセットは「作業ディレクトリから上方探索」で見つける（M11 の探索順）。
+    // テストはリポジトリ直下を起点にするので、リポジトリの `assets/` が使われる。
+    let env = Arc::new(
+        FakeEnv::new(state_dir)
+            .with_current_dir(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
+    );
     let clock = Arc::new(FixedClock::new("2026-11-07T05:00:00Z"));
     let reporter = Arc::new(SilentReporter::new());
     let bootstrap = Bootstrap {

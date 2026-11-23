@@ -61,6 +61,13 @@ pub struct Resolved {
 }
 
 /// 同梱リソースのディレクトリ。
+///
+/// 探索順は仕様 `configuration.md` §1.1 / `network.md` §1.3 に従い、
+/// 「バイナリの隣の `assets/`」→「作業ディレクトリから上方へたどった `assets/`」。
+/// どちらも無ければ空のパスを返し、資源は埋め込み既定（`crate::assets`）で解決する。
+///
+/// 以前はビルドした機械のソースパス（`CARGO_MANIFEST_DIR`）を最後の砦にしていたが、
+/// そのパスが存在する環境（CI のランナー）では壊れた配布物を隠してしまうため廃止した。
 pub fn bundled_root(env: &dyn Env) -> PathBuf {
     if let Some(dir) = env.executable_dir() {
         let assets = dir.join("assets");
@@ -68,8 +75,16 @@ pub fn bundled_root(env: &dyn Env) -> PathBuf {
             return assets;
         }
     }
-    // ソースからの開発実行では従来の配置を使う。
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets")
+    if let Some(dir) = env.current_dir() {
+        // 完全な `assets/` だけを拾う（無関係な `assets` ディレクトリを避ける）。
+        for candidate in dir.ancestors() {
+            let assets = candidate.join("assets");
+            if assets.join("config/settings.json").is_file() {
+                return assets;
+            }
+        }
+    }
+    PathBuf::new()
 }
 
 /// 依存を組み立ててアプリを作る。
@@ -724,6 +739,10 @@ fn origin_of(app: &App, resolved: &Resolved, key: &str) -> (Origin, String) {
     if let Some(path) = resource_origin(resolved, key) {
         return (Origin::File(path.clone()), path.display().to_string());
     }
+    // 資源が埋め込み既定から解決された場合は、その旨を隠さない（M11）。
+    if is_resource_key(key) {
+        return (Origin::Default, crate::assets::EMBEDDED_SOURCE.to_string());
+    }
     (Origin::Default, String::new())
 }
 
@@ -736,6 +755,11 @@ fn file_origin(resolved: &Resolved, key: &str) -> Option<PathBuf> {
         }
     }
     found
+}
+
+/// 資源のキーか（埋め込みで解決されたときの表示に使う）。
+fn is_resource_key(key: &str) -> bool {
+    matches!(key, "network" | "filters" | "quota" | "engines.dir")
 }
 
 /// 資源（`network` / `filters` / `quota`）の解決ファイル。
