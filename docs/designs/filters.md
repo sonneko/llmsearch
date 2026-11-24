@@ -12,19 +12,19 @@
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-結果フィルタは `src/core/config/filter.rs` の `apply_results(filters, hits) -> (Vec<SearchHit>, FilterStats)`、本文フィルタは `src/core/config/filter.rs` の `apply_content(filters, md) -> (String, FilterStats)` と `apply_outline(filters, outline) -> (Outline, FilterStats)`。いずれも純粋関数とする。
+結果フィルタは `src/core/config/filter.rs` の `apply_results(filters, hits, now, disabled) -> (Vec<SearchHit>, FilterStats)`、本文フィルタは同じファイルの `apply_content(filters, md, disabled) -> (String, FilterStats)`。どちらも I/O を持たない純粋関数で、`disabled` は `--no-filter` を表す。
 
 ### 1.2 フィルタ集合
 
-状態: 実装完了（REF:src/core/config/filter.rs）
+状態: 実装完了（REF:src/adapters/config/mod.rs）
 
-`FilterSet` は `core::config::filter` に定義し、`adapters::config::loader` が `filters/<id>.json` から読む。`mode=append` の合成は `core::filter::merge(base, extra)` で行い、規則を連結したうえで元の `mode` を保持する。
+`FilterSet` は `src/core/config/filter.rs` に定義する。解決は `src/adapters/config/mod.rs` の `resolve_filters(env, settings, base_dir, bundled, cli)` が担い、`--filters` → `LLMSEARCH_FILTERS` → 設定 `filters`（ID またはインライン）→ `default` の順で決める。ID の場合は `resolve_resource_dir` の探索順（作業ディレクトリ → 状態ディレクトリ → 設定ディレクトリ → 同梱 `assets/`）で `<id>.json` を探し、見つからなければ `embedded_as` の埋め込み（`assets/filters/default.json`）へフォールバックする。読み込み失敗は `E1004`、未発見は `E1003`。
 
 ### 1.3 評価の原則
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-正規表現は読み込み時に 1 回だけ `Regex::new` してコンパイル結果を `Rule` に保持する（評価のたびにコンパイルしない）。コンパイル失敗は `E1004`。評価結果は `Decision { keep: bool, reason: Option<RuleId> }` とし、`RuleId` は「種別 + 配列名 + 添字」で機械的に生成する。
+`CompiledFilters::compile` が読み込み時に 1 回だけ `regex::Regex::new` を実行し、`CompiledRule` に保持する（評価のたびにコンパイルしない）。コンパイル失敗は `E1004`。規則の識別子は `results.deny[0]` / `results.allow[1]` / `results.require[0]` の形で添字から機械的に作り、その文字列をそのまま `FilterStats::reasons` のキーに使う。判定結果は `Decision` のような型を作らず、`FilterStats::record(rule_id)` で集計しながら `kept` ベクタへ積む。
 
 ---
 
@@ -36,13 +36,13 @@
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`FilterSet { schema_version, id, description, mode, results: Option<ResultFilters>, content: Option<ContentFilters>, extra }`。`extra` は未知キーの温存用。
+`FilterSet { schema_version, id, description, mode, results: Option<ResultFilters>, content: Option<ContentFilters>, extra }`。`serde(rename_all = "camelCase", default)` で、`extra`（`#[serde(flatten)]`）は未知キーの温存用。`schema_version` と `id` は検証しない（読み捨てないが、値による分岐は無い）。
 
 ### 2.2 `mode`
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`merge` は `Mode::Append` の場合のみ規則を連結する。`Mode::Replace` の設定が利用者側で使われた場合は `E1004`（利用者設定では `append` のみ許可）とする。
+`mode: String` として受けるだけで、`Default` は空文字。既定同梱は `"default"` を持つ。`append` / `replace` の解釈、および規則の合成（`merge`）は実装していない。`resolve_filters` は参照先の JSON をそのまま `FilterSet` へデシリアライズするため、利用者側の `filters` がインラインオブジェクトなら既定の集合は合成されず丸ごと置き換わる。
 
 ---
 
@@ -54,25 +54,25 @@
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`ResultFilters { deny: Vec<Rule>, allow: Vec<Rule>, require: Vec<Rule>, max_results: Option<usize>, max_per_host: Option<usize>, diversity: bool }`。
+`ResultFilters { deny: Vec<RuleSpec>, allow: Vec<RuleSpec>, require: Vec<RuleSpec>, max_results: Option<usize>, max_per_host: Option<usize>, diversity: bool }`。`diversity` の既定は `false`、`max_results` / `max_per_host` の既定は `None`（無制限）。
 
 ### 3.2 規則（`deny` / `allow` / `require`）
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`Rule` は全キーを `Option` にした構造体とし、`matches(&self, hit: &SearchHit, ctx: &RuleCtx) -> bool` で AND 評価する。`host` の `*.example.com` は `core::net::host::suffix_match` で判定。`language` は `SearchHit.language`（エンジン定義の `defaults.language` から設定）と比較する。`olderThanDays` は `chrono` で現在日付（`Clock` 由来）と比較し、`published` が無い場合は `false`。
+1 つの規則は `RuleSpec`（全キーが `Option`）で表し、`CompiledRule::matches(&self, hit, now: NaiveDate)` が AND 評価する。どのキーも指定していない規則は `is_empty_rule` で判定して `false` を返す（全件除外を避ける）。`host` の `*.example.com` は `src/core/url.rs` の `suffix_match(host, pattern)` で判定し、`*` 単独は全ホスト一致。`extension` は `src/core/url.rs` の `extension(&url)`（小文字・ドット無し・8 文字超は `None`）と比較する。`olderThanDays` / `newerThanDays` は `published` の先頭 10 文字を `%Y-%m-%d` でパースして `now` との差を取り、`published` が無い・パースできない場合は `false`。`language` は `SearchHit.language` と比較するが、`search_core::assign_ids` は常に `language: None` を入れるため現状は一致しない。
 
 ### 3.3 評価順
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`apply_results` は仕様の 6 段階をそのまま実装する。`maxPerHost` は `BTreeMap<String, usize>` でホスト別件数を数え、超過分を除く。`diversity` は `core::filter::diversity::interleave(hits)` で、ホストごとのキューを作って 1 件ずつ取り出す（安定ソートを維持するため元順序を保持する）。
+`apply_results` は 1) `deny` に該当し `allow` に該当しないものを除外（`allow` が先に効く）、2) `require` のいずれかを満たさないものを除外、3) `maxPerHost`（`BTreeMap<String, usize>` でホスト別件数を数え、上限に達したら `truncated_by_max_per_host` を増やして捨てる＝先着優先）、4) `diversity` なら `interleave_by_host(hits)`、5) `maxResults` で末尾を切り捨て（`truncated_by_max_results`）、6) 残った結果の `id` と `rank` を 1 から振り直す、の順に適用する。`interleave_by_host` はホストの初出順にキューを作り、1 件ずつ取り出す（同一ホスト内の元順序は保つ）。
 
 ### 3.4 既定のフィルタ集合
 
-状態: 実装完了（REF:src/core/config/filter.rs）
+状態: 実装完了（REF:assets/filters/default.json）
 
-同梱の `assets/filters/default.json` に仕様の内容を記述し、`include_str!` で読み込む。コードに規則を埋め込まない。
+同梱の `assets/filters/default.json` に規則を記述し、`src/assets.rs` の `Resource::Filters` が `include_str!` で埋め込む。コードに規則を埋め込まない。`resolve_filters` はファイルが見つからない場合にこの埋め込みへフォールバックする。
 
 ---
 
@@ -84,37 +84,37 @@
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`ContentFilters` は仕様の全キーを持つ。`stripPatterns` と `stripLines.regex` は読み込み時にコンパイルする。`minSectionChars` / `dropEmptySections` / `maxHeadingDepth` は定義と検証のみで、アウトラインの表示には使わない。
+`ContentFilters { strip_selectors, strip_patterns, strip_lines: Vec<LineRule>, keep_only: Vec<LineRule>, normalize: NormalizeOptions, min_section_chars: Option<usize>, drop_empty_sections: bool, max_heading_depth: Option<u8> }`。`strip_patterns` と `LineRule::regex` は評価時に `regex::Regex::new` し、失敗したパターンは無視する（規則のコンパイルは `CompiledRule` のみが行う）。`min_section_chars` / `drop_empty_sections` / `max_heading_depth` は保持するだけで、アウトラインの表示には使わない。
 
 ### 4.2 既定の除去要素
 
-状態: 実装完了（REF:src/core/config/filter.rs）
+状態: 実装完了（REF:src/core/convert.rs）
 
-`DEFAULT_STRIP_SELECTORS` を定数配列として `core/filter/content.rs` に置き、利用者指定と連結する。`adapters::extract` は「除去対象のセレクタ一覧」を引数で受け取り、既定値を自分で持たない。
+`DEFAULT_STRIP` を `src/core/convert.rs` の定数配列として持ち（`script`, `style`, `noscript`, `iframe`, `svg`, `canvas`, `form`, `nav`, `aside`, `footer`, `header`, `dialog`）、`convert` が設定の `strip_selectors` を**追加**してから `remove_selectors` に渡す。`ExtractMode::Whole` のときは `DEFAULT_STRIP` を使わず、設定分だけを適用する。
 
 ### 4.3 `stripLines` の条件
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`repeatedAtLeast` は文書全体の行頻度を先に数える（`HashMap<&str, usize>`）。`boilerplate` は部分一致（大文字小文字を区別しない）。`equals` は完全一致（前後空白を除去した行で比較）。
+`LineRule::matches(line, freq)` は指定されたキーをすべて AND で評価する。`regex` は行全体に対する検索、`equals` は前後空白を除いた完全一致、`shorter_than` は `core::text::chars` による文字数が指定未満、`repeated_at_least` は文書全体の行頻度（空行を除く、`trim` 後の完全一致で計数）が指定以上、`boilerplate` はいずれかの語を含む（大文字小文字を区別しない）。`apply_content` は行頻度を 1 回だけ数え、コードフェンス内の行（`core::outline::fence_flags`）は除去対象から外す。
 
 ### 4.4 `normalize`
 
-状態: 実装完了（REF:src/core/config/filter.rs）
+状態: 実装完了（REF:src/core/markdown.rs）
 
-`core::markdown::normalize::apply(md, &NormalizeOptions) -> String` に 4 つの処理を個別の関数として実装し、`NormalizeOptions` の真偽値で呼び分ける。コードブロック内の行末空白はフェンス状態を追跡して保護する。
+`src/core/markdown.rs` の `normalize(md, &NormalizeOptions) -> String` が 1 関数で 4 種を順に適用する（空行圧縮 → 行末空白除去 → 末尾改行 → エンティティ復号）。コードフェンス内は行末空白除去と空行圧縮の対象外にする。`decode_entities` は `core::text::decode_entities` に委譲する。
 
 ### 4.5 適用順
 
-状態: 実装完了（REF:src/core/config/filter.rs）
+状態: 実装完了（REF:src/usecases/document.rs）
 
-`usecases::document::fetch` が 1) 抽出時に `stripSelectors`、2) 変換後に `apply_content`、を順に呼ぶ。`apply_content` は `stripPatterns` → `stripLines` → `keepOnly` → `normalize` の順に適用し、本文を書き換える。アウトラインの表示深度は `--depth` と `context.outlineDepth` だけで決める。
+`usecases::document::fetch` が `FetchOptions` に `content_filters` を渡し、`convert` が 1) `stripSelectors` を適用してから本文抽出、2) Markdown 変換、を行う。行単位の後処理は取得時ではなく、`outline` / `read` が `load` の直後に呼ぶ `filter_content(app, markdown)`（`apply_content(&app.filters, markdown, app.no_filter)`）で行う。`apply_content` は `stripPatterns` → `stripLines` → `keepOnly` → `normalize` の順に適用し、除外件数を `FilterStats` に記録する（呼び出し側は現在この統計を使わない）。アウトラインの表示深度は `--depth` と `context.outlineDepth` だけで決める。
 
 ### 4.6 既定のフィルタ集合（本文）
 
-状態: 実装完了（REF:src/core/config/filter.rs）
+状態: 実装完了（REF:assets/filters/default.json）
 
-同梱の `assets/filters/default.json` に記載する。`stripLines.repeatedAtLeast: 3`、`stripLines.boilerplate`、`normalize` の既定を用いる。`minSectionChars: 1` と `dropEmptySections: true` も値として含むが、現在はアウトラインの表示に影響しない（§4.1）。
+同梱の `assets/filters/default.json` に `stripPatterns`（広告行・共有行）、`stripLines.boilerplate`、`stripLines.repeatedAtLeast: 3`、`normalize` の既定を記述する。`minSectionChars: 0`、`dropEmptySections: true`、`maxHeadingDepth: 4` も値として含むが、現在は表示に影響しない（§4.1）。
 
 ---
 
@@ -126,16 +126,16 @@
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`FilterStats { kept, removed, reasons: BTreeMap<String, usize>, truncated_by: (usize, usize) }` を返す。`reasons` のキーは `results.deny[2]` のような安定した文字列とし、`BTreeMap` で順序を固定する。
+`FilterStats { kept, removed, reasons: BTreeMap<String, usize>, truncated_by_max_results, truncated_by_max_per_host, disabled }` を返す。`removed` は規則で除いた件数のみを数え、切り捨ては別フィールドに分ける。`reasons` のキーは `results.deny[2]` / `content.stripLines[0]` のような安定した文字列で、`BTreeMap` により順序を固定する。
 
 ### 5.2 表示
 
-状態: 実装完了（REF:src/ui/render.rs）
+状態: 実装完了（REF:src/ui/commands.rs）
 
-`src/ui/render.rs` の `summary_line(stats)` が 1 行の要約を作る。`--verbose` では `detail_lines(stats)` を追加出力する。JSON では `SearchEvent.filtered` に `FilterStats` をそのまま射影する。
+`FilterStats::summary_line()` が 1 行の要約（`(filters: all N shown)` / `(filters: showing N of M results, K filtered out)` / `(filters: disabled)`）を返し、`src/ui/commands.rs` と `src/ui/interactive.rs` が一覧の末尾に出力する。理由の内訳を出す `detail_lines` は持たない（`--verbose` でも内訳は出さない）。JSON では `src/ui/commands.rs` の `filtered_json` が `kept` / `removed` / `reasons` / `disabled` / `truncatedByLimit` を組み立てる（`truncatedByLimit` はページ用 `limit` による切り捨て件数で、`FilterStats` のフィールドではない）。
 
 ### 5.3 無効化
 
-状態: 実装完了（REF:src/core/config/filter.rs）
+状態: 実装完了（REF:src/usecases/search.rs）
 
-`--no-filter`（値なしの真偽フラグ）は `FilterSet` の `results` と `content.strip*` を空にした複製を作る。`DEFAULT_STRIP_SELECTORS` は常に残す（無効化する指定は提供しない）。`disabled: true` を `FilterStats` に含める。
+`--no-filter`（値なしの真偽フラグ）は `App::no_filter` として `apply_results` / `apply_content` の `disabled` 引数に渡す。`disabled` のときは結果をそのまま返し、`FilterStats::disabled` に `true` を立てる。`DEFAULT_STRIP` は `convert` 側の処理であり `disabled` の影響を受けないため、`--no-filter` でも既定の除去要素は常に適用される。

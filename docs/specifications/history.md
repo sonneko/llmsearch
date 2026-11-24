@@ -34,12 +34,14 @@ API キー、認証ヘッダ、Cookie、URL のクエリに含まれる秘匿パ
 |---|---|
 | `id` | 履歴レコード識別子（`H<n>`。保存ファイル内で一意） |
 | `at` | 実行日時（UTC） |
-| `session` | セッション識別子 |
+| `session` | セッション識別子（空文字もある） |
 | `type` | イベント種別 |
 | `engine` | 使用したエンジン ID（該当しない場合は省略） |
 | `cost` | 消費量（該当しない場合は省略） |
 | `remaining` | 消費後の残量（該当しない場合は省略） |
 | `payload` | イベント固有の内容 |
+
+`cost` / `remaining` は `searches` / `fetches` / `results` / `chars` を持つ。ファイル（`history export --format jsonl`）には全フィールドを書くが、`--json` の `history` イベント（`entries[]`）は `id` / `at` / `type` / `engine` / `summary` / `payload` だけを載せる（`session` / `cost` / `remaining` は載せない）。
 
 ---
 

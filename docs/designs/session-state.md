@@ -102,7 +102,7 @@
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`load` の JSON 解析に失敗したら `quarantine(path, stamp)` で `sessions/<id>.corrupt-<YYYYMMDDHHMMSS>.json` へ退避し、`E5001` を詳細（退避先を含む）付きで返す。`W5001` を出して新規セッションへ自動で切り替えることはしない。
+`load` の JSON 解析に失敗したら `adapters::state::quarantine(path, stamp)` で `sessions/<id>.corrupt-<YYYYMMDDHHMMSS>.json` へ退避し、`E5001` を詳細（退避先を含む）付きで返す。警告は出さず、新規セッションへ自動で切り替えることもしない。
 
 ### 4.3 不整合
 

@@ -124,7 +124,7 @@
 
 状態: 実装完了（REF:src/core/errors.rs）
 
-`details` に動的な値を入れる場合は `redact::url_with_secrets` を通した値のみを使う。`SecretString` を `details` に変換する API を用意しない。
+`details` に動的な値を入れる場合は `core::url::redact(url, secrets)` または `core::secret::redact_text(text, secrets)` を通した値のみを使う。`Secret` の保持する値を `details` へそのまま渡す API を用意しない。
 
 ### 4.5 廃止した `ui.locale`
 

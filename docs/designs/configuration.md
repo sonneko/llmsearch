@@ -38,7 +38,7 @@
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
 
-`resolve_settings(layers: [Value; 5]) -> ResolvedSettings` が強い順に畳み込む。畳み込みは `Value` レベルで先に行い、最後に 1 回だけ型へ変換する（型変換の失敗箇所を 1 か所にまとめるため）。
+設定の畳み込みは `src/core/config/mod.rs` の `merge_json(base, over)` を強い順（既定 → 同梱 → 利用者 → 環境変数 → 引数）に適用し、最後に型へ変換する。畳み込みは `Value` レベルで先に行い、最後に 1 回だけ型へ変換する（型変換の失敗箇所を 1 か所にまとめるため）。
 
 ### 2.2 マージ規則
 
@@ -74,7 +74,7 @@
 
 `search.language`（既定 `en`）は `src/core/config/settings.rs` の `SearchSettings.language` に持ち、`Settings::validate()` が言語タグの形を検査する（空・不正は `E1004`）。`--language <tag>` は `Bootstrap.language` → `settings.search.language` の順で重ね、`LLMSEARCH_SEARCH_LANGUAGE` は `ENV_MAPPINGS` の `Kind::Text` として `search.language` へ写す。由来は `config show` の `origin_of` に `--language` / `search.language` の枝を足して表示する。
 
-正規化は `src/core/lang.rs` の `normalize_language(tag) -> Option<Language>` に集約する。`Language { tag, primary }` を返し、`tag` は小文字化した全体（`pt-BR` → `pt-br`）、`primary` は主言語タグ（`pt`）である。受理する形は `<主言語>[-<サブタグ>...]`、主言語は英字 2〜3 文字、サブタグは英数字 1〜8 文字。空・記号混入・4 文字以上の主言語は `None` とし、`Settings::validate()` と `parse_env` の双方で `E1004` にする。
+正規化は `src/core/lang.rs` の `parse(tag) -> Option<Language>` に集約する。`Language { tag, primary }` を返し、`tag` は小文字化した全体（`pt-BR` → `pt-br`）、`primary` は主言語タグ（`pt`）である。受理する形は `<主言語>[-<サブタグ>...]`、主言語は英字 2〜3 文字、サブタグは英数字 1〜8 文字。空・記号混入・4 文字以上の主言語は `None` とし、`Settings::validate()` と `parse_env` の双方で `E1004` にする。
 
 消費側は 1 か所に集約する。`src/usecases/search.rs` の `call_engine` と `src/usecases/engines.rs` の `dry_run` が `TmplCtx { language: primary, locale: tag, .. }` を組み立てる。`{{language}}` は主言語タグ、`{{locale}}` は正規化後の全体（旧定義との互換のため残す）。`Accept-Language` の補完は `src/adapters/engine/eval.rs` で `prepared.headers` に `Accept-Language` が無い場合だけ `tag` を挿入する（ネットワークプロファイルからの `Accept-Language` 上書きは廃止し、`src/adapters/http.rs` の `profile.accept_language` 分岐と `NetworkProfile.accept_language` フィールドを削除する）。
 

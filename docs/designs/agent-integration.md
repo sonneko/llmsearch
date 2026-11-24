@@ -12,7 +12,7 @@
 
 状態: 実装完了（REF:src/ui/commands.rs, REF:src/ui/render.rs, REF:docs/plans.md#m2-implement）
 
-`src/ui/render.rs` の `emit(reporter, event)` が `serde_json::to_string(&event)` を `reporter.data()` へ渡す。終端保証は `src/ui/commands.rs` の `run_command()` が行い、成功時に `done`、失敗時に `error` を 1 回だけ出力する。二重出力を防ぐため `Emitter { closed: bool }` を持つ。
+`src/ui/render.rs` の `Renderer::event(&Value)` が `serde_json::to_string` した 1 行を標準出力へ書く。共通枠（`v` / `event` / `session` / `at`）は `Renderer::envelope(event, fields)` が付ける。終端は `src/ui/commands.rs` の `run` が各分岐の末尾で `done()` を呼んで 1 回だけ出し、失敗時は `main.rs` が `Renderer::error(&AppError)` で `error` を 1 回だけ出す（`Emitter` のような状態型は持たない）。
 
 ### 1.2 無状態の原則
 

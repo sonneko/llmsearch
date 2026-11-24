@@ -12,7 +12,7 @@
 
 状態: 実装完了（REF:src/usecases/search.rs）
 
-`src/usecases/search.rs` の `select_engine(opts, config, registry) -> Result<EngineDef>` が 5 層を順に解決し、`Origin` を併せて返す。解決過程は `--verbose` で表示できる。利用不能時は `AppError::Provider { kind: Misconfigured }` に `available` の一覧を `details` として付ける。
+既定エンジンは `src/usecases/config.rs` が `Bootstrap.engine` → `LLMSEARCH_ENGINE` → 設定 `search.engine` → 認証不要の有効エンジンの定義順先頭 → 有効エンジンの先頭、の順に解決し、`App.default_engine` に保持する。`--engine` などの明示指定が未知の ID だった場合は `E4002`（`engine '<id>' was not found`）、1 件も使えるエンジンが無い場合も `E4002`。
 
 ### 1.2 フォールバックとマージ
 
@@ -26,7 +26,7 @@
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`usecases::guard::check(&GuardCtx)` を送信直前に 1 回だけ呼ぶ。`guard` はレート制限（`RateLimiter`）とクォータ（`Quota`）を順に判定し、消費は送信成功後に行う（失敗時に消費しない）。
+`Guard::check(Metric::Searches, n)` を送信直前に呼ぶ（`run_fallback` は試行ごとに `pending.searches + 1` で再判定する）。消費は `Guard::consume_all(Usage)` で送信成功後にまとめて行い、全候補が失敗した場合は消費しない。レート制限（同一ホストへの最小間隔）は `NetworkProfile.min_interval_ms` に基づき HTTP 層が待機する。
 
 ---
 
@@ -44,13 +44,13 @@
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`core::url::normalize` が `url::Url` を用いて実施する。追跡パラメータの一覧は `core::url::TrackingParams` として設定から注入する。フラグメントは保持し、重複判定用のキーは `core::url::dedup_key`（フラグメント除去後の文字列）で作る。
+`core::url::normalize(url, extra_tracking)` が `url::Url` を用いて実施し、スキームとホストを小文字化し、既定ポートを落とし、追跡パラメータ（`core::url::DEFAULT_TRACKING` と `extra_tracking`）を除去する。追跡パラメータの一覧は `App.tracking`（`usecases::config::default_tracking` が `DEFAULT_TRACKING` から作る固定リスト）で、設定キーからは注入しない。フラグメントは保持し、重複判定用のキーは `core::url::dedup_key`（フラグメント除去後の文字列）で作る。
 
 ### 2.3 重複の除去
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`dedup_by_key(hits, dedup_key)` は `HashSet` で初出を残す。相対 URL の結果は `url::Url::parse` 失敗として破棄し、破棄件数を `W4004` に加算する。
+`core::search::dedup(hits)` が `HashSet` に `core::url::dedup_key` を入れて初出を残し、除去件数を返す。`dedup_key` を作れない URL（`url::Url::parse` の失敗）は原文のままキーにする（破棄しない）。
 
 ### 2.4 並び順
 
@@ -68,7 +68,7 @@
 
 状態: 実装完了（REF:src/core/search.rs）
 
-`src/core/search.rs` の `plan_requests(limit, max_page_size) -> Vec<(offset, size)>` が分割を行う。`limit > max_page_size` の場合に複数リクエストへ分割し、合計が `limit` になるようにする。
+`src/usecases/search.rs` がエンジンへ渡す `limit` を `def.limits.max_page_size.min(limit)` で頭打ちにする。分割取得は行わず、1 ページにつき 1 リクエストとする（`maxPageSize` を超える件数は次ページで取る）。
 
 ### 3.2 次ページの取得
 
@@ -130,7 +130,7 @@
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`tokio::sync::Semaphore` で `network.maxConcurrency` を制御する。検索は `Semaphore::acquire` を 1 本に固定した専用セマフォで直列化する。
+`network.maxConcurrency` は HTTP クライアントの接続プール（`reqwest::ClientBuilder::pool_max_idle_per_host`）に渡し、同時リクエスト数を間接的に制限する（`src/adapters/http.rs`）。検索エンジンの呼び出しを直列化するセマフォは持たない（`usecases::search` はエンジンを 1 つずつ順に呼ぶ）。
 
 ### 5.3 robots.txt
 

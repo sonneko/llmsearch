@@ -18,7 +18,7 @@
 
 状態: 実装完了（REF:tests/m5.rs, REF:tests/m9.rs, REF:tests/e2e.rs）
 
-`REF:tests/m5.rs` が実プロセスを起動し、「各行が単体で `serde_json::from_str` 可能」「`done` / `error` が末尾に 1 回だけ」「終了コードが分類と一致」を検証する。セッション引き継ぎは `tempfile::TempDir` を状態ディレクトリにして別プロセスを連続実行して検証する。`--json` の全サブコマンドが `done` を出すことは `REF:tests/m9.rs` が確認する。
+`REF:tests/m5.rs` が実プロセスを起動し、「各行が単体で `serde_json::from_str` 可能」「`done` / `error` が末尾に 1 回だけ」「終了コードが分類と一致」を検証する。セッション引き継ぎは `tempfile::tempdir()` が返すディレクトリを状態ディレクトリにして別プロセスを連続実行して検証する。`--json` の全サブコマンドが `done` を出すことは `REF:tests/m9.rs` が確認する。
 
 ### 1.3 変換の受入基準
 
@@ -30,7 +30,7 @@ HTML→Markdown の性質（見出し・リスト・表・コードブロック�
 
 状態: 実装完了（REF:tests/integration.rs, REF:tests/contract.rs, REF:tests/assets.rs）
 
-`tempfile::TempDir` に定義 JSON を書き出してからユースケースを実行する。エンジン追加は「定義ファイルを置くと `engines list` と `search` の選択肢に現れる」ことを検証する。クォータは偽の `CounterStore` を注入して境界値（上限ちょうど・上限 +1）を検証する（`REF:tests/m8.rs`）。キャッシュは `REF:tests/support/mod.rs` の `FakeHttp` の呼び出し回数で検証する。
+`tempfile::tempdir()` の下に定義 JSON を書き出してからユースケースを実行する。エンジン追加は「定義ファイルを置くと `engines list` と `search` の選択肢に現れる」ことを検証する。クォータは偽の `CounterStore` を注入して境界値（上限ちょうど・上限 +1）を検証する（`REF:tests/m8.rs`）。キャッシュは `REF:tests/support/mod.rs` の `FakeHttp` の呼び出し回数で検証する。
 
 ### 1.5 配布物の受入基準
 

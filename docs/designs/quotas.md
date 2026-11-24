@@ -24,7 +24,7 @@
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-`Guard::check(kind, amount) -> Result<Decision>`。失敗時は `AppError::Quota { metric, limit, used, resets_at, hint }` を返し、`src/ui/render.rs` が 4 要素を整形する。`onExceed=warn` の場合は `Decision::Allowed { warn: true }` を返し、呼び出し側が `W5005` を表示する。
+`Guard::check(metric, amount) -> Result<(), AppError>` が `core::config::quota::check` に委譲する。超過時は `ExceedInfo::to_error()` が `E5005` を作り、`detail` に `<scope>.<項目> = <使用量>/<上限>`（窓なら `(resets <時刻>)` 付き）を入れる。`onExceed=warn` で上限の 2 倍未満のときは `QuotaDecision::Allowed { warn: true }` を返し、`Guard` が `W5005` を出す。
 
 ---
 
@@ -48,7 +48,7 @@
 
 状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
 
-`core::quota::day_key(now_local: DateTime<Local>) -> String`（`YYYY-MM-DD`）。`Counter.day.key` に保存し、キーが変わったら消費量を 0 に戻す。`Clock` は UTC を返し、`Local` への変換は `core::clock::to_local` に閉じる。
+`Counters.day_key` に `YYYY-MM-DD` のローカル日付を保存し、キーが変わったら消費量を 0 に戻す。`Clock` は UTC を返し、ローカル日付は `Clock::today_local()`（`ports::system::SystemClock` が `chrono::Local::now().date_naive()` を返す）で得る。キーの生成と比較は `usecases::guard::Guard::new` が行い、`core` 側に専用関数は置かない。
 
 ### 2.4 時間窓（`window`）
 
@@ -66,7 +66,7 @@
 
 状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
 
-`OnExceed::Warn` の「2 倍で停止」は `core::quota::hard_limit(limit) -> u64`（`limit.saturating_mul(2)`）で判定する。
+`OnExceed::Warn` の「2 倍で停止」は `core::config::quota::check` が `OnExceed::Stop` なら `limit`、`Warn` なら `limit.saturating_mul(2)` を実効上限として判定する。
 
 ---
 
@@ -108,7 +108,7 @@
 
 状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
 
-`Counters { day: DayCounter, window: Vec<WindowCounter>, total: Usage, updated_at }` を `counters.json` に保存する。セッション単位は `SessionState.usage` に保持する。
+`Counters { day_key, session_key, session: Usage, day: Usage, window: Vec<WindowCounter>, total: Usage, updated_at }` を `counters.json` に保存する。セッション消費量もこのファイルが持ち、`session_key` が現在のセッションと異なれば 0 に戻す（`Guard::new`）。
 
 ### 4.2 残量の表示
 
@@ -126,7 +126,7 @@
 
 状態: 実装完了（REF:src/ui/commands.rs）
 
-`src/ui/commands.rs` に `show` / `reset` / `check` を実装する。`reset` は `--yes` を要求し、実行後に `delete` 相当の履歴イベント（`type: "quota_reset"`）を記録する。
+`src/ui/commands.rs` の `run_quota` が `show` / `reset` / `check` を実装する。`reset` は `--yes` を要求し、`--scope` が `session` / `day` / `window` / `total` / `all` 以外なら `E1004`（全消去にしない）。成功後は `type: "quota"` の履歴 1 件（`payload.action = "reset"`）を記録する。
 
 ---
 
@@ -148,13 +148,13 @@
 
 消費を伴う操作は `HistoryEntry` の `cost` / `remaining` に消費量と残量を入れて記録する。`quota reset` は `EventType::Quota` の 1 レコードとして `src/ui/commands.rs` の `record_quota_reset` が記録する。`payload` は `{ "action": "reset", "scope": ..., "policy": ..., "note": ... }` とし、`cost` にリセット前、`remaining` にリセット後の消費量を入れる（`Cost` は 4 項目のため、`MetricUsage` の一覧は `payload` に入れない）。
 
-リセット前の値は `Counters` から読み、`app.counters.reset(scope)` の直後に記録する。履歴の追記に失敗してもリセットは成功として扱い、`Reporter::warn` で 1 行通知する（監査の失敗で解除を巻き戻すと、上限に張り付いたまま操作できなくなるため）。`scope` の解釈は `CounterStore::reset` と同じ語（`session` / `day` / `window` / `total` / それ以外は全体）を用いる。
+リセット前の値は `Counters` から読み、`app.counters.reset(scope)` の直後に記録する。履歴の追記に失敗してもリセットは成功として扱い、`Reporter::warn` で 1 行通知する（監査の失敗で解除を巻き戻すと、上限に張り付いたまま操作できなくなるため）。`scope` の解釈は `CounterStore::reset` と同じ語（`session` は `Counters.session`、`day` は `day` と `day_key`、`window` は `window`、`total` は `total`、`all` は `Counters::default()`）を用いる。
 
 ### 6.2 改変の検出
 
 状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
 
-`load_counters` の失敗時は `.corrupt-<timestamp>` へ退避し、`Counters::default()` で再開する。`W5001` と直前の `updated_at` を履歴の `quota_recovered` イベントに記録する。
+読めない `counters.json` は `FsCounters::load` が `.corrupt-<timestamp>` へ退避し、`Counters::default()` を返す。警告も履歴も出さない（退避先のファイルで事後に確認できる）。
 
 ### 6.3 上限の引き上げ
 

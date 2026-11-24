@@ -14,7 +14,7 @@
 
 定義の型は `src/core/engine.rs` に `serde::Deserialize` 付きの構造体として置く。評価器は次の 2 つに分ける。
 
-- `src/core/template.rs`: `{{var}}` の展開（`expand_template(spec, ctx) -> Result<String>`）。URL エンコードは `encoding_rs` で `query` を符号化する関数 `encode_query` に閉じる。
+- `src/core/template.rs`: `{{var}}` の展開（`expand(tmpl, ctx) -> Result<String, AppError>`）。URL エンコードは `encoding_rs` で `query` を符号化する関数 `encode_query` に閉じる。
 - `src/adapters/engine/eval.rs`: HTTP 応答 → `Vec<SearchHit>` への写像。`response.kind` による分岐はここだけに存在し、`Extractor` トレイト（`extract_items`）の実装を `registry` から引く。
 
 `core` 側は「定義の妥当性」と「変換の意味」を知るが、HTTP や HTML の具体 API には依存しない。セレクタ構文の検証は `scraper::Selector::parse` を `adapters` 側で行い、`core` では `SelectorSpec`（文字列）として保持する。
@@ -29,7 +29,7 @@
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
 
-`engine_hash(def)` は正規化 JSON（キー順をソートした `serde_json::to_string`）の SHA-256 先頭 16 文字を返す。キャッシュキーは `(engine_id, engine_hash, query, page, limit)` とし、`DefaultHasher` ではなく SHA-256 を用いて実行間で安定させる。
+`EngineDef::hash()` は `serde_json::to_string(self)` の SHA-256 の先頭 8 バイトを 16 進 16 文字で返す。キャッシュキーは `(engine_id, engine_hash, query, page, limit)` とし、`DefaultHasher` ではなく SHA-256 を用いて実行間で安定させる。
 
 ---
 
@@ -85,7 +85,7 @@
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
 
-`validate_request(spec, secrets)` がスキーム・未知変数・`apiKey` 使用時の `value_env` 有無を検査する。`engines test --dry-run` はこの関数の結果を表示し、送信は `usecases::search::run` 内で行う。
+`EngineDef::validate()` がスキーム・未知変数・`apiKey` 使用時の `value_env` 有無を検査する。`engines test --dry-run` は `template::prepare` の結果を表示し、実送信は `adapters::engine::evaluate` が行う。
 
 ---
 
@@ -115,7 +115,7 @@
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
 
-`Transforms` は `Vec<Transform>` を順に適用する純粋関数 `apply_transforms(value: &str, ts: &[Transform], ctx: &TransformCtx) -> String`。`TransformCtx` は `base_url`, `tracking_params`, `date_formats` を持つ。`absolutize` は `url::Url::join`、`to_date` は `chrono::NaiveDate::parse_from_str` を候補形式の順に試す。
+`Transforms` は `Vec<Transform>` を順に適用する純粋関数 `apply_transforms(value: &str, ts: &[Transform], ctx: &TransformCtx) -> String`。`TransformCtx` は `base_url` と追跡パラメータの一覧を持つ（`REF:src/core/url.rs` の `DEFAULT_TRACKING` を `usecases::config` が `App.tracking` へ写す。日付形式は `to_date` が実装内の候補形式を用いる）。`absolutize` は `url::Url::join`、`to_date` は `chrono::NaiveDate::parse_from_str` を候補形式の順に試す。
 
 ### 4.5 結果なしの判定（`errorWhen`）
 
@@ -173,7 +173,7 @@
 
 状態: 実装完了（REF:src/adapters/engine/loader.rs）
 
-`src/adapters/engine/loader.rs` の `load_engines(dirs: &[PathBuf]) -> Result<EngineRegistry>` がディレクトリを順に走査し、`*.json` を `EngineDef` として読む。`id` の重複は先勝ちとし、後から見つかったものは `W4006`（重複定義の無視）として記録する。同梱既定は `include_dir` ではなく `include_str!` で埋め込まず、ビルド時に `engines/` をそのまま同梱パスとして参照する（`CARGO_MANIFEST_DIR` を実行時に使わないため、`--engines-dir` の既定に同梱ディレクトリを追加する）。
+`src/adapters/engine/loader.rs` の `load_registry(dirs: &[PathBuf]) -> Result<LoadedEngines, AppError>` がディレクトリを順に走査し、`*.json`（1 ファイルに配列で複数定義も可）を `EngineDef` として読む。`id@variant` の重複は先勝ちとし、後から見つかったものは `W4002`（既に読み込み済みの定義の無視）として記録する。1 件も見つからない場合は同梱既定（`Resource::Engines::embedded()` の `brave@api` / `duckduckgo@default` / `searxng@json`）へフォールバックする。同梱分の探索ディレクトリは `engine_dirs` が組み立てる。
 
 ### 7.2 複数定義の束ね（プロファイル）
 
@@ -225,4 +225,4 @@
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-`--dry-run` は `validate_request` の結果を `src/ui/render.rs` で表示する（`Authorization` 等のヘッダは `***` へ置換）。実送信時は通常の `search` ユースケースを `limit=3` で呼び、クォータ消費を `Reporter` で事前に通知する。
+`--dry-run` は `EngineDef::validate()` と `template::prepare` の結果を `src/ui/render.rs` で表示する（`Authorization` 等のヘッダは `***` へ置換）。実送信時は通常の `search` ユースケースを `limit=3` で呼び、クォータ消費を `Reporter` で事前に通知する。
