@@ -24,13 +24,13 @@
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`ui::render::status_text::session_line(&state)` が `session 20261107-142233-a7f3（継続: --session 20261107-142233-a7f3）` を返す。`--quiet` 時は呼ばない。
+`src/ui/interactive.rs` の `Interactive::run` が開始時に `session {id} (resume with --session {id})` を 1 行出す。`--quiet` 時は出さない。
 
 ### 1.4 有効期間
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`core::session::is_expired(updated_at, now, ttl_days)`。`session.maxSessions` 超過時の削除は `usecases::session::create` の末尾で行う。
+`session.ttlDays` と `session.maxSessions` は型と検証に取り込み、`config show` / `config explain` に値を出す。期限切れ判定と件数超過時の削除は行わない（削除操作も提供しない）。
 
 ---
 
@@ -66,25 +66,25 @@
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`adapters::state::paths::resolve_state_dir(opts, env, settings) -> Result<PathBuf>`。優先順は `--state-dir` → `LLMSEARCH_STATE_DIR` → `settings.state.dir` → `dirs::state_dir()` → `E5002`。
+`REF:src/adapters/config/mod.rs` の `state_dir_with(env, explicit, configured) -> Option<PathBuf>` が解決する。優先順は `--state-dir` → `LLMSEARCH_STATE_DIR` → 設定 `state.dir` → `env.state_home()`（`XDG_STATE_HOME` または `dirs::state_dir()`、無ければ `~/.local/state`）+ `llmsearch`。すべて外れた場合は `E5002`。
 
 ### 3.2 ディレクトリ構成
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`StatePaths` が `session_file`, `document_dir`, `history_file`, `counters_file`, `robots_cache_file`, `config_dir`, `engines_dir` を返す。パス文字列の連結はこの型に集約する。
+`StatePaths` が `sessions()`, `documents()`, `document_dir(url)`, `history_file()`, `counters_file()`, `robots_file()` を返す。パス文字列の連結はこの型に集約し、`ensure()` が `sessions` / `documents` / `history` / `cache` を権限 0700 で作る。`settings.json` は状態ディレクトリ直下に置き、`network/` / `filters/` / `quotas/` は `config init` が書き出す。
 
 ### 3.3 権限
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`std::fs::DirBuilder::mode(0o700)` でディレクトリを作成し、ファイルは `OpenOptions::mode(0o600)` で作成する（`cfg(unix)` の `PermissionsExt` を使用）。既存ファイルの権限は変更しない。
+`StatePaths::ensure()` が `std::fs::create_dir_all` の後に `set_permissions(0o700)` でディレクトリを絞る（`cfg(unix)`）。ファイルは `write_atomic` が一時ファイルに `0o600` を設定してから `rename` する。既存ファイルの権限は変更しない。
 
 ### 3.4 原子的な書き込み
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`adapters::state::atomic::write(path, bytes)` が `path.tmp-<pid>-<rand>` へ書き、`fs::rename` で置換する。`rand` の代わりに `IdGen` を使い、決定論テストでは固定値を注入する。楽観的排他は `SessionState.revision: u64` の比較で行い、不一致は `E5003`。
+`REF:src/adapters/state/mod.rs` の `write_atomic(path, bytes)` が `path.tmp<pid>` へ書いて `fs::rename` で置換し、失敗時は一時ファイルを消す。`revision` による楽観的排他は実装していない（`E5003` は定義のみで、発行箇所は無い）。
 
 ---
 
@@ -96,25 +96,25 @@
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`--session` 再開時は `SessionState` をそのまま復元する。`documents` の各要素は `meta.json` を読み、`is_fresh` が偽なら `stale: true` を付けて返す（読み込みは遅延して行い、`read` 時に再取得する）。
+`--session` 再開時は `REF:src/adapters/state/session_store.rs` の `FsSessionStore::load` が `SessionState` をそのまま復元する。文書キャッシュの鮮度はセッションに持たせず、取得のたびに `load_cached` が `expires_at` で判定する（`stale` フラグは持たない）。
 
 ### 4.2 破損
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`fs::rename` で `.corrupt-<timestamp>` へ退避し、新規セッションを作成して `W5001` を返す。失われた項目は「検出できた範囲」のみ列挙する。
+`load` の JSON 解析に失敗したら `quarantine(path, stamp)` で `sessions/<id>.corrupt-<YYYYMMDDHHMMSS>.json` へ退避し、`E5001` を詳細（退避先を含む）付きで返す。`W5001` を出して新規セッションへ自動で切り替えることはしない。
 
 ### 4.3 不整合
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`documents` の参照先が存在しない場合は `body_ref: None` として扱う。識別子の欠番は詰めない（`next_result_id` は最大番号 +1）。
+`documents` の参照先が存在しない場合は、その文書を未取得として扱い再取得を案内する。識別子の欠番は詰めない（新しい識別子は既存の最大番号 +1）。
 
 ### 4.4 容量管理
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`usecases::state::cleanup` が `documents/*/meta.json` の `fetched_at` 昇順で削除し、合計サイズが `cache.maxSizeMb` を下回るまで続ける。ディレクトリサイズは `walkdir` を追加せず、`fs::read_dir` の再帰で合計する。
+`REF:src/adapters/state/session_store.rs` の `FsDocumentStore::evict_to_limit()` が `documents/*/meta.json` の `fetched_at` 昇順で削除し、`StatePaths::total_bytes()` が `cache.maxSizeMb` 以下になるまで続ける。`total_bytes` は `fs::read_dir` の再帰で合計する（状態ディレクトリ全体が対象）。`put` の後に呼ぶため、上限超過時の `W5002`（`REF:src/usecases/document.rs`）と併せて通知される。
 
 ---
 
@@ -124,18 +124,18 @@
 
 ### 5.1 セッションの削除
 
-状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
+状態: 実装完了（REF:src/adapters/state/mod.rs）
 
-`usecases::session::cleanup` が対象一覧（ID・更新日時・サイズ）を返し、`ui` が確認を求める。`--yes` がある場合は確認を省略する。削除は `fs::remove_file` / `fs::remove_dir_all` をセッション単位で行う。
+セッションを削除するコマンドは持たない。`FsSessionStore::delete(id)` はポートの実装としてあるが、CLI からは呼ばない（期限切れの自動削除もしない）。
 
 ### 5.2 文書キャッシュの削除
 
-状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
+状態: 実装完了（REF:src/adapters/state/session_store.rs, REF:src/usecases/document.rs）
 
-`usecases::state::refcount` が他セッションと履歴の参照を数え、0 のものだけを削除する。走査は `BTreeSet<PathBuf>` に参照を集めてから差分を取る。
+`FsDocumentStore::evict_to_limit()` が `cache.maxSizeMb` を上限として `fetched_at` の古い順に削除する。`history clear` は履歴ファイルだけを置き換え、文書キャッシュには触れない。
 
 ### 5.3 秘匿情報
 
-状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
+状態: 実装完了（REF:src/usecases/history.rs, REF:src/core/history.rs）
 
-削除操作の履歴レコードは `delete` 種別で識別子と件数のみを記録する。URL を含める場合は `redact::url_with_secrets` を通す。
+削除操作の履歴レコードは `delete` 種別で識別子と件数のみを記録する（`history clear` は `target` / `count`）。本文と URL は記録しない。

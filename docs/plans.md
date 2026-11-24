@@ -21,164 +21,99 @@
 | JSON・秘匿情報・ドキュメント（M9） | 完了 | `--json` の統一（#4/#5）・`refine` と対象解決（#7/#9）・表示 URL の伏字化（#12）・ドキュメント整理（#21/#23）（PR #32） | `REF:docs/plans.md#m9-json-and-docs` |
 | 表示言語とエンジン言語（M10） | 完了 | CLI メッセージの全英語化・嘘をつく `ui.locale` の削除・`search.language` の追加 | `REF:docs/plans.md#m10-english-and-language` |
 | 配布互換ゲート（M11） | 完了 | CI の Build & Distribution Compatibility の `E1003`（ステージした `assets/` の入れ子）を直し、同梱既定の解決を配布配置に依存させない | `REF:docs/plans.md#m11-distribution-assets` |
+| ドキュメントとソースの同期（M12） | 完了 | docs 全 31 本の総点検・未実装仕様の切り分け・`GUIDE.md` の統合・未使用コードの削除 | `REF:docs/plans.md#m12-docs-source` |
 <!-- SYNC:END project-status -->
 
 ---
 
 ## 2. マイルストーン一覧
 
+完了したマイルストーンの作業内容・判断理由・計測結果は `REF:docs/history.md` の `MILESTONE` / `DECISION` / `SPEC-FIX` エントリに移した。ここには現在の進捗を判断するための要約だけを残す（アンカーは各設計書の `状態:` 行が参照するため変更しない）。
+
 <a id="m0-setup"></a>
 ### M0: プロジェクトセットアップ
 
-- [x] リポジトリの作成とドキュメント管理規則の策定
-- [x] GitHub Actions（CI）の設定
-- [x] `REF:docs/script/verify-docs.py` と `REF:scripts/verify.sh` の作成
-- [x] Rust ツールチェーン退避（`REF:scripts/bootstrap-rust.sh`, `REF:.github/workflows/toolchain-export.yml`）
-- [x] `REF:Cargo.toml` / `REF:rust-toolchain.toml` / `REF:src/main.rs` のスキャフォールド（`cargo check` まで通過）
+- [x] リポジトリ・ドキュメント管理規則・CI・検証スクリプト・Rust ツールチェーン退避・スキャフォールド（詳細は `REF:docs/history.md#hist-milestone-m0`）
 
 <a id="m1-spec"></a>
 ### M1: 仕様書・設計書の策定（v2: Rust / 全 JSON）
 
-- [x] 仕様書 13 本・設計書 13 本を Rust 前提へ改訂
-- [x] `REF:docs/specifications/engine-definitions.md`（エンジン定義 JSON）
-- [x] `REF:docs/specifications/network.md`（ネットワークプロファイル JSON）
-- [x] `REF:docs/specifications/filters.md`（フィルタ JSON）
-- [x] `REF:docs/specifications/quotas.md`（クォータ JSON）
+- [x] 仕様書・設計書を Rust 前提へ改訂（現在は 15 本ずつ。`REF:docs/specifications/engine-definitions.md` ほか）
 - [ ] ユーザーによる仕様レビューと承認（指摘は `REF:docs/history.md` の `SPEC-FIX` として記録する）
 
 <a id="m2-implement"></a>
 ### M2: コア実装（Rust）
 
-- [x] 依存クレートの確定（`htmd 0.5` / `scraper 0.29` / `reqwest 0.12` 等）と vendor 退避・サンドボックスへの搬入
-- [x] `src/ports/` のトレイト定義（`HttpClient`, `Fetcher`, `HtmlToMarkdown`, `StateStore`, `HistoryStore`, `CounterStore`, `Clock`, `IdGen`, `Env`, `Reporter`）
-- [x] `src/core/` の純粋ロジック（設定型・エンジン定義型・抽出仕様・URL・テキスト・見出し・節・予算・フィルタ・クォータ・履歴イベント）
-- [x] 設定ローダ（`$ref` 展開・5 層マージ・由来記録・未知キー温存・検証）
-- [x] 状態ディレクトリ（原子的書き込み・セッション・文書キャッシュ・カウンタ）
-- [x] HTTP アダプタ（reqwest・リダイレクト・タイムアウト・サイズ上限・文字コード・再試行）
-- [x] エンジン評価器（HTML 抽出・JSON 抽出・変換パイプライン・ページング）
-- [x] 抽出と変換（`scraper` + 密度推定 + `htmd`、後処理、JavaScript 依存の検出）
-- [x] 見出し抽出・節分割・アウトライン・コンテキスト予算
-- [x] フィルタ評価（結果・本文）と集計
-- [x] ガード（レート制限・クォータ・消費記録）
-- [x] サブコマンド（`search` / `next` / `refine` / `outline` / `read` / `history` / `engines` / `network` / `filters` / `quota` / `config` / `doctor`）
-- [x] JSON イベント出力とエラーカタログ
-- [x] 対話モードの状態機械
-- [x] 同梱アセット（`assets/engines/*.json`, `assets/network/*.json`, `assets/filters/*.json`, `assets/quotas/*.json`）
+- [x] ポート・`core`・アダプタ・ユースケース・UI・同梱アセットの実装（依存確定と vendor 退避を含む。詳細は `REF:docs/history.md#hist-milestone-m002`）
+- [x] サブコマンド 12 種、JSON イベント、エラーカタログ、対話モードの状態機械
 
 <a id="m3-hardening"></a>
 ### M3: 品質強化
 
-- [x] アーキテクチャ検査（層構造・エンジン名分岐の禁止・警告コードの発行元・仕様節との対応）
-- [x] 契約テスト（JSON スキーマ・設定駆動・変換・無害化）
-- [x] 結合テスト（検索→選択→取得→アウトライン→節読み）
-- [x] 追加の同梱エンジン（SearXNG・Brave 等）を JSON のみで追加し、コード変更が不要であることを検証
-- [x] `unwrap` 禁止・非決定性の禁止の自動検査
-- [x] 保持期間・上限件数（履歴の間引き）の検証
-- [x] 容量管理（文書キャッシュの古い順の削除）の検証
-- [x] E2E（`REF:tests/e2e.rs`。実ネットワークは `LLMSEARCH_E2E_LIVE=1` のときだけ）
+- [x] アーキテクチャ検査・契約テスト・結合テスト・E2E と、容量管理・履歴の間引きの検証（詳細は `REF:docs/history.md#hist-milestone-m003`）
 
 <a id="m4-release"></a>
 ### M4: リリース準備
 
-- [x] `REF:README.md` の利用手順（導入・初期設定・典型的な使い方・エンジン追加方法）
-- [x] `REF:docs/developers.md` §2・§3・§7 を Rust の実態に合わせて更新
-- [x] CI（lint / test / build）を実際のコマンドへ差し替え
-- [x] リリース用ワークフロー（`REF:.github/workflows/release.yml`。Linux x86_64 の 1 バイナリをタグで添付）
-- [x] 設計書の `状態:` 行を実装完了へ更新し、`REF:src/...` 参照へ切り替え（エージェント連携は未実装のまま）
-- [x] `v0.1.0` のタグ付けとリリースノート作成（`REF:.github/workflows/release.yml` が Linux x86_64 の 1 バイナリを添付）
+- [x] README・開発者ガイド・CI・リリースワークフロー・`v0.1.0` のタグ付け（詳細は `REF:docs/history.md#hist-milestone-m003`）
 
 <a id="m5-usability-safety"></a>
 ### M5: 使いやすさと安全性
 
-- [x] Rust 搬入、build/test、doctor、エンジン dry-run による現状確認（実検索なし）
-- [x] 仕様・設計・コードの照合を GitHub Issues #4〜#25 と #27 に記録
-- [x] 主要 JSON の共通フィールド、document、warnings、quota.metrics を修正（#4 一部）
-- [x] CLI の limit/depth 設定値・子節除外・refine 履歴・--session を修正（#6/#7 一部/#8/#24）
-- [x] 未知エンジン・method/encoding 検証と本文マーカー無害化（#10/#16）
-- [x] プロキシ適用・認証・noProxy のローカル回帰試験（#14）
-- [x] Ubuntu 22.04 基準ビルドと glibc 互換性ゲートの実装（#25。実起動は PR CI で確認）
-- [x] 全ローカル検証、develop 向け Ready PR #26 を作成（マージしない。最新 CI とマージ可否は PR を参照）
-- [x] 隔離試験で見つけた assets 梱包・ビルド元パス依存を修正（#27）
-
-JSON 全コマンド統一・robots・クォータ計測変更・リダイレクト・設定探索順など、未対応や仕様間矛盾は Issues に残す。仕様の機能削除・安全方針の変更は行わない。#9 は対象不存在時の E5001 とエラーカタログの E1006 が矛盾するため未修正。#7 の検索結果別スロット保存は未対応。#22 の merge 統合は未対応であることをコードで再確認済み。
+- [x] Issue の洗い出し（#4〜#25, #27）と、JSON 共通フィールド・CLI オプション・検証・プロキシ・配布互換性の修正（PR #26。詳細は `REF:docs/history.md#hist-milestone-m005`）
 
 <a id="m6-dogfood-sync"></a>
 ### M6: 実運用と仕様同期
 
-- [x] PR #26（M5）で `Closes` した Issue #6 / #8 / #10 / #14 / #16 / #24 / #25 / #27 を develop 上で実機確認し、手動でクローズ
-- [x] システム CA ルートの参照（`REF:src/adapters/tls.rs`。`tls.caFile` が最優先。TLS を検証するときだけ読む）
-- [x] 抽出結果 0 件の応答に対する再試行と `W4004` / `E4004` の整備（`REF:src/adapters/engine/eval.rs`）
-- [x] プロファイルに `proxy` を文字列で指定したときに環境変数 `NO_PROXY` を参照しない件を仕様・設計に明記（挙動は変更しない）
-- [x] #4 / #5: `--json` イベントの共通枠と全サブコマンドの JSON 化（`REF:src/ui/render.rs` の `envelope`）
-- [x] #7: `refine` の `previousQuery` と履歴記録（M5 で対応済み。仕様へ `--previous` を追記）
-- [x] #9: セッション不在時の識別子解決を `E5001` に統一（`REF:src/ui/commands.rs` の `resolve_target`）
-- [x] #12: 秘匿情報の伏字化（送信エラー文字列・`engines show` の定義値・検索結果の表示 URL）
-- [x] #21: README のテンプレート残骸の除去、クォータ既定値の仕様同期、設計書の `状態:` 更新、未実装機能の plans.md への移動
-- [x] #23: `AppError::hint` の活用、`message()` のロケール反映、`E2007` の扱いを仕様に明記
-- [x] 仕様・設計・README と実装の突き合わせ（M6 時点）
-
-未対応: #11 / #13 / #15 / #17〜#20 / #22（M5 の棚卸しで起票されたまま。M6 の範囲外）。
+- [x] システム CA ルート、抽出 0 件時の再試行、`--json` の共通枠（#4/#5）、`refine` と対象解決（#7/#9）、秘匿情報の伏字化（#12）、ドキュメント同期（#21/#23）（PR #28。詳細は `REF:docs/history.md#hist-milestone-m006`）
 
 <a id="m7-fetch-discipline"></a>
 ### M7: 取得の作法と計測
 
-- [x] #13: robots.txt の強制。`REF:src/core/robots.rs` の純粋ロジックに呼び出し元を付け、本文取得の前にオリジン単位で判定して `E2006` を返す（`REF:src/adapters/robots.rs`）。判定結果は `<state-dir>/cache/robots.json` に `ttlMinutes` で保持し、取得失敗は `onError` に従う
-- [x] #15: `Retry-After` の解釈（`REF:src/core/retry.rs`。秒数と HTTP 日付）と再試行待機への反映。`maxBackoffMs` を超える待機は `E4003` で打ち切る
-- [x] #17: `redirectPolicy` の 3xx 処理。`never` は `E2003`、`manual` は `Location` を解決して返し、`follow` で追いきれない 3xx は `E2004`。`maxRedirects = 0` は HTML 中継ページも追わない
-- [x] #18: クォータ消費の訂正。`fetch` は `fetches` のみ（`chars` は `read` だけ）、`results` はフィルタ前の件数、フォールバックと同一エンジン内の再送は試行ごとに `searches` を消費し、操作全体が失敗した場合は消費しない
-- [x] 再試行判定が詳細文の状態番号解析に依存していた不具合を修正（`AppError::status`。`Retry-After` が付く応答が再試行されなかった）
-- [x] 回帰試験 `REF:tests/m7.rs`（ローカル TCP サーバと偽 HTTP のみ。外部ネットワークは使わない）
-
-未対応: #11 / #19 / #20 / #22（M7 の範囲外）。
+- [x] robots.txt の強制（#13）、`Retry-After`（#15）、`redirectPolicy` の 3xx（#17）、クォータ消費のずれ（#18）（PR #30。詳細は `REF:docs/history.md#hist-milestone-m007`）
 
 <a id="m8-config-quota-merge"></a>
 ### M8: 設定・監査・統合の適合（M5 残課題）
 
-- [x] #11: `config show` を全キーの由来表示（`argv` / `env` / `file` / `default`）へ拡張し、`config path` に存在しない候補を含む探索先一覧を出し、`config init` で `settings.json` / `network/default.json` / `filters/default.json` / `quotas/default.json` の 4 ファイルを書き出す
-- [x] #19: `quota reset` を履歴（`EventType::Quota`）へ記録する。範囲・ポリシー ID・リセット前後の消費量を残し、記録失敗でも解除は巻き戻さない
-- [x] #20: 設定探索順を「状態ディレクトリ → 利用者設定ディレクトリ」の順（後勝ちの畳み込みで前者が強い）へ直し、`LLMSEARCH_CONFIG` を実装する。環境変数表を実装に合わせて仕様へ反映し、解釈できない値は `E1004` とする
-- [x] #22: `search.merge=true` のとき `search.engines` の全エンジンへ逐次送信し、`merge_round_robin` で交互に統合する。`W4005` の重複除去件数と `engine` 付与、送信回数分のクォータ消費を行う
-- [x] 回帰試験 `REF:tests/m8.rs`（4 件の Issue に対応する 9 ケース）
+- [x] `config show/path/init`（#11）、`quota reset` の履歴（#19）、設定探索順と環境変数（#20）、`search.merge` の統合（#22）（PR #31。詳細は `REF:docs/history.md#hist-milestone-m008`）
 
 <a id="m9-json-and-docs"></a>
 ### M9: JSON・秘匿情報・ドキュメントの総点検（M5 残課題）
 
-- [x] #4: `--json` の共通フィールドを全イベントへ揃える。`done` / `error` にも `session` / `at` を付け、`at` は `YYYY-MM-DDTHH:MM:SSZ`、`refine` に `previousQuery`、`outline` の前に `document` イベント、検索・文書系イベントに `warnings[]`、`engines` の `policy` は安定した識別子
-- [x] #5: `--json` 指定時に `engines show/test`・`network/filters show`・`config *`・`quota *`・`history export/clear` が生テキストを出さず、イベントと `done` を出す
-- [x] #7: `refine` は直前のクエリを `previousQuery` として扱い、`search_uc::refine` で履歴に `refine` を残す。仕様に無い `--previous` を削除する
-- [x] #9: セッション無しで識別子を指定した場合は `E5001`（暗黙作成なし）、セッション内に無い識別子は `E1006`、`next` のセッション無しも `E5001` と hint にする
-- [x] #12: 検索結果・文書の表示 URL を `display_url` で一元的に伏字化する。エラー `details`（送信・robots）も伏字化する
-- [x] #21: README のクォータ記述と `GUIDE.md` のテンプレート残骸を直し、設計書の TypeScript 時代のパスを実装に合わせる。未実装機能は仕様から外し `REF:docs/plans.md#unplanned` に移す
-- [x] #23: `E2007` を発行しない理由を仕様に明記したまま、`message` / `hint` を `ui.locale` で選び、`Display` は日本語固定であることを設計に記す
-- [x] 回帰試験 `REF:tests/m9.rs`
+- [x] `--json` の統一（#4/#5）、`refine` と対象解決（#7/#9）、表示 URL の伏字化（#12）、ドキュメント整理（#21/#23）（PR #32。詳細は `REF:docs/history.md#hist-milestone-m009`）
 
 <a id="m10-english-and-language"></a>
 ### M10: CLI の全英語化とエンジン言語の一本化
 
-- [x] 仕様の改訂: `REF:docs/specifications/errors.md` §4.2 / §4.5、`REF:docs/specifications/configuration.md` §3.2.1 / §3.7 / §4 / §6.2、`REF:docs/specifications/engine-definitions.md` §2.1 / §3.2 / §8.3、`REF:docs/specifications/network.md` §2.1 / §7、`REF:docs/specifications/cli-interface.md` §1.3
-- [x] 設計の改訂: `REF:docs/designs/errors.md` §4、`REF:docs/designs/configuration.md` §3.2 / §3.7 / §4、`REF:docs/designs/engine-definitions.md` §3.2、`REF:docs/designs/network.md` §7、`REF:docs/designs/cli-interface.md` §1.3
-- [x] `Locale` の削除とカタログの英語化（`REF:src/core/errors.rs`、`Display` の日本語直書きを含む）
-- [x] `ui.locale` / `LLMSEARCH_UI_LOCALE` / `Settings::locale()` / `App::locale()` / `Renderer::set_locale()` / `peek_locale()` の削除と、旧 `ui.locale` への `W1002` 告知
-- [x] CLI・対話 UI・`doctor`・検証・警告・進捗の全英語化（`REF:src/ui/`・`REF:src/usecases/`・`REF:src/adapters/`）。同梱アセットの `description` も英語化
-- [x] `search.language`（既定 `en`）と `--language` / `LLMSEARCH_SEARCH_LANGUAGE` の追加、`src/core/lang.rs` の正規化、`{{language}}` / `{{locale}}` の配線
-- [x] `Accept-Language` のエンジン段での補完、`NetworkProfile.acceptLanguage` の廃止、同梱 3 エンジン（duckduckgo / brave / searxng）の言語パラメータ配線
-- [x] `REF:tests/architecture.rs` にユーザー可視日本語リテラルの検出を追加し、`tests/m10.rs` に言語設定の配線と `ui.locale` 廃止の回帰試験を追加
-- [x] 実バイナリでの確認（`--help`・エラー・実検索・`config show`・`engines test --dry-run`）と PR（develop 向け）
+- [x] CLI メッセージの全英語化、嘘をつく `ui.locale` の削除、`search.language` と `--language` の追加（PR #34。詳細は `REF:docs/history.md#hist-decision-d033`）
 
 <a id="m11-distribution-assets"></a>
 ### M11: 配布互換ゲートの `E1003` を直す
 
-- [x] 原因の記録: CI のステージ手順が `cp -R assets target/compatibility-package/assets` であり、rust-cache で復元された `target/compatibility-package/assets` が既にあると `assets/assets/` へ入れ子コピーになる。ステージ直後の `assets/network` が空になり、バイナリは隣の `assets/` を同梱既定として選ぶため `network profile 'default' was not found`（`E1003`）になる
-- [x] 原因の記録: 従来の最後の砦が `env!("CARGO_MANIFEST_DIR")` だったため、ビルドした機械のソースパスが存在する環境（CI のランナー）では検査をすり抜け、配布物だけで壊れる状態を検出できなかった
-- [x] `src/assets.rs` を追加し、同梱既定（network / filters / quotas / engines）を `include_str!` で保持する
-- [x] `usecases::config::bundled_root` を「バイナリの隣の `assets/` → 作業ディレクトリから上方探索」の 2 段にし、`CARGO_MANIFEST_DIR` 依存を外す（`Env` に `current_dir` を追加）
-- [x] 資源の解決（network / filters / quota / engines）で、ファイルが見つからない ID は埋め込み既定へ落とす。`config show` の `source` は `embedded` と表示する
-- [x] `REF:.github/workflows/ci.yml` のステージ手順を冪等にする（`rm -rf target/compatibility-package` の後にコピーする）
-- [x] `REF:scripts/check-release.sh` に「`assets/` 無し」「`assets/assets/` のみ」の 2 形態を追加し、同梱既定で起動できることを検査する
-- [x] `tests/m11.rs` に、埋め込み既定での起動と `bundled_root` の 2 段探索の回帰試験を追加する
-- [x] 実バイナリでの確認（CI と同じステージ手順で E1003 が出ないこと、`assets/` を削った状態でも 3 コマンドが成功すること）
+- [x] CI のステージ手順を冪等化し、同梱既定の解決を配布配置に依存させない（埋め込み既定・`bundled_root` の 2 段探索。PR #35。詳細は `REF:docs/history.md#hist-spec-fix-f017`）
 
----
+<a id="m12-docs-source"></a>
+### M12: ドキュメントとソースのリファクタリング（同期の網羅チェック）
+
+- [x] 実バイナリ（ローカル HTTP スタブ。外部ネットワークは使わない）で Issue #4 / #5 / #7 / #9 / #12 / #21 / #23 の現状を再測した
+- [x] 食い違い 20 件を一覧化し、仕様書・設計書の変更案の承認を得た（2026-11-23）
+- [x] 未実装の仕様を実装に合わせ、未実装機能を `REF:docs/plans.md#unplanned` へ移した
+- [x] `GUIDE.md`（旧テンプレート由来の開発プロセス文書）を削除し、固有情報を `REF:docs/developers.md` へ統合した（README の参照も差し替え）
+- [x] 未使用コード `HistoryStore::skipped_lines` / `JsonlHistory::skipped` を削除した（`W5004` は発行しない）
+- [x] `REF:docs/plans.md` §2 の完了マイルストーン詳細を `REF:docs/history.md` へ移して要約だけにした（判断理由は `REF:docs/history.md#hist-decision-d034`）
+- [x] 検証: `REF:docs/script/verify-docs.py`、`REF:scripts/verify.sh --quick`、`cargo test --locked --all-targets`、`cargo clippy --all-targets -- -D warnings`、実バイナリでの再測
+
+#### M12 の Issue 有効性確認（2026-11-23 実測）
+
+| Issue | 実測 | 判定 |
+|---|---|---|
+| #4 `--json` の仕様乖離 | `error` / `done` / `search` に `session`・`at`（`Z` 終端）・`warnings[]`、`refine` に `previousQuery`、`engines list` の `policy` は `first-wins`。`outline` / `read` は `document` を先行出力 | 解消済み |
+| #5 `--json` 非対応のサブコマンド | `engines show/test`・`config show/path/explain`・`quota show/check/reset`・`network show`・`filters show` が封筒＋`done` | 解消済み |
+| #7 `refine` | `--previous` は提供しない（セッションの直前クエリを使う）。履歴に `refine` を残し `previousQuery` を返す。結果は `results` を上書きし別スロット保存は無い（`unplanned` に記載） | 部分残（仕様どおり） |
+| #9 対象解決 | セッション無しで `read R1` → `E5001`＋hint、`next` → `E5001`、存在しない識別子 → `E1006` | 解消済み |
+| #12 秘匿情報 | `TmplValue::Explicit` と `value_env` を含む定義で `engines show` / `show --raw` / `test` / `test --dry-run` のすべてが 0 件漏洩。エラー `details` は `without_url()`＋`redact_text`。検索結果 URL は `token=***` | 解消済み |
+| #21 docs の誤記・残骸 | README のクォータ記述・`--profile`・`--no-filter=all`・`with-body`・`read --heading`・`context.max_chars`（仕様側）・`text/plain`（仕様側）は修正済み。残りは `GUIDE.md` で、M12 で削除・統合した | 解消済み |
+| #23 `hint` / `E2007` / locale | `AppError.hint` を設定（4 箇所）・表示（`Renderer::error`）し、実測でも hint が出る。`E2007` は発行箇所ゼロで仕様も「発行しない」と明記。メッセージは全英語・locale 設定なし | 解消済み |
 
 ## 3. フェーズ別実行順序
 
@@ -259,6 +194,16 @@ JSON 全コマンド統一・robots・クォータ計測変更・リダイレク
 - 複数文書の横断比較・差分表示
 - PDF・Office 文書の取り込み
 - 設定プロファイル（`--profile` / `profile` キー）による設定集合の切り替え（M5 の棚卸しで未実装と判明し、仕様から移動）
+- `session.ttlDays` による期限切れセッションの自動削除と、`session.maxSessions` による件数上限の削除（M12 で値は設定・表示のみと確認。自動削除は行わない）
+- セッションを削除するコマンド（保持期間を過ぎたものの一括削除。`--yes` を伴う確認付きの操作。M12 で仕様から削除）
+- アウトラインへの `minSectionChars` / `dropEmptySections` / `maxHeadingDepth` の適用（`filter.content` と `context.minSectionChars` の両方。M12 で「定義と検証のみ」と確認）
+- 残量が 20% を切ったときの注記（`quota` の対話モード表示。M12 で未実装と確認し、仕様から削除）
+- `Ctrl+C` の捕捉と終了コード `130`（M12 で未実装と確認。割り込みは OS と端末の既定動作に任せる）
+- `!<n>` による同一セッション内の検索語の再利用（M12 で未実装と確認し、仕様から削除）
+- 検索結果の別クエリ・スロット保存（`refine` は現在 `results` を上書きする。Issue #7 の残項目）
+- 履歴の不正行スキップを警告 `W5004` として通知する（M12 では未使用コードを削除し、黙って読み飛ばす仕様にした）
+- `history.enabled = false` で履歴の記録を停止する（M12 で値の読み込みと表示のみと確認。停止は未実装）
+- `quota` の `resetsAt` を機械可読な RFC 3339（`Z` 終端または明示オフセット）にする（現在は `YYYY-MM-DDT00:00 local` の文字列）
 - `read --heading <正規表現>` による見出し名での節指定（同上）
 - `history export --with-body`（履歴書き出しへの本文同梱。同上）
 - `--no-filter=all`（既定の除去要素まで無効化する指定）は採用しない。既定の除去要素は安全性のための不変条件とし、`--no-filter` は値なしのフラグに限る

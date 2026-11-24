@@ -120,7 +120,7 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`context.max_chars`（`REF:src/core/config/settings.rs`）を予算とし、設定スキーマで 500〜100000 の制約を課す。`--max-chars`（`REF:src/ui/commands.rs` の `Command::Read`）は解釈時に同じ範囲へ丸めてから設定値を上書きし、その呼び出しに限り優先する。
+`context.maxChars`（`REF:src/core/config/settings.rs`）を予算とし、設定スキーマで 500〜100000 の制約を課す。`--max-chars`（`REF:src/ui/commands.rs` の `Command::Read`）は解釈時に同じ範囲へ丸めてから設定値を上書きし、その呼び出しに限り優先する。
 
 ### 4.2 配分
 
@@ -132,7 +132,7 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`REF:src/core/context.rs` の `truncate_to_budget(text, limit)` は行境界で切り、未閉のフェンスを検出したら閉じフェンスを補う。注記文字列は `truncation_note(shown, total)` が `[truncated: 表示 N / 全体 M 字]` として生成し、レンダラは受け取った文字列をそのまま出力する。
+`REF:src/core/context.rs` の `truncate_to_budget(text, limit)` は行境界で切り、未閉のフェンスを検出したら閉じフェンスを補う。注記文字列は `truncation_note(shown, total)` が `[truncated: shown {shown} / total {total} chars]` として生成する（現在の描画は `REF:src/ui/render.rs` の `section_block` が同じ書式を直接組み立てている）。
 
 ### 4.4 予算超過時の案内
 

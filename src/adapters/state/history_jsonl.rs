@@ -17,7 +17,6 @@ pub const HISTORY_MAX_ENTRIES_DEFAULT: usize = 50_000;
 /// 履歴ファイル 1 本。
 pub struct JsonlHistory {
     path: PathBuf,
-    skipped: std::sync::atomic::AtomicUsize,
     /// 保持期間（日、0 は無期限）。
     retention_days: u64,
     /// 上限件数。
@@ -29,7 +28,6 @@ impl JsonlHistory {
     pub fn new(paths: StatePaths) -> Self {
         Self {
             path: paths.history_file(),
-            skipped: std::sync::atomic::AtomicUsize::new(0),
             retention_days: HISTORY_RETENTION_DEFAULT,
             max_entries: HISTORY_MAX_ENTRIES_DEFAULT,
             clock: std::sync::Arc::new(crate::ports::system::SystemClock::new()),
@@ -39,7 +37,6 @@ impl JsonlHistory {
     pub fn with_path(path: PathBuf) -> Self {
         Self {
             path,
-            skipped: std::sync::atomic::AtomicUsize::new(0),
             retention_days: HISTORY_RETENTION_DEFAULT,
             max_entries: HISTORY_MAX_ENTRIES_DEFAULT,
             clock: std::sync::Arc::new(crate::ports::system::SystemClock::new()),
@@ -114,18 +111,15 @@ impl JsonlHistory {
             }
         };
         let mut out = Vec::new();
-        let mut skipped = 0usize;
         for line in text.lines() {
             if line.trim().is_empty() {
                 continue;
             }
-            match serde_json::from_str::<HistoryEntry>(line) {
-                Ok(entry) => out.push(entry),
-                Err(_) => skipped += 1,
+            // 壊れた行は読み飛ばす（`history` の表示は継続する）。
+            if let Ok(entry) = serde_json::from_str::<HistoryEntry>(line) {
+                out.push(entry);
             }
         }
-        self.skipped
-            .store(skipped, std::sync::atomic::Ordering::Relaxed);
         Ok(out)
     }
 }
@@ -201,16 +195,12 @@ impl HistoryStore for JsonlHistory {
         crate::adapters::state::write_atomic(&self.path, text.as_bytes())?;
         Ok(0)
     }
-
-    fn skipped_lines(&self) -> usize {
-        self.skipped.load(std::sync::atomic::Ordering::Relaxed)
-    }
 }
 
 /// 書き出した JSON Lines を読み戻す（`history` の退避・移行で使う）。
 ///
-/// 引数は読み込み元のパスで、戻り値は読めた件数。壊れた行は数えずに飛ばし、
-/// 飛ばした件数を返り値の 2 要素目で知らせる（`W5004` の対象）。
+/// 引数は読み込み元のパスと書き込み先。壊れた行は数えずに飛ばし、
+/// 飛ばした件数を返す。
 pub fn import_lines(path: &Path, sink: &mut Vec<HistoryEntry>) -> std::io::Result<usize> {
     let text = std::fs::read_to_string(path)?;
     let mut skipped = 0usize;
@@ -339,7 +329,6 @@ mod tests {
         std::fs::write(&path, "{\"broken\":true}\n").unwrap();
         let store = JsonlHistory::with_path(path);
         assert!(store.read_all().unwrap().is_empty());
-        assert_eq!(store.skipped_lines(), 1);
     }
 
     #[test]

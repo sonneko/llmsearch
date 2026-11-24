@@ -84,7 +84,7 @@
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`ContentFilters` は仕様の全キーを持つ。`stripPatterns` と `stripLines.regex` は読み込み時にコンパイルする。
+`ContentFilters` は仕様の全キーを持つ。`stripPatterns` と `stripLines.regex` は読み込み時にコンパイルする。`minSectionChars` / `dropEmptySections` / `maxHeadingDepth` は定義と検証のみで、アウトラインの表示には使わない。
 
 ### 4.2 既定の除去要素
 
@@ -108,13 +108,13 @@
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`usecases::document::fetch` が 1) 抽出時に `stripSelectors`、2) 変換後に `apply_content`、を順に呼ぶ。アウトライン表示では `apply_outline` を呼び、本文そのものは書き換えない（`read` で指定された節は隠されていても読める）。
+`usecases::document::fetch` が 1) 抽出時に `stripSelectors`、2) 変換後に `apply_content`、を順に呼ぶ。`apply_content` は `stripPatterns` → `stripLines` → `keepOnly` → `normalize` の順に適用し、本文を書き換える。アウトラインの表示深度は `--depth` と `context.outlineDepth` だけで決める。
 
 ### 4.6 既定のフィルタ集合（本文）
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-同梱の `assets/filters/default.json` に記載する。`minSectionChars: 1` と `dropEmptySections: true` により、見出しだけの節はアウトラインから除かれる。
+同梱の `assets/filters/default.json` に記載する。`stripLines.repeatedAtLeast: 3`、`stripLines.boilerplate`、`normalize` の既定を用いる。`minSectionChars: 1` と `dropEmptySections: true` も値として含むが、現在はアウトラインの表示に影響しない（§4.1）。
 
 ---
 

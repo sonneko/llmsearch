@@ -114,13 +114,13 @@
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-`core::quota::remaining(policy, counters, session_usage, now) -> Vec<MetricUsage>` で一覧を作り、`src/ui/render.rs` が 1 行に整形する。20% 未満の注記は `quota_text::low_warning(&[MetricUsage])` が返す。
+`core::config::quota::remaining(policy, counters, session, now_utc, now_local_date) -> Vec<MetricUsage>` で一覧を作り、`src/ui/commands.rs` が `quota show` の表に、`usecases::guard::usage_line(metric)` が対話モードの 1 行注記に整形する。
 
 ### 4.3 例
 
 状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
 
-`quota_text::summary_line` が仕様の例と同じ形式を出力する。リセット時刻は `%Y-%m-%dT%H:%M%:z` で表示する。
+`remaining` の各要素は `name` / `used` / `limit` / `resets_at` を持ち、`quota show` が `name used / limit resets_at` の 3 列で表示する。`resets_at` は日次項目についてだけ `YYYY-MM-DDT00:00 local` を返し、それ以外は `null` とする。
 
 ### 4.4 コマンド
 

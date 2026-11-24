@@ -143,7 +143,19 @@ project-root/
 
 ### 4.2 `python3 docs/script/verify-docs.py`（ドキュメント規則検査）
 
-ドキュメントのみを編集した際にも単体で高速に実行できる。終了コード `0` で全規則合格、非 `0` で違反箇所を標準エラーに出力する。
+ドキュメントのみを編集した際にも単体で高速に実行できる。終了コード `0` で全規則合格、非 `0` で違反箇所を標準エラーに出力する。検査項目は次のとおり。
+
+| 規則 | 内容 |
+|---|---|
+| rule-1 | 必須ファイルの存在確認 |
+| rule-2 | `developers.md` に管理規則の原文が含まれていること |
+| rule-3 | `specifications/*.md` にコード情報・他ファイル参照が含まれないこと（コードフェンス内は除外） |
+| rule-4 | `specifications` と `designs` の見出し構成が一致し、各 `###` 節の冒頭に実装状態があること |
+| rule-5 | すべての `REF:` 参照が存在するファイル・アンカーを指していること |
+| rule-6 | `history.md` の全エントリが grep 検索用の固定ヘッダ（`HIST:<CATEGORY>:<ID>`）を持つこと |
+| rule-7 | SYNC ブロックの内容が全出現箇所でバイト単位に一致し、SYNC 外の段落重複がないこと |
+
+`scripts/verify.sh` はこの検査を最初に実行し、その後に書式・静的解析・テスト・ビルドを続ける。`--quick` を付けるとビルドを省略する。
 
 ### 4.3 Arena サンドボックス環境での所要時間目安
 
@@ -162,6 +174,37 @@ project-root/
    - 仕様書（`docs/specifications/**.md`）および設計書（`docs/designs/**.md`）で既に決まっている事項の実装・テスト・バグ修正は確認を求めず自律的に進める。
    - 仕様書や設計書の内容自体を変更する場合は、単なる記述ミスの修正を除き、人間の承認を得ること。
 
+### 5.1 ドキュメントを増やすとき
+
+1. `docs/specifications/` に仕様を書き、対応する `docs/designs/` に同じ見出し構成で設計を書く
+2. 各 `###` 節の冒頭に `状態:` 行を置き、`REF:src/...` で実装箇所を指す
+3. `docs/plans.md` に項目を足し、完了したら `docs/history.md` へ移す
+4. `python3 docs/script/verify-docs.py` を通す（見出し一致・状態行・REF の実在・SYNC 一致）
+
+仕様書（`docs/specifications/`）には実装のパスや `REF:` を書かない。仕様は「何を満たすか」、設計は「どう実装したか」を担う。両者の分離は rule-3 / rule-4 が機械的に検査する。
+
+### 5.2 作業のサイクル
+
+```text
+仕様策定 → 設計 → 実装 → 検証 → 反映
+    ↑                              |
+    └──────────────────────────────┘
+```
+
+1. **仕様策定**: `docs/specifications/` に明文化（人間の承認が必要）
+2. **設計**: `docs/designs/` に実装方針を記述
+3. **実装**: ソースコードを書く
+4. **検証**: `REF:scripts/verify.sh` で全検査
+5. **反映**: 完了した項目を `docs/plans.md` から `docs/history.md` へ移動
+
+### 5.3 セッション引き継ぎ
+
+`REF:docs/handoff.md` はセッション終了時に必ず更新する。次セッション開始時にエージェントが読む最初のファイルであり、現在の進捗サマリ・作業中のブランチと PR・直近の検証状態・次セッション開始時の手順を含める。
+
+### 5.4 PR のチェックリスト
+
+`REF:.github/pull_request_template.md` が LLM のセルフチェック項目を持つ（仕様書の参照、`verify-docs.py` の通過、CI 全緑、仕様変更の承認、`handoff.md` の更新、`history.md` への追記）。
+
 ---
 
 ## 6. Arena Agent の仕様と環境上の制約
@@ -169,7 +212,11 @@ project-root/
 1. **通信ホワイトリスト**：
    - サンドボックスから外部通信が可能なホストは `github.com`, `codeload.github.com`, `api.github.com`, `registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org` の 6 つに限定される。
    - 公式配布元（各種レジストリ、GitHub Releases のアセット等）には直接到達できないため、新しい依存やバイナリがどうしても必要な場合は GitHub Actions ワークフロー経由で取得し、Git Blob や専用ブランチに退避する。詳細は `REF:docs/add-dependencies.md` を参照。
-2. **コンテナ再起動とスナップショットの挙動**：
+2. **CI の設計（変更フィルタ・Draft PR・コンカレンシー）**：
+   - `REF:.github/workflows/ci.yml` は docs ジョブで変更種別を判定し、コードが変わったときだけ lint / test / build を走らせる（ドキュメントのみの変更で重いジョブを待たない）。
+   - PR が draft の間はジョブをスキップし、Ready for review で実行する。
+   - 同一ブランチへの push では古い実行をキャンセルする（`concurrency` の `cancel-in-progress` は PR のときだけ有効）。失敗時は `::error` 形式の GitHub Annotations で該当ステップに詳細（ログ末尾 10 KB）を付ける。Annotations はログのダウンロードができない環境でも API から読めるため、原因調査の主経路とする。
+3. **コンテナ再起動とスナップショットの挙動**：
    - セッションが長くなるとターン間でサンドボックスのコンテナが再起動することがある。
    - スナップショットで永続化されるのはリポジトリの作業ツリー配下のみであり、除外ディレクトリ（`target/`, `dist/`, `build/`, `node_modules/`, `.cache/` 等）および `/home/user/build/` は消える。
    - コンテナ再起動時は `.git/refs/heads/...` が古い状態に戻ることがあるため、必ず次の手順で復旧する：
@@ -178,9 +225,9 @@ project-root/
      git fetch origin <現在のブランチ名>
      git reset --mixed FETCH_HEAD
      ```
-3. **パッチセット上限（128MB / 10,000 ファイル）**：
+4. **パッチセット上限（128MB / 10,000 ファイル）**：
    - ターン終了時の累積成果物スナップショットには約 128MB または 10,000 ファイルの上限がある。大きな一時ファイルや成果物は必ず `/home/user/build/` または `/tmp/`、もしくは除外ディレクトリ名（`target/`, `dist/` 等）の下に置き、リポジトリ内の追跡対象外パスに放置しない。
-4. **GitHub CLI（`gh`）での PR 更新**：
+5. **GitHub CLI（`gh`）での PR 更新**：
    - `gh pr edit` は GitHub 側の Classic Projects 廃止エラーで失敗することがあるため、PR のタイトルや本文を更新する際は REST API を直接呼ぶ：
      ```bash
      gh api repos/<owner>/<repo>/pulls/<PR番号> -X PATCH --input - <<'JSON'

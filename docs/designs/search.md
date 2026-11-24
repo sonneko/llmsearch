@@ -12,7 +12,7 @@
 
 状態: 実装完了（REF:src/usecases/search.rs）
 
-`src/usecases/search.rs` の `select_engine(opts, config, registry) -> Result<EngineDef>` が 5 層を順に解決し、`Origin` を併せて返す。解決過程は `--verbose` と `engines list --resolved` で表示できる。利用不能時は `AppError::Provider { kind: Misconfigured }` に `available` の一覧を `details` として付ける。
+`src/usecases/search.rs` の `select_engine(opts, config, registry) -> Result<EngineDef>` が 5 層を順に解決し、`Origin` を併せて返す。解決過程は `--verbose` で表示できる。利用不能時は `AppError::Provider { kind: Misconfigured }` に `available` の一覧を `details` として付ける。
 
 ### 1.2 フォールバックとマージ
 
@@ -56,7 +56,7 @@
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-ソート処理を入れない。フィルタ適用後も相対順序が保存されることを `tests/unit/search_order.rs` で検証する。
+ソート処理を入れない。フィルタ適用後も相対順序が保存されることを `REF:tests/contract.rs` で検証する。
 
 ---
 

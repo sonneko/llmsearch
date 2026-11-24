@@ -36,49 +36,43 @@
 
 状態: 実装完了（REF:src/core/history.rs, REF:src/ui/render.rs）
 
-`src/ui/render.rs::render_list(entries)` が 1 行 1 件を生成する。要約は `src/core/history.rs::summary(&event)` に集約し、対話画面とコマンドで共有する。
+`src/ui/render.rs` の `Renderer::history_line(entry)` が 1 行 1 件を生成する。要約は `src/core/history.rs` の `HistoryEntry::summary()` に集約し、対話画面とコマンドで共有する。並び順の反転と件数の切り詰めは `REF:src/adapters/state/history_jsonl.rs` の `query` が行う。
 
 ### 2.2 詳細表示
 
 状態: 実装完了（REF:src/core/history.rs, REF:src/adapters/state/history_jsonl.rs）
 
-`history show <id>` はレコード全フィールドを整形して出力する。`read` レコードでは `usecases::document::read_by_ref` を呼び、キャッシュ有効時は取得を行わない。
+`history show <id>` はレコード全フィールドを整形して出力する。`REF:src/usecases/history.rs` の `get` が `next_id` を使わず全件から識別子で引く。本文の再出力は行わない（§3.1）。
 
 ### 2.3 検索
 
 状態: 実装完了（REF:src/core/history.rs）
 
-`src/core/history.rs::filter(events, criteria)` は純粋関数。キーワードは大文字小文字を区別せず部分一致、日付範囲は `at` の UTC 日付で比較する。
+`src/core/history.rs` の `Filter::matches(entry)` は純粋な判定関数で、`HistoryQuery` を写して使う。キーワードは `summary` / `payload` / `engine` を連結した文字列への部分一致（大文字小文字を区別しない）、日付は `at` の文字列比較、種別は `EventType::parse` が解釈できた最初の 1 件だけを使う。
 
 ### 2.4 セッション単位の表示
 
 状態: 実装完了（REF:src/core/history.rs, REF:src/adapters/state/history_jsonl.rs）
 
-`Criteria { session: Some(..), .. }` を `filter` に渡す。対話画面は現行セッション ID を固定で渡す。
+`HistoryQuery { session: Some(..), .. }` を `query` に渡す。対話画面は現行セッション ID を固定で渡す。
 
 ---
 
-## 3. 再出力
+## 3. 再出力と再実行
 
 状態: 実装完了（REF:src/core/history.rs, REF:src/adapters/state/history_jsonl.rs）
 
-### 3.1 節の再出力
+### 3.1 再出力・再実行の位置づけ
 
-状態: 実装完了（REF:src/core/history.rs, REF:src/adapters/state/history_jsonl.rs）
+状態: 未実装・未計画（`plans.md` §7 に記載）
 
-`read` レコードの `documentId` / `sectionId` から文書キャッシュを引く（セッションに依存しない）。出力ヘッダに `再出力（元: <日時>）` を追記する。取得失敗は `E2001`。
+`history show` は表示のみを行い、`--rerun` や本文の再出力は提供しない（`REF:src/ui/commands.rs` の `run_history`。`REF:tests/m9.rs` で `--previous` と併せて未提供を確認している）。節の再出力は `read` レコードの `payload.document` / `payload.section` をそのまま `read` に渡す経路で代替する。
 
-### 3.2 検索の再実行
-
-状態: 実装完了（REF:src/core/history.rs, REF:src/adapters/state/history_jsonl.rs）
-
-`history show <id> --rerun` は `usecases::search::run` を呼ぶ前に `guard::check` の結果を表示し、`--yes` が無ければ確認する。
-
-### 3.3 エクスポート
+### 3.2 エクスポート
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-Markdown は `src/ui/render.rs` の `history_line` を使い、本文は読まない。JSON Lines は履歴ファイルの行をそのまま出力し、`serde_json` で再整形しない（改変を避けるため）。`--json` のときは形式にかかわらず `history` イベント（`entries[]` / `total`）へ包み、生の JSON Lines を標準出力へ出さない（`REF:src/ui/commands.rs` の `run_history`）。
+Markdown は `src/core/history.rs` の `export_markdown(&[HistoryEntry])` が組み立てる（`REF:src/usecases/history.rs` の `export` が新しい順の一覧を古い順へ直してから渡す）。JSON Lines は各エントリを `serde_json::to_string` で 1 行ずつ出す。`--json` のときは形式にかかわらず `history` イベント（`entries[]` / `total`）へ包み、生テキストを標準出力へ出さない（`REF:src/ui/commands.rs` の `run_history`）。
 
 ---
 
@@ -108,4 +102,4 @@ Markdown は `src/ui/render.rs` の `history_line` を使い、本文は読ま�
 
 状態: 実装完了（REF:src/core/history.rs, REF:src/adapters/state/history_jsonl.rs）
 
-追記は `OpenOptions::append(true)` で行い、既存行を書き換えない。読み込み時の不正行スキップ件数は `W5004` として返し、`history list` の末尾に注記する。
+追記は `OpenOptions::append(true)` で行い、既存行を書き換えない。読み込み時に不正行は読み飛ばして一覧を返す（警告は出さない）。

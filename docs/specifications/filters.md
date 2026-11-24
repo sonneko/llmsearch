@@ -108,9 +108,9 @@
 | `stripLines` | 配列 | `[]` | 行単位の除去条件（§4.3） |
 | `keepOnly` | 配列 | `[]` | 残す行の条件（指定時は他を除去） |
 | `normalize` | オブジェクト | — | 空白・空行の正規化（§4.4） |
-| `minSectionChars` | 整数 | 未設定 | この文字数未満の節をアウトラインで隠す |
-| `dropEmptySections` | 真偽値 | `true` | 本文が空の節をアウトラインから除く |
-| `maxHeadingDepth` | 整数 | 未設定 | この深さを超える見出しをアウトラインで隠す |
+| `minSectionChars` | 整数 | 未設定 | 予約。現在はアウトラインの表示に影響しない |
+| `dropEmptySections` | 真偽値 | `true` | 予約。現在はアウトラインの表示に影響しない |
+| `maxHeadingDepth` | 整数 | 未設定 | 予約。現在はアウトラインの表示に影響しない |
 
 ### 4.2 既定の除去要素
 
@@ -139,7 +139,8 @@
 
 1. HTML からの変換時: `stripSelectors` → 本文抽出 → Markdown 変換
 2. Markdown 後処理: `stripPatterns` → `stripLines` → `keepOnly` → `normalize`
-3. アウトライン生成時: `minSectionChars` / `dropEmptySections` / `maxHeadingDepth` を表示に適用（本文は保持する）
+
+アウトラインの表示深度は `--depth` と `context.outlineDepth` で決める。`minSectionChars` / `dropEmptySections` / `maxHeadingDepth` は定義と検証のみ行い、表示には適用しない（§4.1 の予約項目）。
 
 ### 4.6 既定のフィルタ集合（本文）
 
@@ -148,8 +149,8 @@
 - `stripLines.repeatedAtLeast`: `3`（同一行の反復を除去）
 - `stripLines.boilerplate`: `シェアする`, `この記事を共有`, `Cookie`, `プライバシーポリシー`, `関連記事`, `広告`
 - `normalize`: 既定どおり
-- `minSectionChars`: `1`
-- `dropEmptySections`: `true`
+- `minSectionChars`: `1`（予約。現在は表示に影響しない）
+- `dropEmptySections`: `true`（予約。現在は表示に影響しない）
 
 ---
 

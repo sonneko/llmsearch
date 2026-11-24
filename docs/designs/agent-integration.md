@@ -24,7 +24,7 @@
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
 
-本文は `context.maxChars` の範囲に収める。`details` は `--verbose` 時のみ付与し、既定では `code` / `message` / `hint` のみとする。
+本文は `context.maxChars` の範囲に収める。`error` イベントは常に `code` / `message` / `hint` / `details` / `warnings[]` を出し、`details` は補足が無い場合 `null` とする（キーの有無で判断させない）。`--verbose` は診断行を標準エラーへ足すだけで、JSON の形を変えない。
 
 ### 1.4 クォータの可視性
 
@@ -52,7 +52,7 @@
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/ui/commands.rs）
 
-イベントは `Renderer::envelope(event, fields)` が共通枠（`v` / `event` / `session` / `at`）を付け、`Renderer::event()` が 1 行に出力する。種別ごとのフィールドは `src/ui/commands.rs` の各ハンドラが `json!` で組み立てる。共通枠を 1 か所で足すため、ハンドラ側で `v` / `session` / `at` を書き漏らす事故が起きない（`session` は呼び出し側で明示した値があればそれを使う）。種別名は `search` / `next` / `refine` / `document` / `outline` / `content` / `history` / `engines` / `engine` / `network` / `filters` / `config` / `quota` / `diagnostics` / `done` / `error`。各イベントの必須フィールドは `tests/contract/json_schema.rs` と `REF:tests/m5.rs` で検証する。
+イベントは `Renderer::envelope(event, fields)` が共通枠（`v` / `event` / `session` / `at`）を付け、`Renderer::event()` が 1 行に出力する。種別ごとのフィールドは `src/ui/commands.rs` の各ハンドラが `json!` で組み立てる。共通枠を 1 か所で足すため、ハンドラ側で `v` / `session` / `at` を書き漏らす事故が起きない（`session` は呼び出し側で明示した値があればそれを使う）。種別名は `search` / `next` / `refine` / `document` / `outline` / `content` / `history` / `engines` / `engine` / `network` / `filters` / `config` / `quota` / `diagnostics` / `done` / `error`。各イベントの必須フィールドは `REF:tests/m5.rs` と `REF:tests/m9.rs` で検証する。
 
 `--json` の応答性は「生テキストを標準出力へ出さない」ことを不変条件にする。`engines show` / `engines test` / `network show` / `filters show` / `config *` / `quota *` / `history export` は `renderer.json` で分岐し、必ずイベントと `done` を出す（`REF:tests/m9.rs`）。`engines list` の `apiKey` は表示用の日本語文ではなく `not-required` / `configured` / `missing` の識別子とし、参照する環境変数名は `apiKeyEnvs` に分ける（`REF:src/usecases/engines.rs`）。
 

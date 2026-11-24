@@ -66,26 +66,27 @@
 
 | コード | 発行箇所 |
 |---|---|
-| `W1001` | `ui/render/color.rs` |
-| `W1002` | `usecases/config/resolve.rs`, `adapters/engine/loader.rs` |
-| `W1003` | `core/text/query.rs` |
-| `W1004` | `core/config/network.rs` |
-| `W1005` | `adapters/http/client.rs` |
-| `W2001` | `usecases/guard/rate_limiter.rs` |
-| `W3001` | `adapters/extract/density.rs` |
-| `W3002` | `core/quality/js_hint.rs` |
-| `W3003` | `adapters/http/fetcher.rs` |
-| `W3004` | `usecases/document/outline.rs` |
-| `W4001` | `adapters/engine/eval.rs` |
-| `W4002` | `adapters/engine/loader.rs` |
-| `W4003` | `usecases/search/fallback.rs` |
-| `W4004` | `adapters/engine/eval.rs` |
-| `W4005` | `REF:src/core/search.rs` |
-| `W4006` | `REF:src/core/search.rs`, `REF:src/usecases/search.rs` |
-| `W5001` | `adapters/state/session_store.rs`, `counters_store.rs`, `REF:src/ui/commands.rs`（クォータ解除の履歴記録失敗） |
-| `W5002` | `usecases/state/cleanup.rs` |
-| `W5004` | `adapters/state/history_jsonl.rs` |
-| `W5005` | `usecases/guard/quota.rs` |
+| `W1001` | `REF:src/main.rs`（色付けを要求されたが端末でない） |
+| `W1002` | `REF:src/usecases/config.rs`, `REF:src/adapters/engine/loader.rs` |
+| `W1003` | `REF:src/usecases/search.rs`（検索語の切り詰め） |
+| `W1004` | `REF:src/adapters/http.rs`（地の文の認証情報） |
+| `W1005` | `REF:src/adapters/http.rs`（TLS 検証の無効化） |
+| `W2001` | `REF:src/adapters/http.rs`（レート制限の待機） |
+| `W3001` | `REF:src/core/convert.rs`（本文推定の失敗） |
+| `W3002` | `REF:src/core/convert.rs`（本文が 200 文字未満） |
+| `W3003` | `REF:src/adapters/extract/mod.rs`（文字コードの推定・応答サイズの打ち切り）, `REF:src/adapters/engine/eval.rs` |
+| `W3004` | `REF:src/usecases/document.rs`（再取得で見出し構成が変化） |
+| `W4001` | `REF:src/usecases/search.rs`（`refine` の検索語変更）, `REF:src/core/extract.rs`（抽出に失敗した項目の破棄） |
+| `W4002` | `REF:src/adapters/engine/loader.rs` |
+| `W4003` | `REF:src/usecases/search.rs`（フォールバック） |
+| `W4004` | `REF:src/adapters/engine/eval.rs`, `REF:src/core/extract.rs`, `REF:src/usecases/search.rs` |
+| `W4005` | `REF:src/usecases/search.rs`（マージ時の重複 URL 除去） |
+| `W4006` | `REF:src/usecases/search.rs`（リダイレクト URL の展開） |
+| `W5001` | `REF:src/ui/commands.rs`（クォータ解除の履歴記録失敗） |
+| `W5002` | `REF:src/usecases/document.rs`（容量超過によるキャッシュ削除） |
+| `W5005` | `REF:src/usecases/guard.rs` |
+
+`W5004`（履歴の不正行スキップ）はコードとして定義するが、発行はしない。読み込み時に不正行は黙って読み飛ばす（`REF:docs/specifications/history.md` §4.4）。
 
 ---
 

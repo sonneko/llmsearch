@@ -42,7 +42,6 @@ pub trait HistoryStore: Send + Sync {
     fn append(&self, entry: &HistoryEntry) -> Result<(), AppError>;
     fn query(&self, q: &HistoryQuery) -> Result<Vec<HistoryEntry>, AppError>;
     fn clear(&self, before: Option<&str>) -> Result<usize, AppError>;
-    fn skipped_lines(&self) -> usize;
 }
 
 /// 検索結果のスロット（セッション復元に使う）。
