@@ -133,7 +133,7 @@ python3 docs/script/verify-docs.py
 LLMSEARCH_E2E_LIVE=1 cargo test --test e2e -- --nocapture
 ```
 
-開発プロセス（Arena.ai のエージェントモードを使った仕様駆動開発の手順）は `GUIDE.md` に、このリポジトリ固有の固定情報は `docs/developers.md` にある。
+開発プロセス（Arena.ai のエージェントモードを使った仕様駆動開発の手順）、環境構築、ドキュメント管理規則は `docs/developers.md` にまとめてある。
 
 ---
 

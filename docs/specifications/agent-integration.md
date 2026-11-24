@@ -16,7 +16,7 @@
 
 ### 1.3 出力サイズ
 
-JSON の本文フィールドは `context.maxChars` に従う。1 コマンドあたりの標準出力は既定で 32 KiB を超えないよう、メタ情報を最小限にする。
+JSON の本文フィールドは `context.maxChars` に従う。出力サイズの上限は設けていない（`context.maxChars` と `--limit` で抑える）。エージェントは行単位で読み、必要なら `read --max-chars` で分割して取得する。
 
 ### 1.4 クォータの可視性
 
@@ -46,7 +46,7 @@ JSON の本文フィールドは `context.maxChars` に従う。1 コマンド�
 | `search` | `query`, `engine`, `results[]`, `page`, `hasMore`, `filtered`, `quota` |
 | `next` | `page`, `results[]`, `hasMore`, `terminated`, `filtered`, `quota` |
 | `refine` | `query`, `previousQuery`, `results[]`, `warnings[]`, `quota` |
-| `document` | `documentId`, `url`, `finalUrl`, `title`, `site`, `chars`, `warnings[]`, `quota` |
+| `document` | `documentId`, `url`, `finalUrl`, `title`, `site`, `chars`, `warnings[]`, `quota`（`outline` / `read` の本文出力の前に必ず 1 回出る） |
 | `outline` | `documentId`, `depth`, `sections[]`, `totalChars`, `hidden`, `warnings[]` |
 | `content` | `documentId`, `sectionId`, `heading`, `level`, `text`, `chars`, `truncated`, `nextSectionId`, `url`, `quota` |
 | `engines` | `engines[]`, `policy`（`engines list`。`policy` は `first-wins` などの安定した識別子。`engines[]` の `apiKey` は `not-required` / `configured` / `missing` の識別子、`apiKeyEnvs` は参照する環境変数名の一覧） |
@@ -73,7 +73,7 @@ JSON の本文フィールドは `context.maxChars` に従う。1 コマンド�
 
 ### 2.5 フィルタ集計オブジェクト
 
-`filtered` は `kept`, `removed`, `reasons`（キーと件数の対応）, `disabled` を持つ。
+`filtered` は `kept`, `removed`, `reasons`（キーと件数の対応）, `disabled`, `truncatedByLimit`（1 ページ分の `limit` で切り捨てた件数）を持つ。
 
 ### 2.6 クォータオブジェクト
 

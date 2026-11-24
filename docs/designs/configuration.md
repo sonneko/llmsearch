@@ -16,8 +16,6 @@
 
 同梱アセットの既定値は `src/assets.rs` の `include_str!` 群として 1 か所に置く。`assets::Resource`（`Network` / `Filters` / `Quota` / `Engines`）が `dir()` と `embedded()` を持ち、`embedded()` は `(id, JSON 本文)` を返す。エンジン定義だけはファイル名ではなく定義の `id@variant` をキーにする。ファイル探索（バイナリの隣の `assets/` → 作業ディレクトリから上方探索）で見つからない ID についてだけ埋め込みへ落とす。優先順位は「利用者ファイル > 同梱ファイル > 埋め込み」であり、埋め込みはファイルが 1 つも無い配布形態でも起動できるようにするための最後の砦である。
 
-同梱アセットの既定値は `src/assets.rs` の `include_str!` 群として 1 か所に置く。`assets::Resource`（`Network` / `Filters` / `Quota` / `Engines`）が `dir()` と `embedded()` を持ち、`embedded()` は `(id, JSON 本文)` を返す。エンジン定義だけはファイル名ではなく定義の `id@variant` をキーにする。ファイル探索（バイナリの隣の `assets/` → 作業ディレクトリから上方探索）で見つからない ID についてだけ埋め込みへ落とす。優先順位は「利用者ファイル > 同梱ファイル > 埋め込み」であり、埋め込みはファイルが 1 つも無い配布形態でも起動できるようにするための最後の砦である。
-
 ### 1.2 `$ref` による分割
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
@@ -40,7 +38,7 @@
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
 
-`resolve_settings(layers: [Value; 5]) -> ResolvedSettings` が強い順に畳み込む。畳み込みは `Value` レベルで先に行い、最後に 1 回だけ型へ変換する（型変換の失敗箇所を 1 か所にまとめるため）。
+設定の畳み込みは `src/core/config/mod.rs` の `merge_json(base, over)` を強い順（既定 → 同梱 → 利用者 → 環境変数 → 引数）に適用し、最後に型へ変換する。畳み込みは `Value` レベルで先に行い、最後に 1 回だけ型へ変換する（型変換の失敗箇所を 1 か所にまとめるため）。
 
 ### 2.2 マージ規則
 
@@ -54,7 +52,7 @@
 
 `candidate_paths(env, options) -> Vec<PathBuf>` が弱い順（後ろほど優先）に候補を返す。順序は「利用者設定ディレクトリの `settings.json`」→「状態ディレクトリの `settings.json`」で、`LLMSEARCH_CONFIG` があればその 1 件だけ、`--config` があればその 1 件だけを返す。`--config` / `LLMSEARCH_CONFIG` の指定先が存在しない場合は既存の候補へ落とさず `E1003` を返す。存在しない候補も `config path` 用に保持する。
 
-状態ディレクトリのパスは `state_dir(env, explicit)`（`--state-dir` → `LLMSEARCH_STATE_DIR` → `state.home`）で解決し、`settings.json` はその直下に置く（`config/settings.json` ではない）。`network/` などの資源ディレクトリも同じ基準（`<state.dir>/network/`）とする。`LoadedSettings` は読み込んだ `sources` を優先順（弱い→強い）で保持し、`config show` の由来表示に使う。
+状態ディレクトリのパスは `state_dir_with(env, explicit, configured)`（`--state-dir` → `LLMSEARCH_STATE_DIR` → 設定 `state.dir` → プラットフォームの状態ディレクトリ配下 `llmsearch`）で解決し、`settings.json` はその直下に置く（`config/settings.json` ではない）。資源ディレクトリは「設定ファイルのあるディレクトリ → 状態ディレクトリ → 利用者設定ディレクトリ → 同梱 `assets/`」の順に探し、`<state.dir>/network/` などの直下も候補に含める。`LoadedSettings` は読み込んだ `sources` を優先順（弱い→強い）で保持し、`config show` の由来表示に使う。
 
 ---
 
@@ -76,7 +74,7 @@
 
 `search.language`（既定 `en`）は `src/core/config/settings.rs` の `SearchSettings.language` に持ち、`Settings::validate()` が言語タグの形を検査する（空・不正は `E1004`）。`--language <tag>` は `Bootstrap.language` → `settings.search.language` の順で重ね、`LLMSEARCH_SEARCH_LANGUAGE` は `ENV_MAPPINGS` の `Kind::Text` として `search.language` へ写す。由来は `config show` の `origin_of` に `--language` / `search.language` の枝を足して表示する。
 
-正規化は `src/core/lang.rs` の `normalize_language(tag) -> Option<Language>` に集約する。`Language { tag, primary }` を返し、`tag` は小文字化した全体（`pt-BR` → `pt-br`）、`primary` は主言語タグ（`pt`）である。受理する形は `<主言語>[-<サブタグ>...]`、主言語は英字 2〜3 文字、サブタグは英数字 1〜8 文字。空・記号混入・4 文字以上の主言語は `None` とし、`Settings::validate()` と `parse_env` の双方で `E1004` にする。
+正規化は `src/core/lang.rs` の `parse(tag) -> Option<Language>` に集約する。`Language { tag, primary }` を返し、`tag` は小文字化した全体（`pt-BR` → `pt-br`）、`primary` は主言語タグ（`pt`）である。受理する形は `<主言語>[-<サブタグ>...]`、主言語は英字 2〜3 文字、サブタグは英数字 1〜8 文字。空・記号混入・4 文字以上の主言語は `None` とし、`Settings::validate()` と `parse_env` の双方で `E1004` にする。
 
 消費側は 1 か所に集約する。`src/usecases/search.rs` の `call_engine` と `src/usecases/engines.rs` の `dry_run` が `TmplCtx { language: primary, locale: tag, .. }` を組み立てる。`{{language}}` は主言語タグ、`{{locale}}` は正規化後の全体（旧定義との互換のため残す）。`Accept-Language` の補完は `src/adapters/engine/eval.rs` で `prepared.headers` に `Accept-Language` が無い場合だけ `tag` を挿入する（ネットワークプロファイルからの `Accept-Language` 上書きは廃止し、`src/adapters/http.rs` の `profile.accept_language` 分岐と `NetworkProfile.accept_language` フィールドを削除する）。
 
@@ -92,25 +90,25 @@ DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列�
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
 
-`ttlHours` から `expires_at` を計算するのは `core::cache::expiry(now, ttl_hours)`。`maxSizeMb` は `usecases::state::cleanup` が参照する。
+`ttlHours` から `expires_at` を計算するのは `REF:src/core/convert.rs` の `build_meta`。`maxSizeMb` は `REF:src/usecases/config.rs` で `FsDocumentStore::with_max_bytes` に渡し、`REF:src/usecases/document.rs` が上限超過時に `evict_to_limit` を呼ぶ。
 
 ### 3.5 `history`
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
 
-`enabled=false` のとき `HistoryStore` は `NullHistory` 実装に差し替える（呼び出し側の分岐を増やさない）。
+`enabled` と `retentionDays` / `maxEntries` は `REF:src/usecases/config.rs` で `JsonlHistory::with_limits` に渡す。`enabled = false` の値は読み書きの有無に反映していない（未実装。`config show` には出る）。
 
 ### 3.6 `session`
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
 
-`maxSessions` 超過時の削除は `usecases::session::create` の末尾で行い、`updated_at` 昇順で削除する。
+`ttlDays` / `maxSessions` は型に取り込み、`config show` と `config explain` に値を出す。超過時の自動削除は行わない（セッションの削除操作も提供しない）。
 
 ### 3.7 `ui`
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
 
-`color` の解決は `ui/render/color.rs` の `resolve_color(setting, env)` に集約し、`NO_COLOR` を最優先する。
+`color` の実効値は `usecases::config` の `effective_color(configured, env)` が決め、`NO_COLOR` が設定されていれば `never` とする。`config show` の `ui.color` の由来も同じ判定を使う。
 
 ### 3.8 `state`
 
@@ -154,7 +152,7 @@ DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列�
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
 
-再利用判定は `core::cache::is_fresh(meta, now)` の純粋関数。`--refresh` は `is_fresh` を呼ばずに取得へ回す。
+再利用判定は `REF:src/adapters/extract/mod.rs` の `load_cached` が `meta.expires_at` と現在時刻を比べて行う。`--refresh` と `--no-cache` は `load_cached` を呼ばずに取得へ回す。
 
 ### 5.3 検索結果をキャッシュする範囲
 

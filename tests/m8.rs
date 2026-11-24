@@ -388,6 +388,59 @@ fn quota_reset_requires_yes_and_records_nothing() {
     );
 }
 
+/// 未知の `--scope` は全消去にせず `E1004` で止める。
+#[test]
+fn quota_reset_rejects_unknown_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = TestEnv::new(&dir.path().join("state"), None);
+    let mut ctx = context(env, None, Bootstrap::default());
+
+    let html = support::duckduckgo_html(&[(1, "First", "https://one.example/a")]);
+    ctx.http
+        .route("html.duckduckgo.com", 200, "text/html", &html);
+    execute(&mut ctx, &["search", "first"]);
+    let before = ctx.app.guard().unwrap().counters().day.searches;
+    assert!(before > 0);
+
+    let cli =
+        Cli::try_parse_from(["llmsearch", "quota", "reset", "--scope", "bogus", "--yes"]).unwrap();
+    let r = renderer(&ctx);
+    let err = commands::run(
+        &mut ctx.app,
+        &r,
+        &ctx.resolved,
+        cli.command.as_ref().unwrap(),
+    )
+    .unwrap_err();
+    assert_eq!(err.code, ErrorCode::E1004);
+
+    // 日次の消費量もセッションの消費量も残っている
+    let counters = ctx.app.counters.load().unwrap();
+    assert_eq!(counters.day.searches, before);
+    assert_eq!(counters.session.searches, before);
+}
+
+/// `--scope session` はセッション消費量だけを 0 にし、日次は残す。
+#[test]
+fn quota_reset_session_keeps_daily_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = TestEnv::new(&dir.path().join("state"), None);
+    let mut ctx = context(env, None, Bootstrap::default());
+
+    let html = support::duckduckgo_html(&[(1, "First", "https://one.example/a")]);
+    ctx.http
+        .route("html.duckduckgo.com", 200, "text/html", &html);
+    execute(&mut ctx, &["search", "first"]);
+    let day_before = ctx.app.guard().unwrap().counters().day.searches;
+    assert!(day_before > 0);
+
+    execute(&mut ctx, &["quota", "reset", "--scope", "session", "--yes"]);
+
+    let counters = ctx.app.counters.load().unwrap();
+    assert_eq!(counters.session.searches, 0);
+    assert_eq!(counters.day.searches, day_before);
+}
+
 // ---------------------------------------------------------------------------
 // #20: 探索順と環境変数
 // ---------------------------------------------------------------------------

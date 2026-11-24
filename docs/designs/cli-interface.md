@@ -14,19 +14,19 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`Command::None` の場合は `ui::cli::interactive::run` を、それ以外は `ui::cli::commands::dispatch` を呼ぶ。両者は同一の `usecases` 関数を呼ぶ。
+`Command::None` の場合は `main.rs` の `run_interactive` が `ui::interactive::Interactive::run` を回し、それ以外は `ui::commands::run` へ分岐する。両者は同一の `usecases` 関数を呼ぶ。
 
 ### 1.2 モード判定
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`ports::Env::is_stdin_tty()` / `is_stdout_tty()` で判定する。`is_terminal` クレートではなく `std::io::IsTerminal` を用い、`adapters::env::process_env` に閉じ込める。`E1001` のメッセージにはサブコマンド一覧を含める（`clap` の `Command::render_help` から生成する）。
+`ports::Env::is_stdin_tty()` / `is_stdout_tty()` で判定する。`is_terminal` クレートではなく `std::io::IsTerminal` を用い、`ports::system::SystemEnv`（既定実装）に閉じ込める。サブコマンド無しで stdin が tty でない場合は `E1001`（メッセージに `llmsearch search "..."` の例を含める）を返す。引数解析の誤りは `clap` の `Cli::parse()` がそのまま処理し、`E1001` にはしない。
 
 ### 1.3 共通オプション
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`GlobalOptions` 構造体に集約し、`resolve` 層への入力とする。`--engines-dir` は `Vec<PathBuf>` で複数指定を受け付ける。`--language <tag>` を追加し（M10）、`Bootstrap.language` として `search.language` を上書きする。`--language` を指定できるのは全体設定の一時上書きとして扱い、`--json` の `config show` でも由来 `argv` として出る。`--no-filter` は `Option<Option<String>>`（値なしは `results+content`、`all` は既定除去要素も対象）として解釈する。
+`Global` 構造体（`Cli` に `#[command(flatten)]`）に集約し、`main.rs` が `Bootstrap` へ写して `resolve` 層への入力とする。`--engines-dir` は `Vec<PathBuf>` で複数指定を受け付ける。`--language <tag>` を追加し（M10）、`Bootstrap.language` として `search.language` を上書きする。`--language` を指定できるのは全体設定の一時上書きとして扱い、`--json` の `config show` でも由来 `argv` として出る。`--no-filter` / `--no-cache` / `--refresh` / `--no-color` / `--color` は値なしの真偽フラグ（`bool`）とする。`--color` は `--no-color` と `conflicts_with` で排他にし、`main.rs` が `color = !no_color && (color || tty)` を計算する。`--color` を指定したのに stdout が端末でない場合は装飾を無効化し、`W1001` を 1 度だけ出す（`--json` / `--quiet` 時は出さない）。
 
 ---
 
@@ -38,19 +38,19 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`ScreenState`（`Results` / `Select` / `Outline` / `Read` / `Depth` / `History` / `Done`）の状態機械。番号と項目の対応は定数 `RESULT_MENU: [(u8, &str); 4]` に固定し、描画と解釈が同じ定数を参照する。遷移関数 `transition(state, input, ctx) -> Transition` を純粋関数として単体テストする。
+`src/ui/menu.rs` の `Screen`（`Query` / `Results` / `SelectResults` / `Outline` / `SelectSections` / `History`）と `parse_input(screen, line) -> Input` が入力の解釈を担い、`results_menu()` / `outline_menu()` が表示文言を返す。番号と項目の対応は両関数に固定し、`tests` の `results_menu_numbers_are_fixed` が並びを検査する。状態遷移そのものは `REF:src/ui/interactive.rs` のループが持つ。
 
 ### 2.2 結果選択の入力規則
 
 状態: 実装完了（REF:src/core/select.rs）
 
-`src/core/select.rs` の `parse_selection(input, max_ref) -> Result<SelectionSpec, SelectionError>`。`1,3-5` と `R1,R3` の双方を受け付け、`SelectionSpec { refs: Vec<u32> }` へ正規化する（重複は除去し、順序は入力順）。不正入力の連続回数は画面状態が保持する。
+`src/core/select.rs` の `parse(input) -> Result<Vec<Selection>, AppError>`。`1,3-5` と `R1,R3` の双方を受け付け、`SelectionSpec { refs: Vec<u32> }` へ正規化する（重複は除去し、順序は入力順）。不正入力の連続回数は画面状態が保持する。
 
 ### 2.3 アウトライン・メニュー
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`OutlineView` を描画するのみ。深度変更はメモリ上の `Outline` から再描画し、`usecases::document::fetch` を再度呼ばない。
+取得済みの文書からアウトラインを描画する。深度変更（メニュー 3）は `session.outline_depth` を更新して同じ文書から再描画し、`usecases::document::fetch` を再度呼ばない。メニュー 5 は `history_uc::list` の先頭 10 件を `Renderer::history_line` で表示する。
 
 ### 2.4 節本文の表示形式
 
@@ -62,13 +62,13 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-`src/ui/render.rs` の `search_line`, `fetch_line`, `quota_exceeded_line` が仕様の 3 種類を生成する。数値は `usecases` が返す `Usage` と `FilterStats` から取り、描画側で再計算しない。
+`src/ui/interactive.rs` が `search: {n} results {filter summary} / {session usage}`、`fetched D{id} {chars} chars / {session usage}`、`(output {chars} chars / budget {budget} chars / {session usage})` の 3 種類を組み立てる。数値は `usecases` が返す `FilterStats` と `usecases::guard::usage_line(metric)` から取り、描画側で再計算しない。
 
 ### 2.6 中断と復帰
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`tokio::signal::ctrl_c()` を `tokio::select!` で入力待ちと競争させる。入力待ちは `tokio::task::spawn_blocking` で `std::io::stdin().read_line` を実行し、`select!` の中断で `AbortHandle` により打ち切る。`Ctrl+D` は `Ok(0)` の読み取りで検出する。
+`src/ui/interactive.rs` の `read_line(input)` が読み取り 1 回分を返し、`Ok(0)`（入力終端）を `None` として終了に写す。シグナルハンドラは持たず、割り込みの扱いは OS と端末の既定動作に任せる（非同期ランタイムは `reqwest` の内部でのみ使い、入力待ちは同期の `read_line` で行う）。
 
 ---
 
@@ -80,7 +80,7 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`src/ui/cli/commands/` に機能群ごとのファイルを置く（`search.rs`, `document.rs`, `history.rs`, `engines.rs`, `network.rs`, `filters.rs`, `quota.rs`, `config.rs`, `doctor.rs`）。各ファイルは `async fn run(args, ctx) -> Result<CmdOutcome>` を公開し、`dispatch.rs` が `match` で振り分ける（サブコマンドの分岐はここだけに存在する）。
+サブコマンドの定義は `REF:src/ui/cli.rs` の `clap` derive に置き、実行時の振り分けは `REF:src/ui/commands.rs` の `run(app, renderer, command) -> Result<i32, AppError>` が 1 か所で行う（機能群ごとの `run_engines` / `run_network` / `run_filters` / `run_quota` / `run_config` / `run_history` / `run_doctor`）。
 
 `REF:src/ui/commands.rs` が非対話コマンドを振り分ける。`search --limit` と `outline --depth` は省略時に解決済み設定値を使い、指定時のみ上書きする。`read` は既定で子節を含み、`--no-children` で除外する（`--children` と排他）。`REF:src/main.rs` は非対話でも `--session` を App に適用する。回帰テストは `REF:tests/m5.rs`。
 
@@ -96,7 +96,7 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/core/errors.rs）
 
-`src/core/errors.rs` の `exit_code_for(&AppError) -> i32`。`ErrorKind`（`Input` / `Network` / `Convert` / `Provider` / `State`）から 1〜5 を導出し、割り込みは `130`。`main.rs` は `std::process::exit(code)` を 1 回だけ呼ぶ。
+`src/core/errors.rs` の `AppError::exit_code()` が `ErrorKind`（`Input` / `Network` / `Convert` / `Provider` / `State`）から 1〜5 を導出する。`REF:src/main.rs` は返ってきた値で `std::process::exit(code)` を 1 回だけ呼ぶ。割り込み（`SIGINT`）は捕捉せず、OS と端末の既定動作に従う。
 
 ---
 
@@ -108,13 +108,13 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`trait Reporter { fn data(&mut self, line: &str); fn info(&mut self, line: &str); fn warn(&mut self, d: &Diagnostic); fn error(&mut self, e: &AppError); }`。実装は `StreamReporter`（`Stdout`/`Stderr`）と `BufferReporter`（テスト用）。リポジトリ内で `println!` / `eprintln!` を直接使わないことを `tests/architecture.rs` で検査する。
+`trait Reporter { fn info(&self, message: &str); fn warn(&self, diagnostic: &Diagnostic); fn verbose(&self, message: &str); }`（`REF:src/ports/mod.rs`）。実装は `src/ui/mod.rs` の `StdReporter`（進捗・警告は標準エラー）と、テスト用の無音実装。標準出力へ出る結果データは `Renderer`（`REF:src/ui/render.rs`）が担当し、役割を分ける。
 
 ### 4.2 テキスト出力の規則
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-描画関数は `src/ui/render/*.rs` に集約し、`Reporter::data` に渡す文字列を組み立てる。色は `ui/render/color.rs` の `Paint` を通す。
+描画関数は `src/ui/render.rs` に集約し、`Renderer::out` に渡す文字列を組み立てる。色の有無は `Renderer` の `color` フラグ（`ui.color` / `NO_COLOR` / `--no-color` / tty 判定）で決める。
 
 文言は英語で固定する（M10）。`[untrusted] <url>` マーカー、`[truncated: ...]`、件数・クォータの行など既存の書式は変えず、語だけを英語にする。`[使用]` / `[候補]` の接頭辞は `[used]` / `[candidate]` にする。外部から得た文字列（タイトル・本文・`description`）は翻訳しない。日本語リテラルの混入は `REF:tests/architecture.rs` の検査で防ぐ。
 
@@ -122,7 +122,7 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-`src/ui/render.rs` の `emit(reporter, event)`。`serde_json::to_string` は 1 行を返すため、本文は必ず文字列フィールドに入れる。`at` は `Clock` から取得する。
+`Renderer::envelope(event, fields)` が共通枠を作り、`Renderer::event` が `serde_json::to_string` で 1 行を標準出力へ書く。本文は必ず文字列フィールドに入れる。`at` は注入された `Clock` から取得する。
 
 ---
 
@@ -134,10 +134,10 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/core/select.rs）
 
-`src/core/select.rs` の `read_line(prompt) -> InputResult`（`Value` / `Cancelled` / `Eof`）。行編集は自前実装せず、端末に任せる（`rustyline` 等の追加依存を持たない）。`!<n>` の解釈は `core/parse/reuse.rs`。
+入力の解釈は `src/ui/menu.rs` の `parse_input` に集約する。`src/core/select.rs` は選択範囲（`1,3` / `1-3` / `R1` など）の構文解析だけを行い、区切りはカンマ・読点・空白を受け付ける。行編集は自前実装せず、端末に任せる（`rustyline` 等の追加依存を持たない）。不正入力の回数は `REF:src/ui/interactive.rs` が数え、3 回でメニューへ戻す。
 
 ### 5.2 表示幅
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-`src/ui/render.rs` の `display_width(&str) -> usize`（`unicode_width`）と `truncate_display(&str, width) -> String`。予算計算は `char` 数（`core::text::chars`）で行い、表示幅とは別関数として混同しない。折り返しは `wrap_ansi` 相当を自前で実装せず、`ui/render/wrap.rs` で空白区切りに行を分割する。
+`src/ui/render.rs` の `truncate(text, width) -> String` が `unicode_width::UnicodeWidthChar` で表示幅を数え、収まらない場合は末尾を `…` に置き換える（`width - 1` 桁まで）。予算計算は `char` 数（`core::text::chars`）で行い、表示幅とは別関数として混同しない。折り返しは行わない（端末幅は `COLUMNS` から取るが、出力の組み立てには使わない）。

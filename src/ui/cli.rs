@@ -120,7 +120,7 @@ pub enum Command {
     /// Print the text of a section.
     Read {
         target: String,
-        /// Section (`D1:S3`, `S3`, or `0` for the whole document). Repeatable.
+        /// Section (`D1:S3` or `S3`; `S0` is the whole document). Repeatable.
         #[arg(long = "section", value_name = "ID")]
         sections: Vec<String>,
         /// Include child sections (default). Use `--no-children` to exclude them.

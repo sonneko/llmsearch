@@ -48,25 +48,25 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`OutlineView`（`REF:src/usecases/document.rs`）は全見出しを保持し、表示深度は描画時に適用する。深度超えの見出しは `Heading.hidden` を立てて残し、件数を `hidden` として返す。
+`REF:src/usecases/document.rs` の `outline` が全見出しを作り、深度を超えるものは `Heading.hidden` を立てて残す（`OutlineView.hidden` に件数）。描画は `hidden` を飛ばし、末尾に件数の注記を出す。
 
 ### 2.2 表示形式
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`REF:src/ui/render.rs` の `outline_lines(document, headings, depth)` が 1 行 1 見出しを生成する。インデントは `level - 1` 段の 2 桁とし、本文中の最小レベルには合わせない（深度指定との対応を読み取りやすくするため）。
+`REF:src/ui/render.rs` の `outline_lines(document, url, headings, depth)` が 1 行 1 見出しを生成する。インデントは `level - 1` 段の 2 桁、テキストは 40 表示幅で切り詰め、子見出しを持つ行の末尾に ` ↓` を付ける。
 
 ### 2.3 節の文字数
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`chars` は見出し行を除く本文の書記素数の合計。末尾の空行と空白のみの行は数えない（`REF:src/core/text.rs` の `chars()`）。
+`chars` は見出し行の次の行から次の同レベル以下の見出しの直前までの文字数の合計（`REF:src/core/text.rs` の `chars()`。Unicode の文字数で数え、行ごとに数えて足す）。
 
 ### 2.4 見出しが存在しない場合
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-見出し 0 件のときは `OutlineView.whole_body` を立て、`S0` の仮想節（全文）を 1 件だけ持つ。`S0` の扱いは `REF:src/usecases/document.rs` の `read` で特別扱いする。
+見出し 0 件のときは `OutlineView.whole_body` を立て、対話モードで `(no headings found; the whole body is available as S0)` を出す。`read` に `S0` を渡すと `REF:src/core/outline.rs` の `whole_body` が本文全体を返す（見出し行を持たない `S0` は、文書タイトルを見出しとして表示する）。
 
 ### 2.5 目次の重複排除
 
@@ -96,7 +96,7 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`Section.text` は見出し行を含む範囲の文字列とする。レンダラはヘッダ行に `heading` を別途表示するため、本文中の見出し行はそのまま残す。
+`SectionBody.text` は見出し行を含む範囲の文字列とする。レンダラはヘッダ行に `heading` を別途表示するため、本文中の見出し行はそのまま残す。
 
 ### 3.4 複数指定
 
@@ -108,7 +108,7 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-「親が選択済みなら子を除外」「同一 ID は 1 回」を `REF:src/usecases/document.rs` の `read` で適用し、除外した ID は警告として知らせる。判定は見出しの入れ子関係（親の節範囲に含まれるか）で行う。
+「親が選択済みなら子を除外」「同一 ID は 1 回」を `REF:src/usecases/document.rs` の `read` で適用する。判定は見出しの節範囲（`start_line`〜`end_line`）に見出しが含まれるかで行い、除外は `omittedChildren` として件数で返す（警告は出さない）。
 
 ---
 
@@ -120,25 +120,25 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`context.max_chars`（`REF:src/core/config/settings.rs`）を予算とし、設定スキーマで 500〜100000 の制約を課す。`--max-chars`（`REF:src/ui/commands.rs` の `Command::Read`）は解釈時に同じ範囲へ丸めてから設定値を上書きし、その呼び出しに限り優先する。
+`context.maxChars`（`REF:src/core/config/settings.rs`）を予算とし、設定スキーマで 500〜100000 の制約を課す。`--max-chars`（`REF:src/ui/commands.rs` の `Command::Read`）は解釈時に同じ範囲へ丸めてから設定値を上書きし、その呼び出しに限り優先する。
 
 ### 4.2 配分
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`REF:src/core/context.rs` の `allocate(budget, sizes)` は「残り予算 ÷ 残り節数」を各節に割り当て、端数は先頭へ加算する。前の節が割当より短い場合、余りは後続の節へ繰り越す（合計が予算を超えないことを不変条件としてテストする）。
+`REF:src/core/context.rs` の `allocate(budget, sizes)` は「残り予算 ÷ 残り節数」を各節に割り当て（各節の実サイズを超えない）、配り切れない余りを先頭の節から順に足す。合計が予算を超えないことを単体テストで固定する。
 
 ### 4.3 切り詰め
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`REF:src/core/context.rs` の `truncate_to_budget(text, limit)` は行境界で切り、未閉のフェンスを検出したら閉じフェンスを補う。注記文字列は `truncation_note(shown, total)` が `[truncated: 表示 N / 全体 M 字]` として生成し、レンダラは受け取った文字列をそのまま出力する。
+`REF:src/core/context.rs` の `truncate_to_budget(text, limit)` は行境界で切り、未閉のフェンスを検出したら閉じフェンスを補う。注記文字列は `truncation_note(shown, total)` が `[truncated: shown {shown} / total {total} chars]` として生成する（現在の描画は `REF:src/ui/render.rs` の `section_block` が同じ書式を直接組み立てている）。
 
 ### 4.4 予算超過時の案内
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-切り詰め時は、次の子見出しの ID を `nextSectionId` として `SectionBody` に含める。子が無い場合は `nextSectionId: null` とし、続きの取得方法（深度を上げる／親節を読む）を提案文として返す。
+`SectionBody.next_heading_id` は「同じか浅い次の見出し」の ID を常に持ち（切り詰めの有無によらない）、JSON では `nextSectionId` として出す。無ければ `null`。
 
 ---
 
@@ -150,7 +150,7 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`REF:src/usecases/document.rs` の `section_header(document, body)` が `--- D1:S3 | 見出し | h2 | 3560 字 ---` を生成する。文字数は桁区切りをせず、そのままの整数で表示する（機械的に読み取れる形を優先する）。
+`REF:src/usecases/document.rs` の `section_header(document, body)` が `--- D1:S3 | 見出し | h2 | 3560 chars ---` を生成する（英語・桁区切りなし。機械的に読み取れる形を優先する）。
 
 ### 5.2 信頼境界の明示
 
@@ -168,4 +168,4 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`renderFooter(totalChars, budget)` が合計文字数と予算を 1 行で出力する。合計は `allocate` の結果から算出し、描画側で再計算しない。
+`REF:src/ui/commands.rs` の `run_read` が `(output {total} chars / budget {budget} chars)` を 1 行出す。合計は `ReadOutcome.total_chars`（各節本文の文字数の和）を使う。対話モードは `REF:src/ui/interactive.rs` がセッションの文字消費を末尾に足す。

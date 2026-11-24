@@ -261,7 +261,7 @@ impl CounterStore for FsCounters {
     fn reset(&self, scope: &str) -> Result<(), AppError> {
         let mut counters = self.load()?;
         match scope {
-            "session" => {}
+            "session" => counters.session = Default::default(),
             "day" => {
                 counters.day = Default::default();
                 counters.day_key.clear();

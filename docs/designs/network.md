@@ -12,7 +12,7 @@
 
 状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
-`core::config::network::NetworkProfile` が仕様の全キーを持つ。`adapters::http::reqwest_client` は `NetworkProfile` から `reqwest::Client` を組み立てる関数 `build_client(&NetworkProfile, &Secrets) -> Result<Client>` を提供し、プロファイル以外の設定（環境変数等）を読まない。
+`core::config::network::NetworkProfile` が仕様の全キーを持つ。`adapters::http::ReqwestClient::build_client(&self, profile: &NetworkProfile) -> Result<reqwest::Client, AppError>` が `reqwest::ClientBuilder` を組み立てる（秘密値は `self.secrets` から取る）。プロキシの決定だけは `ports::system::proxy_url_for_scheme` / `in_no_proxy` を介して環境変数も参照する。
 
 ### 1.2 プロファイルの選択順
 
@@ -56,7 +56,7 @@
 
 状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
-`NetworkProfile::validate() -> Vec<Diagnostic>` が範囲を検査する。範囲はマクロ `check_range!(name, value, min, max)` で記述し、キー名と範囲を 1 か所にまとめる。
+`NetworkProfile::validate() -> Vec<Check>` が範囲を検査する。範囲はローカルクロージャ `range(name, value, min, max, out)` で記述し、キー名と範囲を 1 か所にまとめる。
 
 ---
 
@@ -64,10 +64,10 @@
 
 状態: 実装完了（REF:src/adapters/http.rs）
 
-再試行は `src/adapters/http.rs` の `retry_with(policy, clock, f)` を汎用関数として実装する。
+再試行は `src/adapters/http.rs` の `ReqwestClient::send_blocking` がループとして実装する（汎用の `retry_with` 関数は持たない）。
 
-- 判定: `should_retry(policy, outcome) -> bool`（`Outcome` は `Status(u16)` か `Err(io_kind)`）。
-- 待機: `backoff(policy, attempt) -> Duration`（`backoffMs * factor^(attempt-1)` を `maxBackoffMs` で頭打ちにし、`jitterMs` の範囲で疑似乱数を加える）。
+- 判定: `retryable(profile, err) -> bool` がエラーコードと `retry.onError` / `retry.onStatus` で決める（`401/403` を表す `E4003` は常に対象）。
+- 待機: `retry_wait(profile, last_error, attempt, jitter) -> u64` が `RetryPolicy::backoff(attempt, jitter)`（`backoffMs * factor^(attempt-1)` を `maxBackoffMs` で頭打ちにし、`jitterMs` の範囲で加算）を呼ぶ。
 - `Retry-After` は秒数と HTTP-date の両方を解釈する（`chrono` 使用）。解釈は `REF:src/core/retry.rs` の `parse_retry_after_ms(value, now)`（純粋関数）に閉じ、日付形式は `RFC 1123`（`%a, %d %b %Y %H:%M:%S GMT`）のみを受理する。解釈できない値は `None` とし、指数バックオフへ戻す。
 - 待機時間は `REF:src/adapters/http.rs` の `send_blocking` が決める。`respectRetryAfter` が真で解釈できた場合はその値をそのまま待ち（揺らぎは加えない）、`maxBackoffMs` を超える場合は再試行を打ち切って `E4003` を返す。値の受け渡しはエラー詳細の文字列解析ではなく `AppError::retry_after_ms`（`REF:src/core/errors.rs`）で行う。
 - `Retry-After` が付くのは `4xx` / `5xx` 応答だけなので、抽出結果 0 件の再送（`REF:src/adapters/engine/eval.rs`）には適用しない。
@@ -162,7 +162,7 @@ HTML 中継ページの追従（`<meta http-equiv="refresh">` と JS の locatio
 
 状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
-`bytes_stream()` を読みながら累積し、`maxBytes` を超えた時点で `W3003` を記録して打ち切る。打ち切った本文でも変換を試みる。
+`reqwest` のレスポンスの `chunk()` を読みながら `Vec<u8>` へ累積し、`body.len() + chunk.len() > maxBytes` になった時点で `maxBytes` に達する分だけ取り込んで打ち切る（`src/adapters/http.rs`）。打ち切った場合は `HttpResponse.truncated` を立て、`adapters::extract` が変換時に `W3003`（`truncated at the response size limit`）を記録する（打ち切った本文でも変換を試みる）。
 
 ### 8.3 ステータスの扱い
 
@@ -174,4 +174,4 @@ HTML 中継ページの追従（`<meta http-equiv="refresh">` と JS の locatio
 
 状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
-`redact::url_with_secrets(url, secret_values)` が `value_env` 由来の値を `***` に置換する。`SecretString` の保持する値と照合して置換するため、置換漏れが起きにくい。`Authorization` はヘッダ名で一律に伏字化する。
+`src/core/url.rs` の `redact(url, secrets)` が、秘匿パラメータ名（`token` 等）と `value_env` 由来の値（`core::secret::redaction_list`）を `***` に置換する。値はクエリ・パス・断片を問わず文字列一致で照合する。ヘッダは `core::secret::redact_headers` が `Authorization` などの名前で一律に伏字化する。

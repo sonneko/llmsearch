@@ -214,10 +214,11 @@
 
 次の順に探索し、同一 `id` が複数ある場合は先に見つかったものを優先する。
 
-1. `--engines-dir` で指定されたディレクトリ
-2. 状態ディレクトリの `engines/`
-3. 利用者設定ディレクトリの `engines/`（`~/.config/llmsearch/engines/`）
-4. 同梱の既定エンジン（`engines/`）
+1. `--engines-dir` で指定されたディレクトリ（複数指定可）
+2. 環境変数 `LLMSEARCH_ENGINES_DIR`（パス区切りで複数指定可。`--engines-dir` の後ろへ連結する）
+3. 状態ディレクトリの `engines/`
+4. 利用者設定ディレクトリの `engines/`（`~/.config/llmsearch/engines/`）
+5. 同梱の既定エンジン（`engines/`）。ここでも見つからない場合はバイナリへ埋め込んだ既定（`brave@api` / `duckduckgo@default` / `searxng@json`）へ落ちる
 
 ### 7.2 複数定義の束ね（プロファイル）
 

@@ -115,7 +115,7 @@
 | `maxChars` | 整数 | `8000` | 1 回の出力上限（500〜100000） |
 | `outlineDepth` | 整数 | `3` | アウトラインの既定深度（2〜4） |
 | `includeChildren` | 真偽値 | `true` | 節に子見出しの本文を含める |
-| `minSectionChars` | 整数 | `0` | この文字数未満の節をアウトラインから隠す（後述の本文フィルタと独立） |
+| `minSectionChars` | 整数 | `0` | 予約（現在は表示に影響しない） |
 
 ### 3.4 `cache`
 
@@ -133,12 +133,16 @@
 | `retentionDays` | 整数 | `90` | 保持日数（0 は無期限） |
 | `maxEntries` | 整数 | `50000` | 上限件数 |
 
+`enabled` は値の読み込みと `config show` / `config explain` への表示だけを行い、履歴の記録停止には反映していない（未実装。`plans.md` §7）。
+
 ### 3.6 `session`
 
 | キー | 型 | 既定値 | 内容 |
 |---|---|---|---|
-| `ttlDays` | 整数 | `7` | セッションの保持日数 |
-| `maxSessions` | 整数 | `200` | 保持するセッション数の上限（超過時は古い順に削除） |
+| `ttlDays` | 整数 | `7` | 保持日数の指定値。期限切れの自動削除は行わない |
+| `maxSessions` | 整数 | `200` | 保持数の指定値。件数超過の自動削除は行わない |
+
+セッションの削除は明示操作によってのみ行う。指定値は `config show` と `config explain` に現れるが、これらによる自動削除は行わない。
 
 ### 3.7 `ui`
 
@@ -248,7 +252,7 @@ JSON の解析に失敗した場合、行・桁と理由を表示して終了す
 
 ### 7.2 `config path`
 
-次を 1 行 1 件で表示する。読み込んだファイルと、読み込まなかった候補（存在しない探索先）の双方を含み、状態（`[使用]` / `[候補]`）を付す。
+次を 1 行 1 件で表示する。読み込んだファイルと、読み込まなかった候補（存在しない探索先）の双方を含み、状態（`[used]` / `[candidate]`）を付す。行の書式は `[used] <種別>    <パス>`（種別は `settings` / `network` / `filters` / `quotas` / `engines` / `state` / `history` / `counters` / `sessions` / `documents` / `robots`）。
 
 1. `settings.json` の探索候補（`--config` / `LLMSEARCH_CONFIG` / 状態ディレクトリ / 利用者設定ディレクトリの順）
 2. `network` / `filters` / `quota` の解決に使ったファイルと、その探索ディレクトリの候補
@@ -265,4 +269,4 @@ JSON の解析に失敗した場合、行・桁と理由を表示して終了す
 
 ### 7.5 `config explain <key>`
 
-指定したキーの最終的な値と、その由来を 1 行で表示する（例: `context.maxChars = 4000 (env: LLMSEARCH_MAX_CHARS)`）。
+指定したキーの最終的な値と、その由来を 1 行で表示する（例: `context.maxChars = 4000 (env: LLMSEARCH_CONTEXT_MAX_CHARS)`）。

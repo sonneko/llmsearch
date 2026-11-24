@@ -12,7 +12,7 @@
 
 状態: 実装完了（REF:src/ui/commands.rs, REF:src/ui/render.rs, REF:docs/plans.md#m2-implement）
 
-`src/ui/render.rs` の `emit(reporter, event)` が `serde_json::to_string(&event)` を `reporter.data()` へ渡す。終端保証は `src/ui/commands.rs` の `run_command()` が行い、成功時に `done`、失敗時に `error` を 1 回だけ出力する。二重出力を防ぐため `Emitter { closed: bool }` を持つ。
+`src/ui/render.rs` の `Renderer::event(&Value)` が `serde_json::to_string` した 1 行を標準出力へ書く。共通枠（`v` / `event` / `session` / `at`）は `Renderer::envelope(event, fields)` が付ける。終端は `src/ui/commands.rs` の `run` が各分岐の末尾で `done()` を呼んで 1 回だけ出し、失敗時は `main.rs` が `Renderer::error(&AppError)` で `error` を 1 回だけ出す（`Emitter` のような状態型は持たない）。
 
 ### 1.2 無状態の原則
 
@@ -24,7 +24,7 @@
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
 
-本文は `context.maxChars` の範囲に収める。`details` は `--verbose` 時のみ付与し、既定では `code` / `message` / `hint` のみとする。
+本文は `context.maxChars` の範囲に収める。`error` イベントは常に `code` / `message` / `hint` / `details` / `warnings[]` を出し、`details` は補足が無い場合 `null` とする（キーの有無で判断させない）。`--verbose` は診断行を標準エラーへ足すだけで、JSON の形を変えない。
 
 ### 1.4 クォータの可視性
 
@@ -52,7 +52,7 @@
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/ui/commands.rs）
 
-イベントは `Renderer::envelope(event, fields)` が共通枠（`v` / `event` / `session` / `at`）を付け、`Renderer::event()` が 1 行に出力する。種別ごとのフィールドは `src/ui/commands.rs` の各ハンドラが `json!` で組み立てる。共通枠を 1 か所で足すため、ハンドラ側で `v` / `session` / `at` を書き漏らす事故が起きない（`session` は呼び出し側で明示した値があればそれを使う）。種別名は `search` / `next` / `refine` / `document` / `outline` / `content` / `history` / `engines` / `engine` / `network` / `filters` / `config` / `quota` / `diagnostics` / `done` / `error`。各イベントの必須フィールドは `tests/contract/json_schema.rs` と `REF:tests/m5.rs` で検証する。
+イベントは `Renderer::envelope(event, fields)` が共通枠（`v` / `event` / `session` / `at`）を付け、`Renderer::event()` が 1 行に出力する。種別ごとのフィールドは `src/ui/commands.rs` の各ハンドラが `json!` で組み立てる。共通枠を 1 か所で足すため、ハンドラ側で `v` / `session` / `at` を書き漏らす事故が起きない（`session` は呼び出し側で明示した値があればそれを使う）。種別名は `search` / `next` / `refine` / `document` / `outline` / `content` / `history` / `engines` / `engine` / `network` / `filters` / `config` / `quota` / `diagnostics` / `done` / `error`。各イベントの必須フィールドは `REF:tests/m5.rs` と `REF:tests/m9.rs` で検証する。
 
 `--json` の応答性は「生テキストを標準出力へ出さない」ことを不変条件にする。`engines show` / `engines test` / `network show` / `filters show` / `config *` / `quota *` / `history export` は `renderer.json` で分岐し、必ずイベントと `done` を出す（`REF:tests/m9.rs`）。`engines list` の `apiKey` は表示用の日本語文ではなく `not-required` / `configured` / `missing` の識別子とし、参照する環境変数名は `apiKeyEnvs` に分ける（`REF:src/usecases/engines.rs`）。
 

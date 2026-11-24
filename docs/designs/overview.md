@@ -68,7 +68,7 @@
 
 状態: 実装完了（REF:src/lib.rs, REF:src/main.rs）
 
-時刻・乱数・端末判定は `ports::{Clock, IdGen, Env}` を通す。テストでは固定実装（`tests/support/ports.rs`）を注入し、`SystemTime::now()` と `rand` 系の直接利用を禁止パターンとして検査する。
+時刻・乱数・端末判定は `ports::{Clock, IdGen, Env}` を通す。テストでは固定実装（`REF:tests/support/mod.rs` の `FixedClock` / `SeqIds` / `FakeEnv`）を注入し、`SystemTime::now()` と乱数系の直接利用を禁止パターンとして検査する。
 
 ### 2.7 ローカル完結とプライバシー
 
@@ -189,20 +189,20 @@ ui/cli（対話・サブコマンド）
 
 `core::engine::EngineDef` のフィールド以外に、エンジン固有の知識をコードへ置かない。禁止パターン（特定ドメインの文字列リテラル、エンジン ID による分岐）を `tests/architecture.rs` で検出する。組み込み既定エンジンも `engines/*.json` として同梱し、コードへ埋め込まない。
 
-配布時はバイナリに加え JSON データの `assets/` を隣に同梱する。`REF:src/usecases/config.rs` の `bundled_root` が `Env::executable_dir` 経由の隣接ディレクトリを優先し、開発時のみビルド元の配置にフォールバックする。定義の読み込み・検証は既存のローダを通す。`REF:.github/workflows/release.yml` で梱包し、`REF:scripts/check-release.sh` がビルド元をマウントしないコンテナで検証する（Issue #27）。
+配布時はバイナリに加え JSON データの `assets/` を隣に同梱する。`REF:src/usecases/config.rs` の `bundled_root` が「バイナリの隣の `assets/`」→「作業ディレクトリから上方探索」の 2 段で探し、ファイルが 1 つも無い場合だけ `REF:src/assets.rs` の埋め込み既定へ落とす（ビルド元のパスには依存しない）。定義の読み込み・検証は既存のローダを通す。`REF:.github/workflows/release.yml` で梱包し、`REF:scripts/check-release.sh` がビルド元をマウントしないコンテナで検証する（Issue #27）。
 
 ### 6.3 状態の保持単位
 
 状態: 実装完了（REF:src/lib.rs, REF:src/main.rs）
 
-セッション・文書・履歴・カウンタの 4 種を `StateStore` / `HistoryStore` / `CounterStore` トレイトで抽象化し、ファイル実装（`adapters/state/fs_*.rs`）とメモリ実装（`tests/support/memory_store.rs`）を用意する。
+セッション・文書・履歴・カウンタの 4 種を `SessionStore` / `DocumentStore` / `HistoryStore` / `CounterStore` トレイト（`REF:src/ports/state.rs`）で抽象化し、ファイル実装を `REF:src/adapters/state/session_store.rs`（セッション・文書・カウンタ）と `REF:src/adapters/state/history_jsonl.rs`（履歴）に置く。`App` はトレイト越しにのみ状態へ触れ、テストでは偽実装を注入する。
 
 ### 6.4 拡張点
 
 状態: 実装完了（REF:src/lib.rs, REF:src/main.rs）
 
 1. **エンジン追加**: JSON の追加のみ。応答種別は `response.kind`（`html` / `json`）で宣言する。
-2. **抽出方式の追加**: `trait Extractor` を追加実装し、`response.kind` への登録を 1 か所（`adapters/engine/registry.rs`）に限定する。
+2. **抽出方式の追加**: `REF:src/adapters/extract/mod.rs` の `response.kind`（`html` / `json`）分岐に 1 か所だけ追加する。
 3. **ネットワーク実装の差し替え**: `ports::HttpClient` の実装差し替えで完結させる。
-4. **出力形式の追加**: `trait Renderer`（`text` / `json`）を追加実装する。
+4. **出力形式の追加**: `REF:src/ui/render.rs` の `Renderer` は `json: bool` で分岐する。新しい形式を足す場合はこの 1 型に閉じ込める。
 5. **未知設定の温存**: `#[serde(flatten)] extra` に保持し、書き戻し時に再出力する。

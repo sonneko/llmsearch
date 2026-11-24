@@ -1101,6 +1101,16 @@ fn run_quota(
                     "--yes is required".to_string(),
                 ));
             }
+            // 未知の範囲は全消去になってしまうため、指定できる語を閉じておく。
+            if !matches!(
+                scope.as_str(),
+                "session" | "day" | "window" | "total" | "all"
+            ) {
+                return Err(AppError::with_detail(
+                    ErrorCode::E1004,
+                    format!("--scope must be session, day, window, total, or all (got {scope})"),
+                ));
+            }
             let before = app.counters.load().ok();
             app.counters.reset(scope)?;
             let after = app.counters.load().ok();
