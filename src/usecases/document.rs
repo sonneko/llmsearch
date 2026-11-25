@@ -271,7 +271,8 @@ pub fn read(
                         .collect::<Vec<_>>()
                         .join(", ")
                 ),
-            ));
+            )
+            .hint("run `outline` to list the available sections"));
         }
         selected.sort_by_key(|h| h.start_line);
         let mut covered: Vec<(usize, usize)> = Vec::new();

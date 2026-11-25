@@ -189,35 +189,36 @@ fn resolve_tmpl(
 /// ページング位置からリクエスト用の値を計算する。
 pub fn paging_values(paging: Option<&PagingSpec>, page: u32, limit: u32) -> (u32, u32) {
     // 戻り値: (offset, page_number)
+    let page = page.max(1);
     match paging {
         None => (0, 1),
         Some(p) => match p.style {
             PagingStyle::Offset => {
-                let step = p
-                    .offset_step
-                    .unwrap_or_else(|| p.page_size.unwrap_or(limit));
-                let offset = (page.saturating_sub(1)) * step;
+                // 利用者がネイティブの pageSize より小さい件数を表示する場合、
+                // offsetStep のまま進めると表示しなかった分を飛ばしてしまう。
+                // その場合は表示 limit を開始位置の増分に使う。
+                let native_size = p.page_size.or(p.offset_step).unwrap_or(limit).max(1);
+                let configured_step = p.offset_step.unwrap_or(native_size);
+                let step = if limit > 0 && limit < native_size {
+                    limit
+                } else {
+                    configured_step
+                };
+                let offset = page.saturating_sub(1).saturating_mul(step);
                 (offset, page)
             }
-            PagingStyle::Page => (0, p.page_base + page.saturating_sub(1)),
+            PagingStyle::Page => (0, p.page_base.saturating_add(page.saturating_sub(1))),
         },
     }
 }
 
 /// 次ページ以降が存在しうるか。
 pub fn has_more(paging: Option<&PagingSpec>, page: u32, limit: u32, max_results: usize) -> bool {
-    let consumed = (page as usize) * (limit as usize);
-    if consumed >= max_results {
+    let Some(p) = paging else {
         return false;
-    }
-    match paging {
-        None => false,
-        Some(p) => {
-            let max_page = p.page_size.unwrap_or(limit).max(1);
-            consumed + (max_page as usize) <= p.max_results as usize
-                || consumed < p.max_results as usize
-        }
-    }
+    };
+    let consumed = (page as usize).saturating_mul(limit as usize);
+    consumed < max_results.min(p.max_results as usize)
 }
 
 #[cfg(test)]
@@ -268,7 +269,8 @@ mod tests {
             offset_step: Some(10),
             ..Default::default()
         };
-        assert_eq!(paging_values(Some(&p), 2, 7), (10, 2));
+        assert_eq!(paging_values(Some(&p), 2, 7), (7, 2));
+        assert_eq!(paging_values(Some(&p), 2, 10), (10, 2));
         let p2 = PagingSpec {
             style: PagingStyle::Page,
             page_base: 1,

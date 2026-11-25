@@ -49,7 +49,7 @@ impl ResultsChoice {
         match self {
             ResultsChoice::Quit => "Quit",
             ResultsChoice::Select => "Select results (multiple allowed)",
-            ResultsChoice::More => "Show results from the 8th onward",
+            ResultsChoice::More => "Show more results",
             ResultsChoice::Refine => "Edit the query",
         }
     }
@@ -164,10 +164,15 @@ pub fn parse_input(screen: Screen, raw: &str) -> Input {
 }
 
 /// 検索結果メニューの表示テキスト（番号は固定）。
-pub fn results_menu() -> String {
-    let mut out = String::from("  1) Quit\n  2) Select results (multiple allowed)\n");
-    out.push_str("  3) Show results from the 8th onward\n  4) Edit the query\n> ");
-    out
+pub fn results_menu(next_result_id: u32, has_more: bool) -> String {
+    let more = if has_more {
+        format!("Show results from R{next_result_id} onward")
+    } else {
+        "No more results".to_string()
+    };
+    format!(
+        "  1) Quit\n  2) Select results (multiple allowed)\n  3) {more}\n  4) Edit the query\n> "
+    )
 }
 
 /// アウトライン・メニューの表示テキスト。
@@ -186,12 +191,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn results_menu_numbers_are_fixed() {
-        let menu = results_menu();
+    fn results_menu_numbers_are_fixed_and_continuation_is_dynamic() {
+        let menu = results_menu(14, true);
         assert!(menu.contains("1) Quit"));
         assert!(menu.contains("2) Select results (multiple allowed)"));
-        assert!(menu.contains("3) Show results from the 8th onward"));
+        assert!(menu.contains("3) Show results from R14 onward"));
         assert!(menu.contains("4) Edit the query"));
+        assert!(results_menu(14, false).contains("3) No more results"));
     }
 
     #[test]

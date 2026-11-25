@@ -11,14 +11,16 @@ pub struct CheckResult {
 }
 
 /// 診断を実行する。
-pub fn run(app: &App) -> Vec<CheckResult> {
+pub fn run(app: &App, no_network: bool) -> Vec<CheckResult> {
     let mut out = Vec::new();
     out.push(CheckResult {
         name: "version".into(),
         check: Check::Ok(format!(
-            "llmsearch {} / rustc {}",
+            "llmsearch {} / rustc {} / {}-{}",
             crate::VERSION,
-            rustc_version()
+            rustc_version(),
+            std::env::consts::OS,
+            std::env::consts::ARCH
         )),
     });
 
@@ -29,7 +31,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
         check: if state_ok {
             Check::Ok(state.display().to_string())
         } else {
-            Check::Fail(format!("{} does not exist", state.display()))
+            Check::Fail(format!("E5002: {} does not exist", state.display()))
         },
     });
 
@@ -47,7 +49,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
         check: if writable {
             Check::Ok("writable".into())
         } else {
-            Check::Fail(format!("cannot write to {}", state.display()))
+            Check::Fail(format!("E5002: cannot write to {}", state.display()))
         },
     });
 
@@ -58,7 +60,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
     for check in app.network.validate() {
         out.push(CheckResult {
             name: "network".into(),
-            check,
+            check: with_code(check, ErrorCode::E1004),
         });
     }
     for warning in crate::adapters::http::profile_warnings(&app.network) {
@@ -83,7 +85,7 @@ pub fn run(app: &App) -> Vec<CheckResult> {
     for check in quota_checks {
         out.push(CheckResult {
             name: "quota".into(),
-            check,
+            check: with_code(check, ErrorCode::E1004),
         });
     }
 
@@ -128,37 +130,44 @@ pub fn run(app: &App) -> Vec<CheckResult> {
     } else {
         out.push(CheckResult {
             name: "quota.usage".into(),
-            check: Check::Fail("cannot read the counters".into()),
+            check: Check::Fail("E5002: cannot read the counters".into()),
         });
     }
 
-    // ネットワーク到達性（1 回だけ・失敗しても継続）
-    let probe_url = app
-        .engines
-        .get(&app.default_engine)
-        .and_then(|d| crate::core::url::parse(&d.request.url).ok());
-    match probe_url {
-        Some(url) => {
-            let request = crate::ports::http::HttpRequest::get(url.clone());
-            match app.http.send_blocking(&app.network, &request) {
-                Ok(response) => out.push(CheckResult {
-                    name: "network.reachability".into(),
-                    check: Check::Ok(format!(
-                        "{} → HTTP {}",
-                        url.host_str().unwrap_or("?"),
-                        response.status
-                    )),
-                }),
-                Err(err) => out.push(CheckResult {
-                    name: "network.reachability".into(),
-                    check: Check::Warn(format!("{}: {}", err.code.as_str(), err.message())),
-                }),
-            }
-        }
-        None => out.push(CheckResult {
+    // 到達性は `--no-network` で明示的に省略できる。
+    if no_network {
+        out.push(CheckResult {
             name: "network.reachability".into(),
-            check: Check::Warn("cannot determine the URL to check".into()),
-        }),
+            check: Check::Warn("skipped (--no-network)".into()),
+        });
+    } else {
+        let probe_url = app
+            .engines
+            .get(&app.default_engine)
+            .and_then(|d| crate::core::url::parse(&d.request.url).ok());
+        match probe_url {
+            Some(url) => {
+                let request = crate::ports::http::HttpRequest::get(url.clone());
+                match app.http.send_blocking(&app.network, &request) {
+                    Ok(response) => out.push(CheckResult {
+                        name: "network.reachability".into(),
+                        check: Check::Ok(format!(
+                            "{} → HTTP {}",
+                            url.host_str().unwrap_or("?"),
+                            response.status
+                        )),
+                    }),
+                    Err(err) => out.push(CheckResult {
+                        name: "network.reachability".into(),
+                        check: Check::Warn(format!("{}: {}", err.code.as_str(), err.message())),
+                    }),
+                }
+            }
+            None => out.push(CheckResult {
+                name: "network.reachability".into(),
+                check: Check::Warn("cannot determine the URL to check".into()),
+            }),
+        }
     }
 
     out.push(CheckResult {
@@ -201,14 +210,12 @@ pub fn run(app: &App) -> Vec<CheckResult> {
         )),
     });
 
-    if out.iter().any(|r| r.check.is_fail()) {
+    let failure_count = out.iter().filter(|r| r.check.is_fail()).count();
+    if failure_count > 0 {
+        let codes = failure_codes(&out);
         out.push(CheckResult {
             name: "summary".into(),
-            check: Check::Fail(format!(
-                "{} failures ({})",
-                out.iter().filter(|r| r.check.is_fail()).count(),
-                ErrorCode::E1004.as_str()
-            )),
+            check: Check::Fail(format!("{failure_count} failures ({})", codes.join(", "))),
         });
     } else {
         out.push(CheckResult {
@@ -220,6 +227,38 @@ pub fn run(app: &App) -> Vec<CheckResult> {
     out
 }
 
+fn with_code(check: Check, code: ErrorCode) -> Check {
+    match check {
+        Check::Fail(text) if !text.contains(code.as_str()) => {
+            Check::Fail(format!("{}: {text}", code.as_str()))
+        }
+        other => other,
+    }
+}
+
+fn failure_codes(results: &[CheckResult]) -> Vec<String> {
+    let mut codes = std::collections::BTreeSet::new();
+    for result in results.iter().filter(|r| r.check.is_fail()) {
+        let text = result.check.text();
+        let bytes = text.as_bytes();
+        let code = (0..bytes.len().saturating_sub(4)).find_map(|i| {
+            (bytes[i] == b'E' && bytes[i + 1..i + 5].iter().all(u8::is_ascii_digit))
+                .then(|| text[i..i + 5].to_string())
+        });
+        codes.insert(code.unwrap_or_else(|| {
+            if result.name.starts_with("state")
+                || result.name == "history"
+                || result.name == "quota.usage"
+            {
+                ErrorCode::E5002.as_str().to_string()
+            } else {
+                ErrorCode::E1004.as_str().to_string()
+            }
+        }));
+    }
+    codes.into_iter().collect()
+}
+
 fn rustc_version() -> &'static str {
-    option_env!("RUSTC_VERSION").unwrap_or("(unknown)")
+    option_env!("RUSTC_VERSION").unwrap_or("rustc version unavailable at build time")
 }

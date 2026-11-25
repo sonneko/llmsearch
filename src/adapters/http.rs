@@ -404,6 +404,15 @@ impl HttpClient for ReqwestClient {
         profile: &NetworkProfile,
         request: &HttpRequest,
     ) -> Result<HttpResponse, AppError> {
+        self.send_blocking_with_preflight(profile, request, &mut || Ok(()))
+    }
+
+    fn send_blocking_with_preflight(
+        &self,
+        profile: &NetworkProfile,
+        request: &HttpRequest,
+        preflight: &mut dyn FnMut() -> Result<(), AppError>,
+    ) -> Result<HttpResponse, AppError> {
         crate::core::url::validate_scheme(&request.url)?;
         let host = request.url.host_str().unwrap_or_default().to_string();
 
@@ -420,6 +429,8 @@ impl HttpClient for ReqwestClient {
                     self.clock.sleep(Duration::from_millis(wait));
                 }
             }
+            // Quota/other caller checks run for every transport attempt, including retries.
+            preflight()?;
             self.wait_interval(profile, &host);
 
             let now = self.clock.now_utc();

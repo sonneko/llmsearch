@@ -12,19 +12,19 @@
 
 状態: 実装完了（REF:src/core/history.rs）
 
-`src/core/history.rs` に `#[serde(tag = "type", rename_all = "snake_case")] enum HistoryEvent` を置き、種別ごとに `payload` の型を固定する。記録は各ユースケースの末尾で `HistoryStore::append(event)` を 1 回だけ呼ぶ（複数箇所から呼ばない）。
+`src/core/history.rs` に `EventType` と `HistoryEntry`（`payload: serde_json::Value`）を置く。`search` / `next` は実際に使ったエンジンをトップレベルの `engine` に設定する。`JsonlHistory::read_all` は旧レコードのトップレベル `engine` が無い場合に文字列の `payload.engine` から補完し、一覧・JSON・検索・エクスポートで同じ値を使う。クォータで送信前に拒否された `next` も `added: 0` と `terminationReason: "quota"` の履歴を追記する。
 
 ### 1.2 記録しない情報
 
 状態: 実装完了（REF:src/core/history.rs）
 
-保存直前の `src/core/history.rs::redact(&mut event)` で、URL の秘匿パラメータを伏字化し、`payload` に本文が含まれていないことを型で担保する（本文フィールドを持たせない）。秘匿パラメータ名は定数配列。
+`HistoryEntry.payload` は汎用 `serde_json::Value` で、本文を型で禁止する仕組みや append 時の一括 redaction はない。各記録呼び出し側が本文を payload に入れず、URL を保存する場合は `core::url::redact` などで秘匿パラメータを伏せる（例: `usecases::document`）。履歴への新規フィールド追加時は、本文・認証情報を含めないことを呼び出し側で守る。
 
 ### 1.3 記録の単位
 
 状態: 実装完了（REF:src/core/history.rs, REF:src/adapters/state/history_jsonl.rs）
 
-`id` は保存ファイル内の最大番号 +1 を `H<n>` として `HistoryStore` が付与する。`at` は `Clock` から取得し `%Y-%m-%dT%H:%M:%SZ` で整形する。`cost` / `remaining` は `Usage` / `Vec<MetricUsage>` の `Copy` 型。
+呼び出し側は `HistoryStore::next_id()` で保存済み ID の最大番号 +1（`H<n>`）を取得し、`HistoryEntry::new()` で `at` を `Clock` から UTC 文字列として設定した後、`append()` する。`cost` / `remaining` は任意の `Cost`（4 種のカウンタ値）であり、現在は `quota reset` がリセット前後の値を設定する。検索・次ページの個別情報は汎用 `payload: serde_json::Value` に記録し、`search` / `next` はトップレベル `engine` も設定する。
 
 ---
 
@@ -84,7 +84,7 @@ Markdown は `src/core/history.rs` の `export_markdown(&[HistoryEntry])` が組
 
 状態: 実装完了（REF:src/core/history.rs, REF:src/adapters/state/history_jsonl.rs）
 
-読み込み時に `retentionDays` を過ぎたレコードを除外し、`purge` 操作時にファイルからも削除する。`0` は無期限。
+`JsonlHistory::append` の後で `prune()` が `retentionDays` を過ぎたレコードと `maxEntries` 超過分をファイルから取り除く。`0` 日は無期限。`query` は読み込み時に保持期間を適用せず、`history clear` は全件を削除する。
 
 ### 4.2 上限
 

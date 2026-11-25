@@ -228,16 +228,22 @@ pub struct ExceedInfo {
     pub scope: &'static str,
     pub limit: u64,
     pub used: u64,
+    /// 要求された消費量（`quota check --amount` を含む）。
+    pub requested: u64,
     pub resets_at: Option<String>,
 }
 
 impl ExceedInfo {
     pub fn to_error(&self) -> AppError {
+        let projected = self.used.saturating_add(self.requested);
         let mut detail = format!(
-            "{}.{} = {}/{}",
+            "{}.{}: requested {}, used {}/{} (projected {}/{})",
             self.scope,
             self.metric.as_str(),
+            self.requested,
             self.used,
+            self.limit,
+            projected,
             self.limit
         );
         if let Some(at) = &self.resets_at {
@@ -251,7 +257,7 @@ impl ExceedInfo {
 pub fn check(
     policy: &QuotaPolicy,
     counters: &Counters,
-    session: &Usage,
+    session: Option<&Usage>,
     metric: Metric,
     amount: u64,
     now_local_date: chrono::NaiveDate,
@@ -278,6 +284,7 @@ pub fn check(
                     scope,
                     limit,
                     used,
+                    requested: amount,
                     resets_at,
                 });
             }
@@ -295,13 +302,15 @@ pub fn check(
         Some(day_reset),
         &mut over,
     );
-    test(
-        "session",
-        &policy.session,
-        session.get(metric),
-        None,
-        &mut over,
-    );
+    if let Some(session) = session {
+        test(
+            "session",
+            &policy.session,
+            session.get(metric),
+            None,
+            &mut over,
+        );
+    }
     test(
         "total",
         &policy.total,
@@ -363,7 +372,7 @@ pub fn window_active(counter: &WindowCounter, now: chrono::DateTime<chrono::Utc>
 pub fn remaining(
     policy: &QuotaPolicy,
     counters: &Counters,
-    session: &Usage,
+    session: Option<&Usage>,
     now_utc: chrono::DateTime<chrono::Utc>,
     now_local_date: chrono::NaiveDate,
 ) -> Vec<MetricUsage> {
@@ -373,8 +382,17 @@ pub fn remaining(
         now_local_date.succ_opt().unwrap_or(now_local_date)
     );
     for metric in Metric::all() {
+        if let Some(session) = session
+            && let Some(limit) = policy.session.get(metric)
+        {
+            out.push(MetricUsage {
+                name: format!("session.{}", metric.as_str()),
+                used: session.get(metric),
+                limit: Some(limit),
+                resets_at: None,
+            });
+        }
         for (scope, limits, used, resets) in [
-            ("session", &policy.session, session.get(metric), None),
             (
                 "day",
                 &policy.day,
@@ -462,12 +480,28 @@ mod tests {
         let mut counters = Counters::default();
         let session = Usage::default();
         assert!(matches!(
-            check(&policy, &counters, &session, Metric::Searches, 1, date, utc),
+            check(
+                &policy,
+                &counters,
+                Some(&session),
+                Metric::Searches,
+                1,
+                date,
+                utc
+            ),
             QuotaDecision::Allowed { .. }
         ));
         counters.day.searches = 2;
         assert!(matches!(
-            check(&policy, &counters, &session, Metric::Searches, 1, date, utc),
+            check(
+                &policy,
+                &counters,
+                Some(&session),
+                Metric::Searches,
+                1,
+                date,
+                utc
+            ),
             QuotaDecision::Exceeded(_)
         ));
     }
@@ -483,15 +517,63 @@ mod tests {
         let mut counters = Counters::default();
         let session = Usage::default();
         counters.day.searches = 1;
-        match check(&policy, &counters, &session, Metric::Searches, 0, date, utc) {
+        match check(
+            &policy,
+            &counters,
+            Some(&session),
+            Metric::Searches,
+            0,
+            date,
+            utc,
+        ) {
             QuotaDecision::Allowed { warn } => assert!(warn),
             other => panic!("unexpected: {other:?}"),
         }
         counters.day.searches = 2;
         assert!(matches!(
-            check(&policy, &counters, &session, Metric::Searches, 1, date, utc),
+            check(
+                &policy,
+                &counters,
+                Some(&session),
+                Metric::Searches,
+                1,
+                date,
+                utc
+            ),
             QuotaDecision::Exceeded(_)
         ));
+    }
+
+    #[test]
+    fn exceed_detail_includes_requested_used_and_projected_amounts() {
+        let (date, utc) = now();
+        let policy = QuotaPolicy {
+            session: Limits {
+                searches: Some(50),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let counters = Counters::default();
+        let session = Usage {
+            searches: 1,
+            ..Default::default()
+        };
+        let QuotaDecision::Exceeded(info) = check(
+            &policy,
+            &counters,
+            Some(&session),
+            Metric::Searches,
+            51,
+            date,
+            utc,
+        ) else {
+            panic!("request should exceed the session limit");
+        };
+        let detail = info.to_error().detail.unwrap();
+        assert!(detail.contains("requested 51"));
+        assert!(detail.contains("used 1/50"));
+        assert!(detail.contains("projected 52/50"));
     }
 
     #[test]

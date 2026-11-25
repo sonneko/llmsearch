@@ -100,6 +100,7 @@ pub fn build(
         env.as_ref(),
         &LoadOptions {
             config_path: bootstrap.config_path.clone(),
+            state_dir: bootstrap.state_dir.clone(),
             overrides: bootstrap.overrides.clone(),
         },
     )?;

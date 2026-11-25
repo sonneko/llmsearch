@@ -64,7 +64,7 @@
 
 状態: 実装完了（REF:src/adapters/http.rs）
 
-再試行は `src/adapters/http.rs` の `ReqwestClient::send_blocking` がループとして実装する（汎用の `retry_with` 関数は持たない）。
+再試行は `src/adapters/http.rs` の `ReqwestClient::send_blocking` がループとして実装する（汎用の `retry_with` 関数は持たない）。`send_blocking_with_preflight` 経由の検索は各 transport 試行の直前に callback を呼び、クォータ超過なら追加送信を止める。
 
 - 判定: `retryable(profile, err) -> bool` がエラーコードと `retry.onError` / `retry.onStatus` で決める（`401/403` を表す `E4003` は常に対象）。
 - 待機: `retry_wait(profile, last_error, attempt, jitter) -> u64` が `RetryPolicy::backoff(attempt, jitter)`（`backoffMs * factor^(attempt-1)` を `maxBackoffMs` で頭打ちにし、`jitterMs` の範囲で加算）を呼ぶ。

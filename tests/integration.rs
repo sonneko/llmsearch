@@ -279,11 +279,17 @@ fn no_filter_keeps_denied_results() {
 }
 
 #[test]
-fn engine_validation_reports_missing_api_key() {
+fn engine_validation_warns_for_missing_api_key_without_marking_definition_invalid() {
     let h = support::harness(None);
     let results = engines::validate(&h.app, &["brave@api".to_string()]);
     assert_eq!(results.len(), 1);
-    assert!(results[0].1.iter().any(|c| c.is_fail()));
+    assert!(!results[0].1.iter().any(|c| c.is_fail()));
+    assert!(
+        results[0]
+            .1
+            .iter()
+            .any(|c| matches!(c, llmsearch::core::errors::Check::Warn(_)))
+    );
     // API キーが無い状態では試行せず E4002 になる
     let def = engines::get(&h.app, "brave@api").unwrap();
     let err = engines::dry_run(&h.app, &def, "test", 1).unwrap_err();

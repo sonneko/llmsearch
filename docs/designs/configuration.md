@@ -50,7 +50,7 @@
 
 状態: 実装完了（REF:src/adapters/config/mod.rs）
 
-`candidate_paths(env, options) -> Vec<PathBuf>` が弱い順（後ろほど優先）に候補を返す。順序は「利用者設定ディレクトリの `settings.json`」→「状態ディレクトリの `settings.json`」で、`LLMSEARCH_CONFIG` があればその 1 件だけ、`--config` があればその 1 件だけを返す。`--config` / `LLMSEARCH_CONFIG` の指定先が存在しない場合は既存の候補へ落とさず `E1003` を返す。存在しない候補も `config path` 用に保持する。
+`candidate_paths(env, options) -> Vec<PathBuf>` が弱い順（後ろほど優先）に候補を返す。順序は「利用者設定ディレクトリの `settings.json`」→「状態ディレクトリの `settings.json`」で、`LLMSEARCH_CONFIG` があればその 1 件だけ、`--config` があればその 1 件だけを返す。状態候補は `--state-dir` → `LLMSEARCH_STATE_DIR` → 利用者設定ファイル内の `state.dir` → プラットフォーム既定の状態ディレクトリから決める。`--config` / `LLMSEARCH_CONFIG` の指定先が存在しない場合は既存の候補へ落とさず `E1003` を返す。存在しない候補も `config path` 用に保持する。
 
 状態ディレクトリのパスは `state_dir_with(env, explicit, configured)`（`--state-dir` → `LLMSEARCH_STATE_DIR` → 設定 `state.dir` → プラットフォームの状態ディレクトリ配下 `llmsearch`）で解決し、`settings.json` はその直下に置く（`config/settings.json` ではない）。資源ディレクトリは「設定ファイルのあるディレクトリ → 状態ディレクトリ → 利用者設定ディレクトリ → 同梱 `assets/`」の順に探し、`<state.dir>/network/` などの直下も候補に含める。`LoadedSettings` は読み込んだ `sources` を優先順（弱い→強い）で保持し、`config show` の由来表示に使う。
 

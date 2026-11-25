@@ -10,8 +10,8 @@
 
 | イベント | 記録内容 |
 |---|---|
-| `search` | 検索語、エンジン ID、結果件数、フィルタ除外件数、消費量、残量 |
-| `next` | 追加取得した位置、追加件数、終端理由 |
+| `search` | 検索語、エンジン ID、結果件数、フィルタ除外件数 |
+| `next` | 追加取得した位置、追加件数、フィルタ除外件数、終端理由（クォータ超過で送信前に止まった場合も `added: 0` と `terminationReason: "quota"` を記録） |
 | `refine` | 変更前後の検索語 |
 | `fetch` | 取得した URL（伏字化済み）、文書識別子、成否、所要時間、変換警告、robots 判定 |
 | `outline` | 文書識別子、表示深度、見出し数、隠れた見出し数 |
@@ -41,7 +41,7 @@ API キー、認証ヘッダ、Cookie、URL のクエリに含まれる秘匿パ
 | `remaining` | 消費後の残量（該当しない場合は省略） |
 | `payload` | イベント固有の内容 |
 
-`cost` / `remaining` は `searches` / `fetches` / `results` / `chars` を持つ。ファイル（`history export --format jsonl`）には全フィールドを書くが、`--json` の `history` イベント（`entries[]`）は `id` / `at` / `type` / `engine` / `summary` / `payload` だけを載せる（`session` / `cost` / `remaining` は載せない）。
+`cost` / `remaining` は `searches` / `fetches` / `results` / `chars` を持つ。`search` / `next` は使用したエンジン（マージ時は `+` 区切りのエンジン集合）を `engine` にも設定する。既存レコードで `engine` が欠落している場合、読み込み時に `payload.engine` が文字列ならトップレベルへ復元する。ファイル（`history export --format jsonl`）には全フィールドを書くが、`--json` の `history` イベント（`entries[]`）は `id` / `at` / `type` / `engine` / `summary` / `payload` だけを載せる（`session` / `cost` / `remaining` は載せない）。
 
 ---
 
@@ -49,13 +49,14 @@ API キー、認証ヘッダ、Cookie、URL のクエリに含まれる秘匿パ
 
 ### 2.1 一覧
 
-既定では直近 20 件を新しい順に表示する。1 行 1 件とし、識別子・日時・種別・要約（検索語、URL、または節見出し）を表示する。件数は `--limit` で変更できる（実際に返すのは最大 200 件。`history export` の既定は 200 件）。
+既定では直近 20 件を新しい順に表示する。1 行 1 件とし、識別子・日時・種別・エンジン（該当しない場合は `-`）・要約（検索語、URL、または節見出し）を表示する。件数は `--limit` で変更できる（実際に返すのは最大 200 件。`history export` の既定は 200 件）。
 
 ```text
-H42  2026-11-07 14:25  read     D1:S3  2. 適応計画の策定  (3,560 字)  duckduckgo
-H41  2026-11-07 14:24  outline  D1     見出し 12 件 (depth=3, 隠れ 1)
-H40  2026-11-07 14:23  fetch    D1     https://example.jp/adaptation  (4200 字)
-H39  2026-11-07 14:22  search   気候変動 適応策  duckduckgo  7 件（除外 5 件）
+H42   2026-11-07 14:25  read     -                D1:S3  Adaptation plan (3,560 chars)
+H41   2026-11-07 14:24  outline  -                D1     12 headings (depth=3)
+H40   2026-11-07 14:23  fetch    -                D1     https://example.jp/adaptation (4200 chars)
+H39   2026-11-07 14:22  search   duckduckgo       climate adaptation  7 results (5 filtered out)
+H38   2026-11-07 14:21  next     duckduckgo       +7 results
 ```
 
 ### 2.2 詳細表示
@@ -64,11 +65,11 @@ H39  2026-11-07 14:22  search   気候変動 適応策  duckduckgo  7 件（除�
 
 ### 2.3 検索
 
-`--query`（キーワード）、`--type`（種別。複数指定できるが、解釈できる最初の種別だけを使う）、`--before`（この日時より前）、`--session`（セッション識別子）で絞り込める。`--after` とエンジンによる絞り込みは提供しない。解釈できない種別名は無視され、絞り込みは行われない。検索対象は検索語・タイトル・URL・見出しテキスト・サイト名であり、本文全文は対象外とする。
+`--query`（キーワード）、`--type`（種別。複数指定できるが、解釈できる最初の種別だけを使う）、`--before`（この日時より前）、`--session`（セッション識別子）で絞り込める。`--after` とエンジンによる絞り込みは提供しない。解釈できない種別名は無視され、種別による絞り込みは行われない。キーワードは要約・payload・エンジン ID を結合した文字列への大文字小文字を区別しない部分一致で、本文全文は対象外とする。
 
 ### 2.4 セッション単位の表示
 
-`--session <id>` を指定した場合、そのセッションのイベントのみを新しい順に表示する。対話モードの `5) Show the history` も同じ表示を用いる。
+`history list` / `grep` / `export` は、グローバル `--session <id>` が明示された場合にそのセッションへ絞り込む。指定が無ければ全セッションを対象とする。`history show <id>` は履歴 ID から全体の履歴を検索し、`history clear` は全セッションの履歴を削除する。対話モードの `5) Show the history` は現行セッションのみを表示する。
 
 ---
 
@@ -80,7 +81,7 @@ H39  2026-11-07 14:22  search   気候変動 適応策  duckduckgo  7 件（除�
 
 ### 3.2 エクスポート
 
-履歴を Markdown または JSON Lines 形式で標準出力へ出力できる。Markdown 出力は、セッションごとに `## session <id>` の見出しを付け、各操作を `- \`<at>\` **<type>** <summary>` の 1 行で時系列に並べる。本文は含めない（本文を同梱する指定は提供しない）。
+履歴を Markdown または JSON Lines 形式で標準出力へ出力できる。Markdown 出力は `# History` を先頭に置き、セッションごとに `### session <id>`（セッション ID が空なら `### session (no session)`）の見出しを付け、各操作を `- \`<at>\` **<type>** <summary>` の 1 行で時系列に並べる。本文は含めない（本文を同梱する指定は提供しない）。
 
 `--json` を併用した場合は、形式にかかわらず `history` イベント（`entries[]` と `total`）として出力する。
 

@@ -51,6 +51,14 @@ impl Renderer {
         format_at(self.clock.now_utc())
     }
 
+    fn style(&self, text: &str, ansi: &str) -> String {
+        if self.color && !self.json {
+            format!("\x1b[{ansi}m{text}\x1b[0m")
+        } else {
+            text.to_string()
+        }
+    }
+
     /// 標準出力（データ）。
     pub fn out(&self, line: &str) {
         println!("{line}");
@@ -127,7 +135,7 @@ impl Renderer {
         }
     }
 
-    /// 警告を出力する。
+    /// 警告を標準エラーへ出力する（`--quiet` では抑制。JSON イベントの payload は別経路）。
     pub fn warn(&self, diagnostic: &Diagnostic) {
         if self.quiet {
             return;
@@ -152,7 +160,8 @@ impl Renderer {
     /// 検索結果の 1 件を複数行で出力する。
     pub fn hit_block(&self, hit: &SearchHit, decided_cols: usize) -> String {
         let mut out = String::new();
-        out.push_str(&format!("[{}] {}\n", hit.label(), hit.title));
+        let label = self.style(&format!("[{}]", hit.label()), "36");
+        out.push_str(&format!("{label} {}\n", hit.title));
         let url = if decided_cols < 60 {
             String::new()
         } else {
@@ -180,16 +189,11 @@ impl Renderer {
             .as_deref()
             .map(|s| truncate(s, 80))
             .unwrap_or_default();
+        let label = self.style(&format!("[{}]", hit.label()), "36");
         if snippet.is_empty() {
-            format!("[{}] {} <{}>", hit.label(), hit.title, url)
+            format!("{label} {} <{}>", hit.title, url)
         } else {
-            format!(
-                "[{}] {}\n      {} <{}>",
-                hit.label(),
-                hit.title,
-                snippet,
-                url
-            )
+            format!("{label} {}\n      {} <{}>", hit.title, snippet, url)
         }
     }
 
@@ -207,9 +211,11 @@ impl Renderer {
                 continue;
             }
             let indent = "  ".repeat(heading.level.saturating_sub(1) as usize);
+            let label = heading.label();
+            let styled_label = self.style(&label, "36");
+            let padding = " ".repeat(5usize.saturating_sub(label.chars().count()));
             out.push_str(&format!(
-                "{indent}{:<5} h{}  {:<40}  ({} chars){}\n",
-                heading.label(),
+                "{indent}{styled_label}{padding} h{}  {:<40}  ({} chars){}\n",
                 heading.level,
                 truncate(&heading.text, 40),
                 heading.chars,
@@ -261,10 +267,11 @@ impl Renderer {
             .take(16)
             .collect::<String>();
         format!(
-            "{:<5} {}  {:<8} {}",
+            "{:<5} {}  {:<8} {:<16} {}",
             entry.id,
             at,
             entry.kind.as_str(),
+            entry.engine.as_deref().unwrap_or("-"),
             entry.summary()
         )
     }
@@ -366,6 +373,30 @@ mod tests {
         assert_eq!(truncate("abcdefg", 5), "abcd…");
         assert_eq!(truncate("abc", 10), "abc");
         assert_eq!(truncate("abcdef", 4), "abc…");
+    }
+
+    #[test]
+    fn color_styles_result_labels_only_for_text_output() {
+        let hit = SearchHit {
+            id: 3,
+            rank: 3,
+            title: "A result".into(),
+            url: "https://example.com/".into(),
+            site: None,
+            snippet: None,
+            published: None,
+            engine: "stub".into(),
+            language: None,
+        };
+        let clock: Arc<dyn crate::ports::Clock> =
+            Arc::new(crate::ports::system::SystemClock::new());
+        let text =
+            Renderer::new(false, true, true, 80, Arc::clone(&clock)).hit_line_with(&hit, &hit.url);
+        assert!(text.contains(&format!("{}[36m[R3]{}[0m", char::from(27), char::from(27))));
+
+        let json = Renderer::new(true, true, true, 80, clock).hit_line_with(&hit, &hit.url);
+        assert!(!json.contains(char::from(27)));
+        assert!(json.contains("[R3]"));
     }
 
     #[test]

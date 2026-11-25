@@ -26,7 +26,7 @@ pub struct Global {
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Continue an existing session.
+    /// Resume an existing session (unknown IDs are rejected).
     #[arg(long, global = true, value_name = "ID")]
     pub session: Option<String>,
 
@@ -78,11 +78,11 @@ pub struct Global {
     #[arg(long, global = true, conflicts_with = "color")]
     pub no_color: bool,
 
-    /// Decorate output even when stdout is not a terminal.
+    /// Force ANSI color in text output, including when stdout is not a terminal (ignored with --json).
     #[arg(long, global = true)]
     pub color: bool,
 
-    /// Suppress progress output.
+    /// Suppress progress and warning text (structured operation warnings remain in JSON).
     #[arg(long, global = true)]
     pub quiet: bool,
 
@@ -96,10 +96,10 @@ pub enum Command {
     /// Search the web and print the results.
     Search {
         query: String,
-        /// Results per page (defaults to `search.limit`).
+        /// Results per page (1-30; defaults to `search.limit`).
         #[arg(long)]
         limit: Option<usize>,
-        /// Page number (1-based).
+        /// Page number (1-based, within the engine's configured result limit).
         #[arg(long, default_value_t = 1)]
         page: u32,
     },
@@ -112,6 +112,8 @@ pub enum Command {
     Refine { query: String },
     /// Fetch and convert a document, then print its outline.
     Outline {
+        /// Result (`R1`), document (`D1`), or absolute HTTP(S) URL.
+        #[arg(value_name = "TARGET")]
         target: String,
         /// Outline depth, 2 to 4 (defaults to `context.outlineDepth`).
         #[arg(long)]
@@ -119,6 +121,8 @@ pub enum Command {
     },
     /// Print the text of a section.
     Read {
+        /// Result (`R1`), document (`D1`), or absolute HTTP(S) URL.
+        #[arg(value_name = "TARGET")]
         target: String,
         /// Section (`D1:S3` or `S3`; `S0` is the whole document). Repeatable.
         #[arg(long = "section", value_name = "ID")]
@@ -179,7 +183,11 @@ pub enum Command {
         action: Option<ConfigAction>,
     },
     /// Diagnose the environment, network, and configuration.
-    Doctor,
+    Doctor {
+        /// Skip the network reachability probe.
+        #[arg(long)]
+        no_network: bool,
+    },
 }
 
 #[derive(Subcommand, Debug, Clone)]

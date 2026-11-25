@@ -46,13 +46,13 @@
 
 `Renderer` が注入された `Clock` から UTC 秒精度・Z 終端の日時を作る。`done` / `error` にも `session` / `at` を付与する。検索・参照成功時とエラー処理時に現行セッションを Renderer に反映する。セッション作成前は空文字を使う。コマンド間の `--session` 引き継ぎとイベント形式は `REF:tests/m5.rs` で実プロセス検証する。
 
-警告の載せ方は 2 経路ある。各ハンドラが `crate::ui::render::warnings_json(&diagnostics)` で `warnings[]` を組み立てる経路（`search` / `next` / `refine` / `document` / `outline`）と、`Renderer::error()` が `AppError::warnings` を `error` イベントへ写す経路である。どちらも空配列を必ず出す（キーの有無で警告の有無を推測させない）。
+警告の出力は 3 経路ある。各ハンドラが `crate::ui::render::warnings_json(&diagnostics)` で `warnings[]` を組み立てる経路（`search` / `next` / `refine` / `document` / `outline`）、`Renderer::error()` が `AppError::warnings` を `error` イベントへ写す経路、そして `main.rs` が `--color --json` の非互換を単独の `warnings` イベント（`W1001`）として出す経路である。検索・参照イベントと `error` は空配列を必ず出す（キーの有無で警告の有無を推測させない）。`--quiet` は標準エラーの警告表示とグローバルな `W1001` イベントを抑制するが、操作イベントに含める構造化警告は保持する。
 
 ### 2.2 イベント種別
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/ui/commands.rs）
 
-イベントは `Renderer::envelope(event, fields)` が共通枠（`v` / `event` / `session` / `at`）を付け、`Renderer::event()` が 1 行に出力する。種別ごとのフィールドは `src/ui/commands.rs` の各ハンドラが `json!` で組み立てる。共通枠を 1 か所で足すため、ハンドラ側で `v` / `session` / `at` を書き漏らす事故が起きない（`session` は呼び出し側で明示した値があればそれを使う）。種別名は `search` / `next` / `refine` / `document` / `outline` / `content` / `history` / `engines` / `engine` / `network` / `filters` / `config` / `quota` / `diagnostics` / `done` / `error`。各イベントの必須フィールドは `REF:tests/m5.rs` と `REF:tests/m9.rs` で検証する。
+イベントは `Renderer::envelope(event, fields)` が共通枠（`v` / `event` / `session` / `at`）を付け、`Renderer::event()` が 1 行に出力する。種別ごとのフィールドは `src/ui/commands.rs` の各ハンドラが `json!` で組み立てる。共通枠を 1 か所で足すため、ハンドラ側で `v` / `session` / `at` を書き漏らす事故が起きない（`session` は呼び出し側で明示した値があればそれを使う）。種別名は `search` / `next` / `refine` / `document` / `outline` / `content` / `history` / `engines` / `engine` / `network` / `filters` / `config` / `quota` / `diagnostics` / `warnings` / `done` / `error`。`warnings` は `main.rs` が `--color --json` の `W1001` を知らせるために出すイベント。各イベントの必須フィールドは `REF:tests/m5.rs` と `REF:tests/m9.rs` で検証する。
 
 `--json` の応答性は「生テキストを標準出力へ出さない」ことを不変条件にする。`engines show` / `engines test` / `network show` / `filters show` / `config *` / `quota *` / `history export` は `renderer.json` で分岐し、必ずイベントと `done` を出す（`REF:tests/m9.rs`）。`engines list` の `apiKey` は表示用の日本語文ではなく `not-required` / `configured` / `missing` の識別子とし、参照する環境変数名は `apiKeyEnvs` に分ける（`REF:src/usecases/engines.rs`）。
 
@@ -72,13 +72,13 @@
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
 
-`From<&FilterStats> for AgentFiltered` を実装し、`reasons` は `BTreeMap<String, usize>` をそのまま `serde_json::Map` へ変換する（順序を固定するため）。
+`commands.rs::filtered_json(stats, truncated)` が `kept` / `removed` / `reasons` / `disabled` / `truncatedByMaxPerHost` / `truncatedByMaxResults` / `truncatedByLimit` を組み立てる。`reasons` は `BTreeMap<String, usize>` で順序を固定する。`removed` には規則除外・重複 URL・`maxPerHost` 超過が含まれ、`truncatedByLimit` は `FilterStats` のフィールドではなく今回の表示上限による件数。
 
 ### 2.6 クォータオブジェクト
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
 
-`QuotaView { metrics: Vec<MetricView> }`、`MetricView { name, used, limit: Option<u64>, resets_at: Option<String> }`。`limit` が未設定（無制限）の項目も必ず含め、`limit: null` とする（項目の有無で判断させない）。`resets_at` は `2026-11-22T00:00 local` の形（`src/core/config/quota.rs` の `format!` で組み立てる。日次・窓の判定が端末ローカル日付のため、UTC の `Z` 終端にはしない）。
+`commands.rs::quota_json(app)` が `Guard::metrics()` から `metrics[]` を組み立てる。`MetricUsage` は `name` / `used` / `limit` / `resets_at` を持ち、`remaining()` で `limit - used` を求める。設定された上限のあるメトリクスだけを列挙し、セッション未選択時は `session.*` を省く。JSON は各要素に `remaining` を加える。`resets_at` は日次項目の次のローカル 0 時、セッション・累積・窓は `null`。クォータ超過エラーの detail は日次・窓のリセット時刻も含む。
 
 ### 2.7 エラーオブジェクト
 

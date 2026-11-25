@@ -31,6 +31,28 @@ pub fn evaluate(
     secrets: &Secrets,
     tracking: &[String],
 ) -> Result<EngineCall, AppError> {
+    evaluate_with_preflight(clock, client, profile, def, ctx, secrets, tracking, || {
+        Ok(())
+    })
+}
+
+/// エンジンを評価する前に、各ネットワーク送信を確認する。
+///
+/// 抽出の再試行もそれぞれ個別の送信として preflight を通す。
+#[allow(clippy::too_many_arguments)] // mirrors `evaluate`; the final argument is the per-send quota gate
+pub fn evaluate_with_preflight<F>(
+    clock: &dyn crate::ports::Clock,
+    client: &dyn HttpClient,
+    profile: &NetworkProfile,
+    def: &EngineDef,
+    ctx: &TmplCtx,
+    secrets: &Secrets,
+    tracking: &[String],
+    mut preflight: F,
+) -> Result<EngineCall, AppError>
+where
+    F: FnMut() -> Result<(), AppError>,
+{
     let prepared = template::prepare(def, ctx, secrets)?;
     let url = crate::core::url::parse(&prepared.url)?;
 
@@ -73,6 +95,12 @@ pub fn evaluate(
     let mut last_error: Option<AppError> = None;
     // 再試行で出た警告は、成功・失敗のどちらでも失わずに呼び出し側へ渡す。
     let mut carried: Vec<Diagnostic> = Vec::new();
+    let requests = std::cell::Cell::new(0u32);
+    let mut before_send = || {
+        preflight()?;
+        requests.set(requests.get().saturating_add(1));
+        Ok(())
+    };
 
     for attempt in 0..attempts {
         if attempt > 0 {
@@ -83,7 +111,17 @@ pub fn evaluate(
         }
 
         let started = clock.monotonic_ns();
-        let response: HttpResponse = client.send_blocking(profile, &request)?;
+        let response: HttpResponse =
+            match client.send_blocking_with_preflight(profile, &request, &mut before_send) {
+                Ok(response) => response,
+                Err(error) => {
+                    return Err(if carried.is_empty() {
+                        error
+                    } else {
+                        error.warnings(carried)
+                    });
+                }
+            };
         let elapsed_ms = clock.monotonic_ns().saturating_sub(started) as u128 / 1_000_000;
 
         let (body, _had_errors) = decode(&response, def);
@@ -121,7 +159,7 @@ pub fn evaluate(
             status: response.status,
             truncated: response.truncated,
             elapsed_ms,
-            requests: attempt + 1,
+            requests: requests.get(),
         });
     }
 
@@ -253,5 +291,67 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.code, ErrorCode::E4004);
+    }
+
+    #[test]
+    fn quota_preflight_runs_before_each_extraction_retry() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountingClient {
+            sends: AtomicUsize,
+        }
+        impl HttpClient for CountingClient {
+            fn send_blocking(
+                &self,
+                _profile: &NetworkProfile,
+                request: &HttpRequest,
+            ) -> Result<HttpResponse, AppError> {
+                self.sends.fetch_add(1, Ordering::SeqCst);
+                Ok(HttpResponse {
+                    status: 200,
+                    final_url: request.url.clone(),
+                    headers: vec![("content-type".into(), "text/html; charset=utf-8".into())],
+                    body: b"<p>nothing here</p>".to_vec(),
+                    truncated: false,
+                    redirects: 0,
+                })
+            }
+
+            fn describe(&self, profile: &NetworkProfile) -> String {
+                profile.id.clone()
+            }
+        }
+
+        let client = CountingClient {
+            sends: AtomicUsize::new(0),
+        };
+        let mut profile = NetworkProfile::default();
+        profile.retry.enabled = true;
+        profile.retry.max_attempts = 3;
+        let preflights = std::cell::Cell::new(0);
+        let error = evaluate_with_preflight(
+            &crate::ports::system::SystemClock::new(),
+            &client,
+            &profile,
+            &def(),
+            &TmplCtx::default(),
+            &Secrets::new(),
+            &[],
+            || {
+                let attempt = preflights.get() + 1;
+                preflights.set(attempt);
+                if attempt == 2 {
+                    Err(AppError::new(ErrorCode::E5005))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code, ErrorCode::E5005);
+        assert_eq!(preflights.get(), 2);
+        assert_eq!(client.sends.load(Ordering::SeqCst), 1);
+        assert_eq!(error.warnings.len(), 1);
     }
 }

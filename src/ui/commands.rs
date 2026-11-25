@@ -26,10 +26,67 @@ pub fn run(
     renderer.set_session(app.current_session_id());
     match command {
         Command::Search { query, limit, page } => {
-            // `--limit` が指定された場合のみ設定を上書きする（省略時は設定値）
             if let Some(limit) = limit {
-                app.settings.search.limit = (*limit).clamp(1, 30);
+                if !(1..=30).contains(limit) {
+                    return Err(AppError::with_detail(
+                        ErrorCode::E1004,
+                        format!("--limit = {limit} (allowed range 1..=30)"),
+                    )
+                    .hint("choose a value from 1 to 30 for `--limit`"));
+                }
+                app.settings.search.limit = *limit;
             }
+            let limit = app.settings.search.limit.max(1);
+            if *page == 0 {
+                return Err(AppError::with_detail(
+                    ErrorCode::E1004,
+                    "--page = 0 (allowed range starts at 1)".to_string(),
+                )
+                .hint("use `--page 1` or a later page within the engine's result limit"));
+            }
+            let (max_results, supports_paging, page_step) = if app.settings.search.merge {
+                (
+                    app.settings.search.max_results,
+                    app.settings
+                        .search
+                        .engines
+                        .iter()
+                        .any(|id| app.engines.get(id).is_some_and(|def| def.paging.is_some())),
+                    limit,
+                )
+            } else if let Some(def) = app.engines.get(&app.default_engine) {
+                let page_step = match def.paging.as_ref() {
+                    Some(paging) if paging.style == crate::core::engine::PagingStyle::Offset => {
+                        let request_limit = def.limits.max_page_size.min(limit as u32).max(1);
+                        let first =
+                            crate::core::template::paging_values(Some(paging), 1, request_limit).0;
+                        let second =
+                            crate::core::template::paging_values(Some(paging), 2, request_limit).0;
+                        second.saturating_sub(first).max(1) as usize
+                    }
+                    _ => limit,
+                };
+                (
+                    def.max_results(app.settings.search.max_results),
+                    def.paging.is_some(),
+                    page_step,
+                )
+            } else {
+                (app.settings.search.max_results, true, limit)
+            };
+            let max_pages = if supports_paging {
+                max_results.div_ceil(page_step).max(1)
+            } else {
+                1
+            };
+            if *page as usize > max_pages {
+                return Err(AppError::with_detail(
+                    ErrorCode::E1004,
+                    format!("--page = {page} (allowed range 1..={max_pages})"),
+                )
+                .hint(format!("choose a page from 1 to {max_pages}")));
+            }
+
             let outcome = search_uc::run(app, query, *page)?;
             let session = search_uc::apply_to_session(app, &outcome, query)?;
             app.set_session(&session.session_id);
@@ -52,22 +109,33 @@ pub fn run(
                     }),
                 ));
             } else {
-                let limit = app.settings.search.limit;
-                let start = (outcome.page.page as usize - 1) * limit + 1;
-                let end = start + outcome.hits.len().saturating_sub(1);
+                renderer.info(&format!(
+                    "session {} (resume with --session {})",
+                    session.session_id, session.session_id
+                ));
                 renderer.out(&format!(
-                    "Q: {query}    engine: {}    showing: {start}-{end}",
-                    outcome.engine
+                    "Q: {query}    engine: {}    showing: {}",
+                    outcome.engine,
+                    result_range(&outcome.hits)
                 ));
                 let secrets = secret_values(app);
                 for hit in &outcome.hits {
                     renderer.out(&renderer.hit_line_with(hit, &display_url(&hit.url, &secrets)));
                 }
-                renderer.out(&outcome.filtered.summary_line());
+                renderer.out(
+                    &outcome
+                        .filtered
+                        .summary_line_for(outcome.hits.len(), outcome.truncated_by_limit),
+                );
                 if outcome.has_more {
-                    renderer.out(
-                        "(continue with `next`, or choose 3) Show results from the 8th onward)",
-                    );
+                    let next_id = outcome
+                        .hits
+                        .last()
+                        .map(|hit| hit.id.saturating_add(1))
+                        .unwrap_or_else(|| (*page).saturating_sub(1) * limit as u32 + 1);
+                    renderer.out(&format!(
+                        "(continue with `next` for results from R{next_id} onward)"
+                    ));
                 }
             }
             if renderer.json {
@@ -80,25 +148,26 @@ pub fn run(
             Ok(0)
         }
         Command::Next { query } => {
-            // `next` は「直前の検索の続き」なので、セッションが無い場合は
-            // 新規に作らず E5001 で search から始めるよう促す。
-            let session_id = app.current_session_id();
-            if session_id.is_empty() {
-                return Err(AppError::new(ErrorCode::E5001)
-                    .detail("`next` has no search to continue")
-                    .hint("start a new session with `search`"));
+            let resume_was_implicit = app.current_session_id().is_empty();
+            let session = app.require_existing_session()?;
+            if resume_was_implicit {
+                renderer.info(&format!("resumed session {}", session.session_id));
             }
-            let session = app
-                .sessions
-                .load(&session_id)?
-                .ok_or_else(|| AppError::with_detail(ErrorCode::E5001, session_id.clone()))?;
+            renderer.set_session(&session.session_id);
             let query = query
                 .clone()
                 .or_else(|| session.queries.last().map(|q| q.query.clone()))
+                .or_else(|| (!session.last_query.is_empty()).then(|| session.last_query.clone()))
                 .ok_or_else(|| {
                     AppError::with_detail(ErrorCode::E5001, "the session has no query")
-                        .hint("start a new session with `search`")
+                        .hint("run `search` to start a session before using `next`")
                 })?;
+
+            // セッションで直近に使ったエンジン（merge の場合は全エンジン）を継承する。
+            let engine_was_explicit =
+                resolved.argv.engine.is_some() || app.env.var("LLMSEARCH_ENGINE").is_some();
+            inherit_session_engine(app, &session, engine_was_explicit);
+
             let outcome = search_uc::next(app, &query, &session.page)?;
             let session = search_uc::apply_to_session(app, &outcome, &query)?;
             renderer.set_session(&session.session_id);
@@ -109,9 +178,12 @@ pub fn run(
                 renderer.event(&renderer.envelope(
                     "next",
                     json!({
+                        "query": outcome.query,
+                        "engine": outcome.engine,
                         "page": outcome.page.page,
                         "hasMore": outcome.has_more,
                         "terminated": !outcome.has_more,
+                        "terminationReason": outcome.termination_reason.clone(),
                         "filtered": filtered_json(&outcome.filtered, outcome.truncated_by_limit),
                         "results": hits_json(&outcome.hits, &secret_values(app)),
                         "warnings": crate::ui::render::warnings_json(&outcome.warnings),
@@ -119,11 +191,30 @@ pub fn run(
                     }),
                 ));
             } else {
+                renderer.out(&format!(
+                    "Q: {query}    engine: {}    showing: {}",
+                    outcome.engine,
+                    result_range(&outcome.hits)
+                ));
                 let secrets = secret_values(app);
                 for hit in &outcome.hits {
                     renderer.out(&renderer.hit_line_with(hit, &display_url(&hit.url, &secrets)));
                 }
-                if !outcome.has_more {
+                renderer.out(
+                    &outcome
+                        .filtered
+                        .summary_line_for(outcome.hits.len(), outcome.truncated_by_limit),
+                );
+                if outcome.has_more {
+                    let next_id = outcome
+                        .hits
+                        .last()
+                        .map(|hit| hit.id.saturating_add(1))
+                        .unwrap_or_else(|| hit_next_id(&session));
+                    renderer.out(&format!(
+                        "(continue with `next` for results from R{next_id} onward)"
+                    ));
+                } else {
                     renderer.out("No more results.");
                 }
             }
@@ -133,17 +224,27 @@ pub fn run(
             Ok(0)
         }
         Command::Refine { query } => {
-            // 変更前の検索語はセッションの直前クエリ（`last_query`）を使う。
-            // セッションが無い・検索していない場合は `refine` 自体が成立しない。
-            let previous = app
-                .sessions
-                .load(&app.current_session_id())?
-                .map(|s| s.last_query)
-                .filter(|q| !q.is_empty())
-                .ok_or_else(|| {
-                    AppError::with_detail(ErrorCode::E5001, "`refine` needs the previous query")
-                        .hint("run `search` to start a session before using `refine`")
-                })?;
+            let resume_was_implicit = app.current_session_id().is_empty();
+            let session_before = app.require_existing_session()?;
+            if resume_was_implicit {
+                renderer.info(&format!("resumed session {}", session_before.session_id));
+            }
+            let previous = if !session_before.last_query.is_empty() {
+                session_before.last_query.clone()
+            } else {
+                session_before
+                    .queries
+                    .last()
+                    .map(|record| record.query.clone())
+                    .ok_or_else(|| {
+                        AppError::with_detail(ErrorCode::E5001, "`refine` needs the previous query")
+                            .hint("run `search` before using `refine`")
+                    })?
+            };
+            let engine_was_explicit =
+                resolved.argv.engine.is_some() || app.env.var("LLMSEARCH_ENGINE").is_some();
+            inherit_session_engine(app, &session_before, engine_was_explicit);
+            renderer.set_session(&session_before.session_id);
             let outcome = search_uc::refine(app, &previous, query)?;
             let session = search_uc::apply_to_session(app, &outcome, query)?;
             renderer.set_session(&session.session_id);
@@ -175,7 +276,11 @@ pub fn run(
             Ok(0)
         }
         Command::Outline { target: t, depth } => {
+            let session_was_implicit = app.current_session_id().is_empty();
             let (session, url) = resolve_target(app, t)?;
+            if session_was_implicit {
+                renderer.info(&format!("using session {session}"));
+            }
             let fetched = document::fetch(app, &url)?;
             renderer.set_session(&session);
             if renderer.json {
@@ -232,7 +337,11 @@ pub fn run(
             no_children,
             max_chars,
         } => {
+            let session_was_implicit = app.current_session_id().is_empty();
             let (session, url) = resolve_target(app, t)?;
+            if session_was_implicit {
+                renderer.info(&format!("using session {session}"));
+            }
             let fetched = document::fetch(app, &url)?;
             renderer.set_session(&session);
             if renderer.json {
@@ -315,8 +424,8 @@ pub fn run(
         Command::Filters { action } => run_filters(app, renderer, action),
         Command::Quota { action } => run_quota(app, renderer, action),
         Command::Config { action } => run_config(app, renderer, resolved, action),
-        Command::Doctor => {
-            let results = doctor::run(app);
+        Command::Doctor { no_network } => {
+            let results = doctor::run(app, *no_network);
             let failed = results.iter().any(|r| r.check.is_fail());
             if renderer.json {
                 renderer.event(&renderer.envelope(
@@ -345,9 +454,7 @@ pub fn run(
 /// `outline` / `read` の対象を解決する。
 ///
 /// URL は指定だけで取得できるため、必要なら新しいセッションを用意する。
-/// 識別子（`R1` / `D1` / 番号）は「現行セッション」への参照なので、セッションが
-/// 無い・期限切れの場合は新しいセッションを作らず `E5001` を返す
-/// （仕様 cli-interface.md §3.2 / errors.md §2.5。解決の失敗で状態を変えない）。
+/// 識別子（`R1` / `D1` / 番号）は現行または直近の既存セッションから解決する。
 fn resolve_target(app: &App, t: &str) -> Result<(String, url::Url), AppError> {
     let trimmed = t.trim();
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
@@ -357,16 +464,8 @@ fn resolve_target(app: &App, t: &str) -> Result<(String, url::Url), AppError> {
         let url = target::to_url(&resolved, session.as_ref())?;
         return Ok((session_id, url));
     }
-    let session_id = app.current_session_id();
-    if session_id.is_empty() {
-        return Err(AppError::new(ErrorCode::E5001)
-            .detail("no session, so the identifier cannot be resolved")
-            .hint("run `search` before naming a target"));
-    }
-    let session = app
-        .sessions
-        .load(&session_id)?
-        .ok_or_else(|| AppError::with_detail(ErrorCode::E5001, session_id.clone()))?;
+    let session = app.require_existing_session()?;
+    let session_id = session.session_id.clone();
     let resolved = target::resolve(t, Some(&session))?;
     let url = target::to_url(&resolved, Some(&session))?;
     Ok((session_id, url))
@@ -381,7 +480,13 @@ fn parse_sections(
     }
     let mut out = Vec::new();
     for s in sections {
-        let parsed = crate::core::select::parse(s)?;
+        let parsed = crate::core::select::parse(s).map_err(|err| {
+            if err.code == ErrorCode::E1005 {
+                err.hint("use section IDs such as `S0`, `S3`, or `D1:S3`")
+            } else {
+                err
+            }
+        })?;
         for selection in parsed {
             for r in &selection.refs {
                 match r {
@@ -392,12 +497,12 @@ fn parse_sections(
                         }
                         out.push(0);
                     }
-                    crate::core::select::Ref::Index(n) => out.push(*n),
                     _ => {
                         return Err(AppError::with_detail(
                             ErrorCode::E1005,
                             format!("{s} is not a section reference"),
-                        ));
+                        )
+                        .hint("use section IDs such as `S0`, `S3`, or `D1:S3`"));
                     }
                 }
             }
@@ -430,13 +535,17 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
     let query = query.clone();
     let kinds = kinds.clone();
     let before = before.clone();
+    // Without `--session`, history operations cover all sessions. An explicitly
+    // selected session narrows list/grep/export consistently.
+    let selected_session = app.current_session_id();
+    let history_session = (!selected_session.is_empty()).then_some(selected_session.as_str());
     match action {
         None | Some(HistoryAction::List) => {
             let entries = history_uc::search(
                 app,
                 query.as_deref(),
                 &kinds,
-                None,
+                history_session,
                 before.as_deref(),
                 Some(limit),
             )?;
@@ -491,7 +600,8 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
             Ok(0)
         }
         Some(HistoryAction::Grep { query }) => {
-            let entries = history_uc::search(app, Some(query), &[], None, None, Some(limit))?;
+            let entries =
+                history_uc::search(app, Some(query), &[], history_session, None, Some(limit))?;
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "history",
@@ -513,7 +623,7 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
             Ok(0)
         }
         Some(HistoryAction::Export { format }) => {
-            let entries = history_uc::list(app, Some(200), None)?;
+            let entries = history_uc::list(app, Some(200), history_session)?;
             if format == "json" || format == "jsonl" {
                 if renderer.json {
                     // `--json` のときは履歴もイベント封筒に入れる（生の JSON Lines を出さない）。
@@ -552,7 +662,9 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                     format!("{} entries", ordered.len()),
                 );
             } else {
-                renderer.out(&history_uc::export(app, Some(200))?);
+                let mut ordered = entries;
+                ordered.reverse();
+                renderer.out(&crate::core::history::export_markdown(&ordered));
             }
             Ok(0)
         }
@@ -729,10 +841,7 @@ fn run_engines(
                 renderer.info("--dry-run: the request was not sent");
                 return Ok(0);
             }
-            let guard = app.guard()?;
-            guard.check(Metric::Searches, 1)?;
-            app.default_engine = def.selector();
-            let outcome = search_uc::run(app, query, 1)?;
+            let outcome = search_uc::run_engine_test(app, &def.selector(), query)?;
             if renderer.json {
                 let secrets = secret_values(app);
                 renderer.event(&renderer.envelope(
@@ -798,20 +907,8 @@ fn run_network(
     );
     match action {
         None | Some(NetworkAction::List) => {
-            let mut ids: Vec<String> = Vec::new();
-            for dir in &dirs {
-                if let Ok(entries) = std::fs::read_dir(dir) {
-                    for entry in entries.flatten() {
-                        if let Some(stem) = entry.path().file_stem() {
-                            let id = stem.to_string_lossy().to_string();
-                            if !ids.contains(&id) {
-                                ids.push(id);
-                            }
-                        }
-                    }
-                }
-            }
-            ids.sort();
+            let ids = resource_ids(&dirs);
+
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "network",
@@ -830,7 +927,7 @@ fn run_network(
         }
         Some(NetworkAction::Show { id }) => {
             let path = crate::adapters::config::find_resource(&dirs, id)
-                .ok_or_else(|| AppError::with_detail(ErrorCode::E1003, id.clone()))?;
+                .ok_or_else(|| resource_not_found("network profile", id, &dirs, "network list"))?;
             let mut value = crate::adapters::config::read_json_file(&path)?;
             crate::core::secret::redact_json(&mut value, &app.secrets);
             if renderer.json {
@@ -931,20 +1028,8 @@ fn run_filters(
     );
     match action {
         None | Some(FiltersAction::List) => {
-            let mut ids: Vec<String> = Vec::new();
-            for dir in &dirs {
-                if let Ok(entries) = std::fs::read_dir(dir) {
-                    for entry in entries.flatten() {
-                        if let Some(stem) = entry.path().file_stem() {
-                            let id = stem.to_string_lossy().to_string();
-                            if !ids.contains(&id) {
-                                ids.push(id);
-                            }
-                        }
-                    }
-                }
-            }
-            ids.sort();
+            let ids = resource_ids(&dirs);
+
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "filters",
@@ -962,10 +1047,23 @@ fn run_filters(
             Ok(0)
         }
         Some(FiltersAction::Show { id, raw }) => {
-            let _ = raw;
             let path = crate::adapters::config::find_resource(&dirs, id)
-                .ok_or_else(|| AppError::with_detail(ErrorCode::E1003, id.clone()))?;
+                .ok_or_else(|| resource_not_found("filter set", id, &dirs, "filters list"))?;
             let value = crate::adapters::config::read_json_file(&path)?;
+            let value = if *raw {
+                value
+            } else {
+                let set: crate::core::config::FilterSet =
+                    serde_json::from_value(value).map_err(|error| {
+                        AppError::with_detail(
+                            ErrorCode::E1003,
+                            format!("{}: {error}", path.display()),
+                        )
+                    })?;
+                serde_json::to_value(set).map_err(|error| {
+                    AppError::with_detail(ErrorCode::E1003, format!("{}: {error}", path.display()))
+                })?
+            };
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "filters",
@@ -1062,8 +1160,20 @@ fn run_quota(
 ) -> Result<i32, AppError> {
     match action {
         None | Some(QuotaAction::Show) => {
+            let resume_was_implicit = app.current_session_id().is_empty();
+            let resumed = app.resume_latest_session()?;
+            if let Some(session) = resumed {
+                renderer.set_session(&session.session_id);
+                if resume_was_implicit {
+                    renderer.info(&format!("resumed session {}", session.session_id));
+                }
+            }
             let guard = app.guard()?;
-            let metrics = guard.metrics();
+            let mut metrics = guard.metrics();
+            if app.current_session_id().is_empty() {
+                // セッションが選択されていないとき、0 を実測値のように見せない。
+                metrics.retain(|metric| !metric.name.starts_with("session."));
+            }
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "quota",
@@ -1073,6 +1183,7 @@ fn run_quota(
                             "name": m.name,
                             "used": m.used,
                             "limit": m.limit,
+                            "remaining": m.remaining(),
                             "resetsAt": m.resets_at,
                         })).collect::<Vec<_>>(),
                     }),
@@ -1081,15 +1192,18 @@ fn run_quota(
             } else {
                 for m in &metrics {
                     renderer.out(&format!(
-                        "{:<24} {:>8} / {:<8} {}",
+                        "{:<24} {:>8} / {:<8} (remaining {:>8}) {}",
                         m.name,
                         m.used,
                         m.limit.map(|l| l.to_string()).unwrap_or_else(|| "∞".into()),
+                        m.remaining()
+                            .map(|n| n.to_string())
+                            .unwrap_or_else(|| "∞".into()),
                         m.resets_at.clone().unwrap_or_default()
                     ));
                 }
                 if metrics.is_empty() {
-                    renderer.out("No limits are configured.");
+                    renderer.out("No applicable quota limits are configured.");
                 }
             }
             Ok(0)
@@ -1099,7 +1213,8 @@ fn run_quota(
                 return Err(AppError::with_detail(
                     ErrorCode::E1004,
                     "--yes is required".to_string(),
-                ));
+                )
+                .hint("add `--yes` to confirm the quota reset"));
             }
             // 未知の範囲は全消去になってしまうため、指定できる語を閉じておく。
             if !matches!(
@@ -1109,7 +1224,8 @@ fn run_quota(
                 return Err(AppError::with_detail(
                     ErrorCode::E1004,
                     format!("--scope must be session, day, window, total, or all (got {scope})"),
-                ));
+                )
+                .hint("choose one: `--scope session`, `--scope day`, `--scope window`, `--scope total`, or `--scope all`"));
             }
             let before = app.counters.load().ok();
             app.counters.reset(scope)?;
@@ -1139,6 +1255,13 @@ fn run_quota(
             Ok(0)
         }
         Some(QuotaAction::Check { kind, amount }) => {
+            let resume_was_implicit = app.current_session_id().is_empty();
+            if let Some(session) = app.resume_latest_session()? {
+                renderer.set_session(&session.session_id);
+                if resume_was_implicit {
+                    renderer.info(&format!("resumed session {}", session.session_id));
+                }
+            }
             let metric = match kind.as_str() {
                 "search" | "searches" => Metric::Searches,
                 "fetch" | "fetches" => Metric::Fetches,
@@ -1151,6 +1274,30 @@ fn run_quota(
             let guard = app.guard()?;
             match guard.check(metric, *amount) {
                 Ok(()) => {
+                    let metrics = guard.metrics();
+                    let usage: Vec<String> = metrics
+                        .iter()
+                        .filter(|entry| entry.name.ends_with(&format!(".{}", metric.as_str())))
+                        .map(|entry| {
+                            let limit = entry
+                                .limit
+                                .map(|limit| limit.to_string())
+                                .unwrap_or_else(|| "unlimited".to_string());
+                            let remaining = entry
+                                .remaining()
+                                .map(|n| n.to_string())
+                                .unwrap_or_else(|| "unlimited".to_string());
+                            format!(
+                                "{} {}/{} (remaining {})",
+                                entry.name, entry.used, limit, remaining
+                            )
+                        })
+                        .collect();
+                    let usage_summary = if usage.is_empty() {
+                        "no applicable limit configured".to_string()
+                    } else {
+                        usage.join("; ")
+                    };
                     if renderer.json {
                         renderer.event(&renderer.envelope(
                             "quota",
@@ -1159,17 +1306,26 @@ fn run_quota(
                                 "amount": amount,
                                 "allowed": true,
                                 "policy": app.quota.id,
-                                "metrics": guard.metrics().iter().map(|m| json!({
+                                "usage": usage,
+                                "metrics": metrics.iter().map(|m| json!({
                                     "name": m.name,
                                     "used": m.used,
                                     "limit": m.limit,
+                                    "remaining": m.remaining(),
                                     "resetsAt": m.resets_at,
                                 })).collect::<Vec<_>>(),
                             }),
                         ));
-                        done(renderer, "quota check", "allowed".to_string());
+                        done(renderer, "quota check", format!("allowed; {usage_summary}"));
                     } else {
-                        renderer.out("Allowed.");
+                        renderer.out(&format!(
+                            "Allowed: {} {} (amount {}); {}; policy {}.",
+                            metric.as_str(),
+                            if *amount == 1 { "request" } else { "requests" },
+                            amount,
+                            usage_summary,
+                            app.quota.id
+                        ));
                     }
                     Ok(0)
                 }
@@ -1186,6 +1342,7 @@ fn run_quota(
                                     "name": m.name,
                                     "used": m.used,
                                     "limit": m.limit,
+                                    "remaining": m.remaining(),
                                     "resetsAt": m.resets_at,
                                 })).collect::<Vec<_>>(),
                             }),
@@ -1413,6 +1570,80 @@ fn run_config(
     }
 }
 
+fn inherit_session_engine(
+    app: &mut App,
+    session: &crate::core::session::SessionState,
+    explicit_engine: bool,
+) {
+    if explicit_engine {
+        if app.settings.search.merge {
+            app.settings.search.engines = vec![app.default_engine.clone()];
+        }
+        return;
+    }
+    if session.last_engine.is_empty() {
+        return;
+    }
+    let engines: Vec<String> = session.last_engine.split('+').map(str::to_string).collect();
+    if engines.len() > 1 {
+        app.settings.search.merge = true;
+        app.settings.search.engines = engines;
+    } else if app.settings.search.merge {
+        app.settings.search.engines = engines;
+    } else {
+        app.default_engine = engines[0].clone();
+    }
+}
+
+fn resource_ids(dirs: &[std::path::PathBuf]) -> Vec<String> {
+    let mut ids = std::collections::BTreeSet::new();
+    for dir in dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file()
+                    && path
+                        .extension()
+                        .is_some_and(|extension| extension == "json")
+                    && let Some(stem) = path.file_stem()
+                {
+                    ids.insert(stem.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    ids.into_iter().collect()
+}
+
+fn resource_not_found(
+    kind: &str,
+    id: &str,
+    dirs: &[std::path::PathBuf],
+    list_command: &str,
+) -> AppError {
+    let available = resource_ids(dirs);
+    let candidates = if available.is_empty() {
+        "none".to_string()
+    } else {
+        available.join(", ")
+    };
+    AppError::with_detail(ErrorCode::E1003, format!("{kind} '{id}' was not found")).hint(format!(
+        "available: {candidates}; run `{list_command}` to list available IDs"
+    ))
+}
+
+fn result_range(hits: &[crate::core::model::SearchHit]) -> String {
+    match (hits.first(), hits.last()) {
+        (Some(first), Some(last)) if first.id == last.id => first.id.to_string(),
+        (Some(first), Some(last)) => format!("{}-{}", first.id, last.id),
+        _ => "none".to_string(),
+    }
+}
+
+fn hit_next_id(session: &crate::core::session::SessionState) -> u32 {
+    session.next_result_id()
+}
+
 fn entry_json(entry: &crate::core::history::HistoryEntry) -> serde_json::Value {
     json!({
         "id": entry.id,
@@ -1484,6 +1715,8 @@ fn filtered_json(
         "removed": stats.removed,
         "reasons": stats.reasons,
         "disabled": stats.disabled,
+        "truncatedByMaxPerHost": stats.truncated_by_max_per_host,
+        "truncatedByMaxResults": stats.truncated_by_max_results,
         "truncatedByLimit": truncated,
     })
 }
@@ -1494,6 +1727,7 @@ fn quota_json(app: &App) -> serde_json::Value {
             "name": m.name,
             "used": m.used,
             "limit": m.limit,
+            "remaining": m.remaining(),
             "resetsAt": m.resets_at,
         })).collect::<Vec<_>>()}),
         Err(_) => json!({"metrics": []}),
