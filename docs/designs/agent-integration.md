@@ -46,13 +46,15 @@
 
 `Renderer` が注入された `Clock` から UTC 秒精度・Z 終端の日時を作る。`done` / `error` にも `session` / `at` を付与する。検索・参照成功時とエラー処理時に現行セッションを Renderer に反映する。セッション作成前は空文字を使う。コマンド間の `--session` 引き継ぎとイベント形式は `REF:tests/m5.rs` で実プロセス検証する。
 
-警告の出力は 3 経路ある。各ハンドラが `crate::ui::render::warnings_json(&diagnostics)` で `warnings[]` を組み立てる経路（`search` / `next` / `refine` / `document` / `outline`）、`Renderer::error()` が `AppError::warnings` を `error` イベントへ写す経路、そして `main.rs` が `--color --json` の非互換を単独の `warnings` イベント（`W1001`）として出す経路である。検索・参照イベントと `error` は空配列を必ず出す（キーの有無で警告の有無を推測させない）。`--quiet` は標準エラーの警告表示とグローバルな `W1001` イベントを抑制するが、操作イベントに含める構造化警告は保持する。
+警告は `Resolved.warnings`（起動時）・各ユースケースの戻り値・`Reporter::warn`（アダプターや `Guard` を含む）から発生する。`main.rs` は App 構築後、起動時警告を `Renderer` に渡す前に環境 secret と定義上の固定値を伏字化対象へ登録する。`Renderer::warn` は操作中警告を同じコマンドスコープで収集する。`Renderer::event` は次のデータイベントに `warnings[]` があれば警告を統合し、無ければ直前に `warnings` イベントを出す。エラー時は `AppError::warnings` と収集済み警告を `error.warnings[]` に統合する。警告はコードとメッセージで重複を除き、`--quiet` は標準エラー表示だけを抑制する。`main.rs` の `W1001` は従来どおり独立イベントで、`--quiet` では抑制する。
+
+`Renderer` はアプリが参照する秘匿値を保持し、JSON イベント全体・警告・標準エラーのエラー詳細を出力境界で伏字化する。URL と定義の表示経路固有の整形は引き続き各ハンドラと `core::secret` / `core::url` で行う。
 
 ### 2.2 イベント種別
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/ui/commands.rs）
 
-イベントは `Renderer::envelope(event, fields)` が共通枠（`v` / `event` / `session` / `at`）を付け、`Renderer::event()` が 1 行に出力する。種別ごとのフィールドは `src/ui/commands.rs` の各ハンドラが `json!` で組み立てる。共通枠を 1 か所で足すため、ハンドラ側で `v` / `session` / `at` を書き漏らす事故が起きない（`session` は呼び出し側で明示した値があればそれを使う）。種別名は `search` / `next` / `refine` / `document` / `outline` / `content` / `history` / `engines` / `engine` / `network` / `filters` / `config` / `quota` / `diagnostics` / `warnings` / `done` / `error`。`warnings` は `main.rs` が `--color --json` の `W1001` を知らせるために出すイベント。各イベントの必須フィールドは `REF:tests/m5.rs` と `REF:tests/m9.rs` で検証する。
+イベントは `Renderer::envelope(event, fields)` が共通枠（`v` / `event` / `session` / `at`）を付け、`Renderer::event()` が 1 行に出力する。種別ごとのフィールドは `src/ui/commands.rs` の各ハンドラが `json!` で組み立てる。共通枠を 1 か所で足すため、ハンドラ側で `v` / `session` / `at` を書き漏らす事故が起きない（`session` は呼び出し側で明示した値があればそれを使う）。種別名は `search` / `next` / `refine` / `document` / `outline` / `content` / `history` / `engines` / `engine` / `network` / `filters` / `config` / `quota` / `diagnostics` / `warnings` / `done` / `error`。`warnings` は、対象イベントが `warnings[]` を持たない場合の設定・操作警告、または `main.rs` が出す `--color --json` の `W1001` を運ぶ。各イベントの必須フィールドは `REF:tests/m5.rs` / `REF:tests/m9.rs` / `REF:tests/m15.rs` で検証する。
 
 `--json` の応答性は「生テキストを標準出力へ出さない」ことを不変条件にする。`engines show` / `engines test` / `network show` / `filters show` / `config *` / `quota *` / `history export` は `renderer.json` で分岐し、必ずイベントと `done` を出す（`REF:tests/m9.rs`）。`engines list` の `apiKey` は表示用の日本語文ではなく `not-required` / `configured` / `missing` の識別子とし、参照する環境変数名は `apiKeyEnvs` に分ける（`REF:src/usecases/engines.rs`）。
 
@@ -132,13 +134,13 @@
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/ui/commands.rs, REF:src/core/secret.rs, REF:src/core/url.rs）
 
-JSON 生成の直前に `crate::core::url::redact()`（`REF:src/core/url.rs`）を通す。`SecretString` は `Serialize` を実装しないため、誤って出力経路に載せるとコンパイルエラーになる。
+`main.rs` と `commands::run` は App 構築後に環境 secret とエンジン定義の固定値を `Renderer` の伏字化対象へ登録し、`Renderer::event()` は JSON 全体を出力境界で再帰的に伏字化する。テキストの `out` / `err` / `info` / `warn` と `Renderer::error()` も既知の秘匿値と本文中の URL を伏せる。`Secret` は `Serialize` を実装しないため、保持値を直接シリアライズすることもできない。
 
-設定値を値として直接書いた場合（`TmplValue::Explicit`）は表示時に漏れるため、定義を JSON で出す経路（`engines show` / `network show` / `filters show`）では `crate::core::secret::redact_json()` を通す。`--raw` の定義ダンプも同じ基準で伏せる。`value_env`（環境変数名）は秘匿値ではないので残す。取得用の URL はセッション内の実体をそのまま保持し、表示・JSON には伏字化した `url` を出す。
+定義の表示は経路別に二重化する。`engines show` / `network show` / `filters show` の定義と `--raw` は `core::secret::redact_json()` を通し、明示値・秘匿名の query/header・URL の認証情報を伏せる。`engines show` の要約 URL も `core::url::redact()` を通す。`value_env`（環境変数名）は秘匿値ではないため残す。`engines test --dry-run` は解決済み環境変数と `TmplValue::Explicit` の値を redaction list に加え、URL・ヘッダ名・本文のフィールド名と値を使って伏字化する。取得用 URL はセッション内で再取得可能な実体を保持する。
 
-検索結果・文書の表示 URL は `src/ui/commands.rs` の `display_url(url, secrets)` を必ず通す。`display_url` は URL として解釈できれば `crate::core::url::redact()`（クエリの秘匿パラメータ名、およびパス中の `名前=値` を伏せる）、できなければ `redact_text()` に落とす。`hits_json()` と `hit_line_with()` の呼び出し側がこの 1 か所に集約されているため、新しい出力経路を足すときも同じ関数を使う。`outline` / `read` の見出しヘッダと `[untrusted]` 行、`content` / `document` の `url` / `finalUrl` も同じ関数を通す。
+検索結果・文書 URL の既存経路は `src/ui/commands.rs` の `display_url(url, secrets)` に集約し、`core::url::redact()` が URL ユーザー情報、秘匿 query/path パラメータ、既知の秘匿値を伏せる。`hits_json()` / `hit_line_with()`、見出しヘッダ、`[untrusted]` 行、`content` / `document` の `url` / `finalUrl` はこの関数を使う。履歴は `App::append_history()` が追記前にエンジン名と payload 内の文字列を伏字化し、URL のユーザー情報・秘匿 query/path パラメータも含めて保存する。履歴の JSON・テキスト出力は表示境界でも再度 sanitize する。
 
-送信エラーの文字列（`E2001` / `E2002` / `E2004` の `details`）には URL や認証値が混ざるため、`crate::core::secret::redact_text()` を通してから表示する（`REF:src/adapters/http.rs`）。robots.txt の取得失敗理由（`E2006` の `details`）も `reqwest` のエラー文字列を含むため同じ処理を通す（`REF:src/adapters/robots.rs`）。
+送信エラーの `E2001` / `E2002` / `E2004` は `reqwest::Error::without_url()` と `core::secret::redact_text()` を通してから `details` にする（`REF:src/adapters/http.rs`）。本文読み取りエラーも同じ処理にする。robots.txt の取得失敗理由（`E2006`）も既知の秘匿値を伏せる（`REF:src/adapters/robots.rs`）。`Renderer::error()` と JSON イベント全体が出力境界の最終防御となり、個別の `AppError::detail` / 警告に入った既知の秘匿値も出さない。
 
 ### 4.3 再現性
 

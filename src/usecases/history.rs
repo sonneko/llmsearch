@@ -62,6 +62,6 @@ pub fn clear(app: &App, before: Option<&str>) -> Result<usize, AppError> {
         crate::core::history::EventType::Delete,
         serde_json::json!({"target": "history", "count": count, "before": before}),
     );
-    let _ = app.history.append(&entry);
+    let _ = app.append_history(&entry);
     Ok(count)
 }

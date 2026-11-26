@@ -57,6 +57,21 @@ pub struct App {
 }
 
 impl App {
+    /// 既知の秘匿値を伏せてから履歴へ追記する。
+    pub fn append_history(
+        &self,
+        entry: &crate::core::history::HistoryEntry,
+    ) -> Result<(), AppError> {
+        let redactions =
+            crate::core::secret::redaction_list_for_engines(&self.secrets, &self.engines);
+        let mut safe = entry.clone();
+        if let Some(engine) = &mut safe.engine {
+            *engine = crate::core::secret::redact_display_text(engine, &redactions);
+        }
+        crate::core::secret::redact_json_output(&mut safe.payload, &redactions);
+        self.history.append(&safe)
+    }
+
     /// クォータ判定用のガードを作る（レート待機は HTTP アダプタが担当）。
     pub fn guard(&self) -> Result<Guard, AppError> {
         let session = self.current_session_id();

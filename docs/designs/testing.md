@@ -18,7 +18,7 @@
 
 状態: 実装完了（REF:tests/m5.rs, REF:tests/m9.rs, REF:tests/e2e.rs）
 
-`REF:tests/m5.rs` が実プロセスを起動し、「各行が単体で `serde_json::from_str` 可能」「`done` / `error` が末尾に 1 回だけ」「終了コードが分類と一致」を検証する。セッション引き継ぎは `tempfile::tempdir()` が返すディレクトリを状態ディレクトリにして別プロセスを連続実行して検証する。`--json` の全サブコマンドが `done` を出すことは `REF:tests/m9.rs` が確認する。
+`REF:tests/m5.rs` が実プロセスを起動し、「各行が単体で `serde_json::from_str` 可能」「`done` / `error` が末尾に 1 回だけ」「終了コードが分類と一致」を検証する。セッション引き継ぎは `tempfile::tempdir()` が返すディレクトリを状態ディレクトリにして別プロセスを連続実行して検証する。`REF:tests/m9.rs` が `--json` サブコマンドのイベント封筒を、`REF:tests/m15.rs` が全管理系コマンド・警告の伝播・Issue #4/#5/#7/#9/#12/#21/#23 の回帰を確認する。
 
 ### 1.3 変換の受入基準
 
@@ -42,7 +42,7 @@ HTML→Markdown の性質（見出し・リスト・表・コードブロック�
 
 状態: 実装完了（REF:tests/integration.rs, REF:tests/m9.rs, REF:src/ui/render.rs）
 
-出所ヘッダと `[untrusted]` マーカーの付与、および本文中のマーカー様行の無害化は `REF:src/ui/render.rs` の単体テストが検証する。API キー混入は、`TmplValue::Explicit` と `value_env` の双方を含む定義で `engines show` / `show --raw` / `test` を実行し、出力・履歴・状態ファイルに値が含まれないことを `REF:tests/m9.rs` と単体テストで検証する。robots.txt はモック応答で検証する。
+出所ヘッダと `[untrusted]` マーカーの付与、および本文中のマーカー様行の無害化は `REF:src/ui/render.rs` の単体テストが検証する。`TmplValue::Explicit` と `value_env` を使う自作エンジン定義で `engines show`（要約・JSON・`--raw`）/ `engines test --dry-run`（URL・ヘッダ・本文）/検索結果 URL / fetch・search 履歴 / HTTP エラー詳細を検査し、標準出力・標準エラー・履歴に値が残らないことを `REF:tests/m15.rs` で実プロセス確認する。HTTP は OS 割り当てポートの `127.0.0.1` ローカルスタブを使い、実サイトには接続しない。robots.txt はモック応答で検証する。
 
 ---
 
@@ -58,7 +58,7 @@ HTML→Markdown の性質（見出し・リスト・表・コードブロック�
 |---|---|---|
 | 単体テスト | `src/**` の `#[cfg(test)] mod tests` | `cargo test --lib` |
 | 結合テスト・契約テスト | `REF:tests/integration.rs`, `REF:tests/contract.rs`, `REF:tests/assets.rs` | `cargo test --test integration --test contract --test assets` |
-| マイルストーン別の回帰 | `REF:tests/m5.rs`, `REF:tests/m6.rs`, `REF:tests/m7.rs`, `REF:tests/m8.rs`, `REF:tests/m9.rs`, `REF:tests/m10.rs`, `REF:tests/m11.rs` | `cargo test --test m5` など |
+| マイルストーン別の回帰 | `REF:tests/m5.rs`, `REF:tests/m6.rs`, `REF:tests/m7.rs`, `REF:tests/m8.rs`, `REF:tests/m9.rs`, `REF:tests/m10.rs`, `REF:tests/m11.rs`, `REF:tests/m15.rs` | `cargo test --test m5` など（M15 は `cargo test --test m15`） |
 | アーキテクチャ検査 | `REF:tests/architecture.rs` | `cargo test --test architecture` |
 | ネットワーク・TLS・プロキシ | `REF:tests/proxy.rs`, `REF:tests/tls.rs`（証明書は `REF:tests/fixtures/tls/`） | `cargo test --test proxy --test tls` |
 | E2E テスト | `REF:tests/e2e.rs` | 既定では起動と決定論性のみ。実ネットワークは `LLMSEARCH_E2E_LIVE=1` |
@@ -67,7 +67,7 @@ HTML→Markdown の性質（見出し・リスト・表・コードブロック�
 
 状態: 実装完了（REF:tests/support/mod.rs）
 
-HTTP はポート境界で偽実装（`REF:tests/support/mod.rs` の `FakeHttp`。登録した応答を順に返す）に差し替える。`reqwest` の `Mock` 機能は使わない（アダプタの実装詳細にテストが依存しないようにするため）。実 HTTP の応答が必要な検査はローカルの `http.server` スタブ（サンプルは `REF:tests/fixtures/tls/server.py`）で行い、外部ネットワークへは出ない。期待値は手作業で編集せず、テストコードが生成した出力をレビューして確定する。
+HTTP はポート境界で偽実装（`REF:tests/support/mod.rs` の `FakeHttp`。登録した応答を順に返す）に差し替える。`reqwest` の `Mock` 機能は使わない（アダプタの実装詳細にテストが依存しないようにするため）。実 HTTP の応答が必要な検査はローカルの `http.server` スタブで行い、外部ネットワークへは出ない。M15 の実プロセス回帰は OS 割り当てポートの `127.0.0.1` スタブと自作エンジン定義を使う（`REF:tests/m15.rs`）。期待値は手作業で編集せず、テストコードが生成した出力をレビューして確定する。
 
 ### 2.3 決定論性の担保
 

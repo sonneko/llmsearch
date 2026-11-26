@@ -37,13 +37,13 @@ JSON の本文フィールドは `context.maxChars` に従う。出力サイズ�
 | `session` | 文字列 | セッション識別子（確定していない実行では空文字） |
 | `at` | 文字列 | 実行日時（UTC、`YYYY-MM-DDTHH:MM:SSZ`） |
 
-検索・文書を扱うイベント（`search` / `next` / `refine` / `document` / `outline`）は、実行中に出た警告を `warnings[]`（各要素は `code` と `message`）として持つ。警告が無い場合も空配列を必ず含める。同じ内容を標準エラーにも出力するが、`--quiet` では標準エラーの警告表示だけを抑制する。`error` は失敗に至る過程で出た警告を同じ形で持つ。
+検索・文書を扱うイベント（`search` / `next` / `refine` / `document` / `outline`）は、実行中に出た警告を `warnings[]`（各要素は `code` と `message`）として持つ。警告が無い場合も空配列を必ず含める。設定解決時の警告と `Reporter` 経由の操作警告も失わない。次に出るイベントが `warnings[]` を持つ場合はそこへ統合し、持たない場合はそのイベントの直前に `warnings` イベントを出す。同じコード・メッセージの警告は 1 コマンド内で重複させない。警告は標準エラーにも出すが、`--quiet` では標準エラー表示だけを抑制し、JSON の構造化警告は保持する。`error` は失敗に至る過程で出た警告を `warnings[]` に含める。`--color --json` による独立警告 `W1001` は従来どおり `warnings` イベントで通知し、`--quiet` では抑制する。
 
 ### 2.2 イベント種別
 
 | `event` | 主なフィールド |
 |---|---|
-| `search` | `query`, `engine`, `results[]`, `page`, `hasMore`, `filtered`, `quota` |
+| `search` | `query`, `engine`, `results[]`, `page`, `hasMore`, `filtered`, `warnings[]`, `quota` |
 | `next` | `query`, `engine`, `page`, `results[]`, `hasMore`, `terminated`, `terminationReason`, `filtered`, `warnings[]`, `quota` |
 | `refine` | `query`, `previousQuery`, `results[]`, `warnings[]`, `quota` |
 | `document` | `documentId`, `url`, `finalUrl`, `title`, `site`, `chars`, `warnings[]`, `quota`（`outline` / `read` の本文出力の前に必ず 1 回出る） |
@@ -57,7 +57,7 @@ JSON の本文フィールドは `context.maxChars` に従う。出力サイズ�
 | `diagnostics` | `checks[]`（`engines validate`, `engines test`, `network validate`, `filters validate`, `config validate`, `doctor`） |
 | `quota` | `metrics[]`, `policy`, `kind`, `amount`, `allowed`（`quota check`。許可時は `usage[]` も含む）／`action`, `scope`（`quota reset`） |
 | `history` | `entries[]`, `total`（`history list` / `show` / `grep` / `export`）／`removed`（`history clear`） |
-| `warnings` | `warnings[]`（例: `--color --json` の `W1001`。`--quiet` 時は抑制） |
+| `warnings` | `warnings[]`（`warnings[]` を持たない次イベントへ結び付く設定・操作警告、または独立した `--color --json` の `W1001`。操作警告は `--quiet` でも保持し、`W1001` は `--quiet` 時に抑制） |
 | `done` | `command`, `summary` |
 | `error` | `code`, `message`, `hint`, `details`, `warnings[]` |
 
@@ -123,11 +123,12 @@ JSON 出力に API キー・Cookie・認証ヘッダを含めない。URL の秘
 伏字化の対象は次のとおり。
 
 - 検索結果・文書の `url` / `finalUrl`（表示用。セッション内に保持する取得用 URL は実体のまま）
-- `engines show` / `network show` / `filters show` の `definition` と `--raw` のダンプ
-- `engines test --dry-run` の `request.url` と `request.headers`
-- エラーの `details`（送信エラー文字列、robots.txt の取得失敗理由）
+- `engines show` の要約 URL、`engines show` / `network show` / `filters show` の `definition` と `--raw` のダンプ
+- `engines test --dry-run` の `request.url` / `request.headers` / `request.body`
+- 履歴へ保存・表示・エクスポートする URL と payload の文字列フィールド
+- エラーの `details` と警告文（送信エラー文字列、robots.txt の取得失敗理由など）
 
-URL のクエリに含まれる秘匿パラメータ名（`token`, `key`, `apikey`, `api_key`, `sig`, `signature`, `password`, `passwd`, `secret`, `auth`）は値だけを `***` に置き換える。パス中でも同じ `名前=値` の形をしていれば同じ基準で伏せる（パスの丸ごとの置換は行わず、誤爆を避ける）。環境変数から解決した秘匿値は、URL・エラー文字列のいずれでも文字列一致で `***` に置き換える。
+URL のユーザー情報（username/password）は値を出さず `***` にする。URL のクエリに含まれる秘匿パラメータ名（`token`, `key`, `apikey`, `api_key`, `sig`, `signature`, `password`, `passwd`, `secret`, `auth`）は値だけを `***` に置き換える。パス中でも同じ `名前=値` の形をしていれば同じ基準で伏せる（パスの丸ごとの置換は行わず、誤爆を避ける）。環境変数から解決した秘匿値と定義に直接記述した `TmplValue::Explicit` は、URL・リクエスト本文・警告・エラー文字列・履歴 payload のいずれでも出力境界または追記前に `***` へ置き換える。`engines show` では固定値を表示せず、認証ヘッダは `--dry-run` でも値の出自にかかわらずヘッダ名に基づいて伏せる。
 
 ### 4.3 再現性
 

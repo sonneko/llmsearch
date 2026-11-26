@@ -42,7 +42,7 @@
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`SessionState` は `schema_version` / `session_id` / 作成・更新時刻 / `queries` / `active_query` / `results` / `page` / `documents` / `outline_depth` / `selections` / `pending_selections` / `last_query` / `last_engine` を持つ。`QueryRecord` は検索語・エンジン・時刻・結果件数・除外件数を保持し、`PageState` は現在ページ・次ページ・終端フラグを持つ。クォータ消費量はセッション JSON ではなく `counters.json` の `session_key` 付きカウンタに保存する。全フィールドに既定値を適用して古いセッションを読み込む。
+`SessionState` は `schema_version` / `session_id` / 作成・更新時刻 / `queries` / `active_query` / `results` / `page` / `documents` / `outline_depth` / `selections` / `pending_selections` / `last_query` / `last_engine` を持つ。`QueryRecord` は検索語・エンジン・時刻・結果件数・除外件数を保持する。`active_query` は `queries` の現在位置だが、結果一覧はクエリ別のスロットではなく `SessionState.results` 1 つであり、新しい検索・`refine` で置き換える。`PageState` は現在ページ・次ページ・終端フラグを持つ。クォータ消費量はセッション JSON ではなく `counters.json` の `session_key` 付きカウンタに保存する。全フィールドに既定値を適用して古いセッションを読み込む。
 
 ### 2.2 文書キャッシュ
 

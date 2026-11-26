@@ -122,7 +122,7 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-`Renderer::envelope(event, fields)` が共通枠を作り、`Renderer::event` が `serde_json::to_string` で 1 行を標準出力へ書く。本文は必ず文字列フィールドに入れる。`at` は注入された `Clock` から取得する。
+`Renderer::envelope(event, fields)` が共通枠を作り、`Renderer::event` が `serde_json::to_string` で 1 行を標準出力へ書く。本文は必ず文字列フィールドに入れる。`at` は注入された `Clock` から取得する。コマンドスコープの警告は `Renderer` が収集し、対象イベントの `warnings[]` または直前の `warnings` イベントへ出す。`--quiet` でも JSON の警告を失わない。
 
 ---
 

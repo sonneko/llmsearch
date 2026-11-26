@@ -22,6 +22,7 @@
 | 表示言語とエンジン言語（M10） | 完了 | CLI メッセージの全英語化・嘘をつく `ui.locale` の削除・`search.language` の追加 | `REF:docs/plans.md#m10-english-and-language` |
 | 配布互換ゲート（M11） | 完了 | CI の Build & Distribution Compatibility の `E1003`（ステージした `assets/` の入れ子）を直し、同梱既定の解決を配布配置に依存させない | `REF:docs/plans.md#m11-distribution-assets` |
 | ドキュメントとソースの同期（M12） | 完了 | docs 全 31 本の総点検・未実装仕様の切り分け・`GUIDE.md` の統合・未使用コードの削除 | `REF:docs/plans.md#m12-docs-source` |
+| M5 棚卸し残課題の再監査（M15） | 進行中 | Issue #4/#5/#7/#9/#12/#21/#23 の仕様・設計・実装・回帰検証 | `REF:docs/plans.md#m15-m5-residuals` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -115,6 +116,47 @@
 | #21 docs の誤記・残骸 | README のクォータ記述・`--profile`・`--no-filter=all`・`with-body`・`read --heading`・`context.max_chars`（仕様側）・`text/plain`（仕様側）は修正済み。残りは `GUIDE.md` で、M12 で削除・統合した | 解消済み |
 | #23 `hint` / `E2007` / locale | `AppError.hint` を設定（4 箇所）・表示（`Renderer::error`）し、実測でも hint が出る。`E2007` は発行箇所ゼロで仕様も「発行しない」と明記。メッセージは全英語・locale 設定なし | 解消済み |
 
+<a id="m15-m5-residuals"></a>
+### M15: M5 棚卸し残課題の再監査
+
+#### 目的と対象
+
+M5 棚卸しの Issue #4、#5、#7、#9、#12、#21、#23 を、M9 / M12 の修正済み記録だけに依存せず、現在の仕様・設計・実装・実バイナリで再照合する。Issue #37〜#44 は PR #45 で修正済みなので対象外とし、`develop` が既定ブランチでないため open のままでも再対応しない。
+
+#### 初期照合で確認する範囲
+
+| Issue | 再監査する残項目 |
+|---|---|
+| #4 | 共通イベント封筒・`at`・`refine` / `document` / `warnings[]` に加え、設定解決時と `Reporter::warn` の警告を JSON に失わず反映すること |
+| #5 | 全管理系サブコマンドを `--json` で実行し、標準出力がイベント封筒付き JSON Lines だけで終端が正しいこと |
+| #7 | セッション直前クエリ・`previousQuery`・`refine` 履歴を照合し、現行仕様どおり `results` を置き換える（別クエリ結果スロットは本 Issue の受入対象にしない） |
+| #9 | セッション無しの `R` / `D` 識別子と `next`（`E5001` + hint）・既存セッション内の不明 ID（`E1006`）・URL 対象を分け、状態不変条件も照合する |
+| #12 | 検索・文書 URL、エンジン定義と要約 URL、dry-run の URL / headers / body、HTTP エラー、履歴と警告の各出力境界で既知の値が漏れないこと |
+| #21 | README / ガイド / 仕様 / 設計の誤記、実装と合わない説明、存在しないソース参照、テンプレート残骸を検索して修正する |
+| #23 | `E2007` の未発行方針、個別 `AppError.hint` の優先、全英語の `message` / `hint` と CLI / JSON / stderr の一致を実行確認する |
+
+#### 受け入れ条件
+
+1. 仕様書 → 設計書 → 本計画の順で方針を同期し、実装・テストの追加後も挙動と記述が一致する。
+2. 管理系を含む `--json` 全コマンドが共通封筒と終端イベントを持ち、`Reporter` 警告を `--quiet` でも構造化出力する（`W1001` は独立イベントで `--quiet` 時に抑制）。
+3. `refine` と対象解決の回帰を実プロセスで固定し、意図した既存挙動以外は変更しない。
+4. 結果 URL、URL ユーザー情報、エンジン定義、dry-run の URL / headers / body、履歴、警告、エラーの出力・保存に既知の秘匿値を含めない。安全境界 `[untrusted]`、クォータ、フィルタ、定義の送信前検証を維持する。
+5. README・ガイド・仕様・設計の誤記・残骸・参照切れを修正し、`E2007` / `AppError.hint` / 英語メッセージの方針を検証で固定する。
+6. 自作エンジン定義と OS 割り当てポートの `127.0.0.1` ローカル HTTP スタブだけを使い、外部ネットワークなしで回帰を通す。固定ポート競合を避け、未検証の実サイト挙動は最終報告に明記する。
+7. Issue #4/#5/#7/#9/#12/#21/#23 をそれぞれ `Closes` 参照する `develop` 向け PR を 1 件作成し、マージしない。PR 外に残る未コミット / 未 push 変更は有無と扱いを明示する。
+
+#### 実施順序と進捗
+
+- [x] 仕様を更新: `agent-integration.md` / `errors.md` / `history.md` / `session-state.md` / `testing.md` / `engine-definitions.md`
+- [x] 設計を更新: `agent-integration.md` / `cli-interface.md` / `engine-definitions.md` / `errors.md` / `history.md` / `session-state.md` / `testing.md`
+- [x] 本計画に再監査範囲・受入条件・実施順序を記載
+- [x] 警告伝播・履歴 payload / URL・dry-run 秘匿情報の実装を補い、標準出力・標準エラー・履歴の漏洩回帰を追加
+- [x] 全 `--json` 管理系コマンド、`refine`、`R` / `D` 対象解決、エラーと hint のローカル実プロセス回帰を実行
+- [x] README・ガイド・仕様・設計全体を再検索し、実装との不一致を修正
+- [x] OS 割り当てポートの `127.0.0.1` 自作スタブで実バイナリを検証。外部サイトには接続しない
+- [x] `bash scripts/verify.sh --quick`（docs / release-gate / fmt-check / clippy / all-target tests）と `git diff --check` を実行
+- [ ] 7 Issue を `Closes` する `develop` 向け PR を 1 件作成。マージしない
+
 ## 3. フェーズ別実行順序
 
 1. **Phase 1（基盤）**: 依存確定と vendor 退避、ポート定義、`core` の型・設定ロード、状態ディレクトリ。
@@ -163,7 +205,7 @@
 | `session-state` | 状態ディレクトリ・セッション・破損対応 | `src/adapters/state/` |
 | `history` | 履歴の記録と参照 | `src/core/history/`, `src/adapters/state/history_jsonl.rs` |
 | `configuration` | 設定 JSON とマージ | `src/core/config/`, `src/usecases/config/` |
-| `agent-integration` | JSON イベント | `src/ui/render/json_events.rs` |
+| `agent-integration` | JSON イベント | `src/ui/render.rs`, `src/ui/commands.rs` |
 | `errors` | エラー・警告・`doctor` | `src/core/errors/`, `src/usecases/doctor/` |
 | `testing` | 受入基準・品質ゲート | `tests/` 全体 |
 
