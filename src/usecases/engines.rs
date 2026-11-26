@@ -102,13 +102,21 @@ pub fn validate(app: &App, selectors: &[String]) -> Vec<(String, Vec<Check>)> {
             .collect()
     };
     for def in targets {
-        let mut checks = def.validate();
+        let mut checks: Vec<Check> = def
+            .validate()
+            .into_iter()
+            .map(|check| match check {
+                Check::Fail(text) => Check::Fail(format!("E1004: {text}")),
+                other => other,
+            })
+            .collect();
         for env in collect_envs(&def) {
             if app.secrets.contains(&env) {
                 checks.push(Check::Ok(format!("environment variable {env} is set")));
             } else {
-                checks.push(Check::Fail(format!(
-                    "environment variable {env} is not set"
+                // 秘密値が無いことは利用環境の警告であり、定義の破損ではない。
+                checks.push(Check::Warn(format!(
+                    "environment variable {env} is not set (engine unavailable until configured)"
                 )));
             }
         }

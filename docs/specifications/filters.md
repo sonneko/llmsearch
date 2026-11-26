@@ -15,7 +15,7 @@
 
 ### 1.2 フィルタ集合
 
-フィルタは「フィルタ集合」という名前付きの JSON（`filters/<id>.json`）にまとめる。設定 `filters` で ID を参照するか、インライン定義を直接記述する。
+フィルタは「フィルタ集合」という名前付きの JSON（`filters/<id>.json`）にまとめる。設定 `filters` で ID を参照するか、インライン定義を直接記述する。camelCase を正規形として出力し、互換性のため `schema_version`, `max_results`, `max_per_host`, `host_regex`, `url_regex`, `path_prefix`, `title_regex`, `snippet_regex`, `title_contains`, `older_than_days`, `newer_than_days`, `strip_selectors`, `strip_patterns`, `strip_lines`, `keep_only`, `min_section_chars`, `drop_empty_sections`, `max_heading_depth`, `shorter_than`, `repeated_at_least`, `collapse_blank_lines`, `trim_line_ends`, `ensure_trailing_newline`, `decode_entities` などの定義済み snake_case 別名も入力として受け付ける。`filters show <id>` は読み込んだ定義を camelCase に正規化し、`filters show <id> --raw` はファイル内の JSON を変更せず表示する。
 
 ### 1.3 評価の原則
 
@@ -91,8 +91,8 @@
 同梱の `default`（`assets/filters/default.json`）は次の 4 種類の `deny` と 1 種類の `allow` を持つ。いずれも利用者設定で上書き・追加できる。
 
 - `deny`: `extension` が `pdf`, `zip`, `exe`, `dmg`, `apk`, `iso` の結果（本文を読めないため）
-- `deny`: `host` が `*.pinterest.com` / `*.quora.com` / `*.facebook.com` かつ `url_regex` がログイン・登録ページの結果（両方を満たす場合のみ）
-- `deny`: `title_regex` がログイン・サインインの定型で始まる結果
+- `deny`: `host` が `*.pinterest.com` / `*.quora.com` / `*.facebook.com` かつ `urlRegex` がログイン・登録ページの結果（両方を満たす場合のみ）
+- `deny`: `titleRegex` がログイン・サインインの定型で始まる結果
 - `deny`: `titleRegex` が `404 Not Found` などの結果
 - `allow`: `host` が `*.wikipedia.org` / `*.go.jp` / `*.ac.jp` の結果（`deny` の例外）
 - `require`: なし
@@ -166,18 +166,19 @@
 | 項目 | 内容 |
 |---|---|
 | `kept` | 残した件数 |
-| `removed` | 規則で除いた件数の合計（`maxPerHost` / `maxResults` による切り捨ては含まない） |
-| `reasons` | 理由ごとの件数（`results.deny[0]` / `content.stripLines[1]` 形式のキー） |
-| `truncatedByMaxResults` | `maxResults` による切り捨て件数 |
-| `truncatedByMaxPerHost` | `maxPerHost` による切り捨て件数 |
-| `disabled` | `--no-filter` で無効化されたか |
+| `removed` | 規則除外、重複 URL、および `maxPerHost` 超過の合計。`maxResults` と表示ページの `--limit` による切り捨ては含まない |
+| `reasons` | 理由ごとの件数（規則 ID、`maxPerHost`、`duplicateUrl` など） |
+| `truncatedByMaxResults` | フィルタ集合の `maxResults` による切り捨て件数 |
+| `truncatedByMaxPerHost` | `maxPerHost` 上限を超えた件数（`removed` にも含む） |
+| `disabled` | 規則フィルタが `--no-filter` で無効化されたか |
+| `truncatedByLimit` | 表示ページの `--limit` を超えているため、今回の一覧に出さなかった件数 |
 
 ### 5.2 表示
 
-- 一覧の末尾に `(filters: showing 7 of 12 results, 5 filtered out)` の形で 1 行表示する（除外が 0 件なら `(filters: all 7 shown)`、無効時は `(filters: disabled)`）。
-- 理由の内訳は常に出力しない。`--verbose` でも内訳は出さない（JSON の `filtered.reasons` で確認する）。
-- JSON 出力では `search` イベントの `filtered` オブジェクトに `kept` / `removed` / `reasons` / `disabled` / `truncatedByLimit` を含める。
+- 一覧の末尾に、今回の表示件数・全対象件数と除外／切り捨て区分を 1 行表示する。例: `(filters: showing 7 of 10 results; 3 beyond --limit)`。規則除外、重複 URL、`maxPerHost`、`maxResults`、表示 `--limit` は区別する。何も除外・切り捨てが無いときは `(filters: all 7 shown)`、無効で除外・切り捨ても無いときは `(filters: disabled)` とする。
+- 理由の内訳は一覧に出さない。`--verbose` でも規則 ID ごとの内訳は出さず、JSON の `filtered.reasons` で確認する。
+- JSON 出力では `search` / `next` イベントの `filtered` オブジェクトに `kept` / `removed` / `reasons` / `disabled` / `truncatedByMaxPerHost` / `truncatedByMaxResults` / `truncatedByLimit` を含める。`maxPerHost` による除外は `removed` に含め、`truncatedByMaxResults` と `truncatedByLimit` は個別カウントとして示す。
 
 ### 5.3 無効化
 
-`--no-filter` 指定時は、結果フィルタ（`results`）を評価せず、本文フィルタのうち行単位の規則（`stripPatterns` / `stripLines` / `keepOnly`）も適用しない。結果側は `filtered.disabled: true` として記録する。`stripSelectors`（既定の除去要素と §4.2）は `--no-filter` でも適用する（安全性のため無効化する手段は提供しない）。
+`--no-filter` 指定時は、結果の `deny` / `allow` / `require` 規則と、変換後の本文フィルタ（`stripPatterns` / `stripLines` / `keepOnly` / `normalize`）を適用しない。ただし結果セットの上限制御 `maxPerHost` / `maxResults` は常に適用し、`filtered.disabled: true` と各除外件数を記録する。HTML 変換時の `stripSelectors`（既定の除去要素と §4.2）は `--no-filter` でも適用する（安全性のため無効化する手段は提供しない）。

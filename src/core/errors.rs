@@ -228,7 +228,7 @@ pub fn message(code: ErrorCode) -> &'static str {
     match code {
         ErrorCode::E1001 => "interactive mode requires a terminal",
         ErrorCode::E1002 => "unknown argument or subcommand",
-        ErrorCode::E1003 => "cannot read configuration file",
+        ErrorCode::E1003 => "cannot load or resolve configuration resource",
         ErrorCode::E1004 => "invalid configuration value",
         ErrorCode::E1005 => "cannot parse the selection",
         ErrorCode::E1006 => "target identifier not found",

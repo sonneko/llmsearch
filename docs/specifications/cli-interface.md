@@ -19,7 +19,7 @@
 | オプション | 既定 | 説明 |
 |---|---|---|
 | `--json` | 無効 | 標準出力を JSON イベント形式にする |
-| `--session <id>` | 自動採番 | 既存セッションを継続する |
+| `--session <id>` | 自動採番 | 既存セッションを再開する。存在しない ID は `E5001`（新規作成しない） |
 | `--engine <id[@variant]>` | 設定値 | 検索エンジンを一時的に切り替える |
 | `--language <tag>` | 設定値 | 検索エンジンへ送る言語（`search.language`）を一時的に切り替える |
 | `--network <id>` | 設定値 | ネットワークプロファイルを一時的に切り替える |
@@ -32,8 +32,8 @@
 | `--state-dir <path>` | 設定値 | 状態ディレクトリを明示指定する |
 | `--engines-dir <path>` | なし | エンジン定義の追加探索ディレクトリ（複数指定可） |
 | `--no-color` | 自動判定 | 装飾を無効化する |
-| `--color` | 無効 | 標準出力が端末でなくても装飾する |
-| `--quiet` | 無効 | 進捗表示を抑制する |
+| `--color` | 無効 | テキスト出力を ANSI 装飾する。`--json` と併用時は無視し、`--quiet` でない限り `W1001` を JSON の `warnings` イベントで通知する |
+| `--quiet` | 無効 | 進捗・セッション案内・標準エラーの警告を抑制する。JSON の操作警告は各イベントに残し、`W1001` の独立イベントは抑制する |
 | `--verbose` | 無効 | 診断情報を標準エラーへ追加する |
 | `--help` / `--version` | — | 使用方法・版数を表示して終了する |
 
@@ -56,7 +56,7 @@ Q: climate adaptation    engine: duckduckgo
 
   1) Quit
   2) Select results (multiple allowed)
-  3) Show results from the 8th onward
+  3) Show results from R8 onward
   4) Edit the query
 > 
 ```
@@ -65,7 +65,7 @@ Q: climate adaptation    engine: duckduckgo
 
 - **1) Quit**: セッションを閉じ、終了コード `0` で終了する。
 - **2) Select results**: 選択用の入力待ちへ移る（§2.2）。選択後は文書取得とアウトライン表示へ進む。
-- **3) Show results from the 8th onward**: 次のページを取得して追記表示する。取得済みの結果は再表示せず、識別子は連番を継続する。フィルタ適用後の件数と除外件数を 1 行で示す。
+- **3) Show results from R<n> onward**: 次のページを取得して追記表示する。`R<n>` は次に使う結果識別子で、ページが終端なら `No more results` と表示する。取得済みの結果は再表示せず、表示ラベルとセッション保存済みの識別子を一致させ、識別子は連番を継続する。フィルタ・上限・`--limit` による件数を 1 行で区別して示す。
 - **4) Edit the query**: 現在の検索語を初期値として編集入力させ、新しい検索を実行する。以前の結果一覧はセッション内に保持し、履歴から再参照できる。
 
 ### 2.2 結果選択の入力規則
@@ -138,9 +138,9 @@ S1    h1  Climate Adaptation Platform            (920 chars) ↓
 
 | コマンド | 目的 | 主なオプション |
 |---|---|---|
-| `search <query>` | 検索して結果一覧を出力する | `--limit`, `--page` |
-| `next` | 直前の検索の次ページを取得する | `--query`（セッションの直前クエリを上書きする） |
-| `refine <query>` | 検索語を変更して再検索する（変更前はセッションの直前クエリ） | なし |
+| `search <query>` | 検索して結果一覧を出力する | `--limit`（1〜30）, `--page`（1 始まり、有効な上限内） |
+| `next` | 直前の検索の次ページを取得する。既定ではセッションの `lastEngine` を継承し、グローバル `--engine` / `LLMSEARCH_ENGINE` があれば優先 | `--query`（セッションの直前クエリを上書きする） |
+| `refine <query>` | 検索語を変更して再検索する（変更前はセッションの直前クエリ）。エンジン継承・上書きは `next` と同じ | なし |
 | `outline <target>` | 文書を取得・変換し、見出し一覧を出力する | `--depth` |
 | `read <target>` | 節本文を出力する | `--section`, `--max-chars`, `--children` / `--no-children` |
 | `history [list\|show\|grep\|export\|clear]` | 履歴の参照・出力・削除 | `--limit`, `--query`, `--type`, `--before`, `--yes`（`clear`） |
@@ -150,22 +150,22 @@ S1    h1  Climate Adaptation Platform            (920 chars) ↓
 | `filters [list\|show\|validate]` | フィルタ集合の参照・検証 | `show --raw` |
 | `quota [show\|reset\|check]` | クォータの参照・初期化・事前確認 | `reset --scope`, `reset --yes`、`check --kind`, `check --amount` |
 | `config [show\|path\|init\|validate\|explain]` | 設定の表示・初期化・検証 | `init --force` |
-| `doctor` | 環境・ネットワーク・設定の診断 | なし |
+| `doctor` | 環境・ネットワーク・設定の診断 | `--no-network`（到達性プローブを省略） |
 
 `--json` / `--session` / `--engine` / `--language` / `--network` / `--filters` / `--quota` / `--no-filter` / `--no-cache` / `--refresh` / `--config` / `--state-dir` / `--engines-dir` / `--no-color` / `--color` / `--quiet` / `--verbose` はルートで定義したグローバルオプションで、すべてのサブコマンドで受け付ける（§1.3）。
 
 ### 3.2 対象の指定方法
 
-`outline` と `read` の `<target>` は次のいずれかを受け付ける。
+`outline` と `read` の引数は help 上で `TARGET` と表記し、次のいずれかを受け付ける。
 
 1. URL（`https://` または `http://` で始まる）
 2. セッション内の検索結果識別子（`R3`）
 3. セッション内の文書識別子（`D2`）
 4. セッション内の結果番号（`3`）。3 と URL 以外の数値は検索結果番号として解釈する
 
-`read` の `--section` は `S3`（単一文書）または `D1:S3`（文書指定付き）の形式で受け付ける。`S0` は文書全体（見出しが無い場合は本文全体）を指す予約識別子で、`--section` を省略した場合も同じく全文を出力する。`0` のような接頭辞の無い数値は検索結果番号として解釈されるため節としては扱えず、`E1005`（`0 is not a section reference`）を返す。`--section` は複数指定でき、指定順に出力する。
+`read` の `--section` は `S3`（単一文書）または `D1:S3`（文書指定付き）の形式で受け付ける。`S0` は文書全体（見出しが無い場合は本文全体）を指す予約識別子で、`--section` を省略した場合も同じく全文を出力する。`0` のような接頭辞の無い数値は検索結果番号として解釈されるため節としては扱えず、`E1005`（`0 is not a section reference`）を返す。このときの hint は `S3` / `D1:S3` / `S0` を示し、結果選択用の `1,3` / `R1` は案内しない。存在しない節 ID は `E1006` と利用可能な節 ID を返し、hint で `outline` による一覧確認を案内する。`--section` は複数指定でき、指定順に出力する。
 
-セッションが無い状態で識別子を指定した場合は `E5001` を返し、`search` でセッションを開始するよう案内する（参照解決のためにセッションを暗黙に作成しない）。セッションはあるが識別子が存在しない場合は `E1006` を返し、利用可能な識別子の一覧を標準エラーへ出力する。URL を指定した場合はセッションが無くても取得でき、その時点でセッションを作成する。
+明示した `--session` が存在しない場合は `E5001` を返し、セッションを作成しない。識別子を使う操作は既存セッションを要求し、必要に応じて直近の有効なセッションを再開する。セッションがあるが識別子が存在しない場合は `E1006` を返し、利用可能な識別子の一覧を標準エラーへ出力する。URL を指定した場合はセッションが無くても取得でき、その時点でセッションを作成する。
 
 ### 3.3 終了コード
 
@@ -191,7 +191,7 @@ S1    h1  Climate Adaptation Platform            (920 chars) ↓
 
 ### 4.2 テキスト出力の規則
 
-1 行 1 レコードを基本とし、識別子を行頭に置く。装飾（色・太字）は標準出力が端末のときのみ有効とし、`--no-color` で無効化する。`--color` は端末でない場合に装飾を強制するが、実際には装飾を無効化して `W1001`（`color was requested but stdout is not a terminal; decorations disabled`）を 1 度だけ標準エラーへ出す（`--json` / `--quiet` 時は出さない）。
+1 行 1 レコードを基本とし、識別子を行頭に置く。`--no-color` は装飾を無効化する。`--color` はテキスト出力で ANSI 装飾を強制する。`--json` と併用した場合は装飾を無効化して、`W1001`（`--color is ignored with --json to preserve machine-readable output`）を `warnings` イベントとして標準出力へ 1 回出す（`--quiet` 時は出さない）。
 
 ### 4.3 JSON 出力の規則
 

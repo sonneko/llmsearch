@@ -20,13 +20,13 @@
 
 `usecases::search::run` は `search.merge=true` なら `run_merge`、そうでなければ `run_fallback` に分岐する（`candidate_engines` がどちらの連鎖を作るかも同じ条件で決める）。`run_fallback` は候補を順に試し、`ports::classify(&err) == FallbackClass::RetryOtherEngine`（`E4001` / `E4003` / `E4004`）のときだけ次の候補へ進む。`E2xxx` を含む他は即座に返す。
 
-`run_merge` は `search.engines` を列挙順に逐次呼び、成功したエンジンの結果だけを集めて `core::search::merge_round_robin` で統合する。並列送信はしない（レート制限を守るため）。`search.merge=true` かつ `search.engines` が空の設定は `Settings::validate()` が `E1004` とするため、`run_merge` には空で入らない（防御的に空なら `E4002`）。
+`run_merge` は `search.engines` を列挙順に逐次呼び、成功したエンジンの結果だけを集めて `core::search::merge_round_robin` で統合する。通常の失敗は警告として除外するが、`E5005` は全体を直ちに中止し、後続エンジンへ送信しない。並列送信はしない（レート制限を守るため）。`search.merge=true` かつ `search.engines` が空の設定は `Settings::validate()` が `E1004` とするため、`run_merge` には空で入らない（防御的に空なら `E4002`）。
 
 ### 1.3 送信の制約
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`Guard::check(Metric::Searches, n)` を送信直前に呼ぶ（`run_fallback` は試行ごとに `pending.searches + 1` で再判定する）。消費は `Guard::consume_all(Usage)` で送信成功後にまとめて行い、全候補が失敗した場合は消費しない。レート制限（同一ホストへの最小間隔）は `NetworkProfile.min_interval_ms` に基づき HTTP 層が待機する。
+`call_engine` は `evaluate_with_preflight` に callback を渡し、各 HTTP 送信の直前（page-style の隣接 provider page、抽出 retry、HTTP 層の transport retry を含む）に `Guard::check(Metric::Searches, pending.searches + 1)` を行う。`HttpClient::send_blocking_with_preflight` は `ReqwestClient` の各 transport 試行前にも callback を呼ぶ。通過した送信数は `pending.searches` に積む。`Guard` はクォータだけを担当し、成功後に `Guard::consume_all(Usage)` でまとめて永続化する。全候補が失敗した場合は消費しない。ホスト単位のレート制限は `ReqwestClient::wait_interval`（`src/adapters/http.rs`）が `NetworkProfile.min_interval_ms` に基づき待機し、必要時に `W2001` を出す。
 
 ---
 
@@ -56,7 +56,7 @@
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-ソート処理を入れない。フィルタ適用後も相対順序が保存されることを `REF:tests/contract.rs` で検証する。
+検索ユースケースは独自にソートしない。規則フィルタは相対順序を保つが、`filters.diversity=true` の場合は `core::config::filter::interleave_by_host` がホストごとに交互配置する。
 
 ---
 
@@ -68,19 +68,19 @@
 
 状態: 実装完了（REF:src/core/search.rs）
 
-`src/usecases/search.rs` がエンジンへ渡す `limit` を `def.limits.max_page_size.min(limit)` で頭打ちにする。分割取得は行わず、1 ページにつき 1 リクエストとする（`maxPageSize` を超える件数は次ページで取る）。
+`search_once` は各要求の `limit` を `def.limits.max_page_size` で制限する。`offset` 方式は 1 回要求する。`page` 方式では `paging.page_size`（要求件数を既定とし `max_page_size` で制限）をプロバイダのページ幅として、論理ページの必要範囲を埋める隣接ページを読み、`search.limit` 件の範囲を切り出す。
 
 ### 3.2 次ページの取得
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`core::search::paging::next_position(style, current, page_base, offset_step, page_size)` が次の位置を計算する純粋関数。`usecases::search::next` はセッションの `page` を進める前に取得し、成功時のみ更新する。
+`core::template::paging_values(paging, page, limit)` が offset / provider-page 値を計算する。offset 要求数は `min(search.limit, limits.maxPageSize)` とし、その実要求数がネイティブ幅より小さい場合は同じ値を offset 増分に使う。それ以外は `offsetStep` に従う。CLI の `search --page` の範囲検証もこの有効増分で最大ページ数を求める。`page` 方式では論理ページを満たす範囲のプロバイダページを取得して切り出す。CLI の `next` / `refine` はセッションの `last_engine` を復元してから実行し、`apply_to_session` は成功した結果だけでページ状態と識別子を保存する。
 
 ### 3.3 取得上限と終端
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`TerminationReason`（`MaxResults`, `Quota`, `EmptyPage`, `AllFiltered`）を返し、描画側が理由別の文言を出す。判定は `effective_limits` とクォータ残量の最小値で行う。
+`SearchOutcome` は `has_more` と文字列の `termination_reason` を返す。終端理由は `pagingUnsupported` / `maxResults` / `filtered` / `emptyPage`（`next` が送信前にクォータで拒否された場合は `quota`）で、JSON と履歴に同じ識別子を載せる。上限・quota で `next` が拒否されたときはセッションの検索状態を先に書き換えず、ページ状態を保持したまま `added: 0` の `next` 履歴を記録する。
 
 ### 3.4 失敗時の扱い
 
@@ -98,15 +98,15 @@
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`SessionState.queries` に要素を追加し、`active_query` を切り替える。結果一覧は `results_by_query` のスロットとして保持し、過去の一覧を保持する。
+`apply_to_session` は page 1 または直近の検索語と異なる結果を新しい `QueryRecord` として `queries` に追加し、`active_query` / `last_query` / `last_engine` を更新する。ページングでは同一クエリの結果を単一の `SessionState.results` に追記し、結果 ID は表示時と同じ値を保存する。クエリごとの別結果スロットは持たず、refine は現在の結果一覧を置き換える。
 
-非対話の `refine` は `REF:src/ui/commands.rs` から `search::refine` を呼び、変更前の検索語をセッションの `last_query`（または明示の `--previous`）から取得する。履歴に `Refine` を追記し、JSON に `previousQuery` を含める。結果の別スロット保存は未対応のため、Issue #7 の残項目とする。
+非対話の `refine` は `commands.rs` が既存セッションの `last_query`（空なら最後の `QueryRecord`）を変更前の検索語として `search::refine` に渡す。新しい検索は page 1 として実行し、`apply_to_session` が現在の `results` を置き換えて `queries` に `QueryRecord` を追加する。`last_query` / `last_engine` / `page` も更新し、履歴には `Search` と `Refine` のイベントを記録する。JSON の `refine` イベントは `previousQuery` を含む。
 
 ### 4.2 検索語の履歴
 
-状態: 実装完了（REF:src/core/select.rs）
+状態: 実装完了（REF:src/usecases/search.rs）
 
-`!<n>` の展開は `src/core/select.rs`。範囲外は `E1005`。展開後に `normalize_query` を通す。
+`recent_queries(app, limit)` は `search.rs` が履歴から最近の検索語を列挙する補助関数だが、`search` 入力で `!<n>` を展開する機能は実装していない。通常の `search` / `refine` の入力は `prepare_query` で正規化・上限長検査する。
 
 ### 4.3 入力の正規化
 
@@ -124,7 +124,7 @@
 
 状態: 実装完了（REF:src/usecases/guard.rs）
 
-`src/usecases/guard.rs` が `HashMap<String, Instant>` を持ち、`Clock` 経由で現在時刻を取得する。待機は `Clock::sleep` を呼び、テストでは即座に進む仮想時計を使う。
+`src/adapters/http.rs::ReqwestClient` がホスト別の最終送信時刻を `Mutex<HashMap<String, u64>>` で保持し、`NetworkProfile.min_interval_ms` に足りない場合は `Clock::sleep` で待機する。待機が発生した場合は reporter 経由で `W2001` を通知する。
 
 ### 5.2 同時実行
 
@@ -148,4 +148,4 @@ robots.txt の解析は自前の小さな実装（`src/core/robots.rs`）とす�
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`guard::check` は `rate::check` → `quota::check` の順に呼び、両方通過した場合のみ送信する。消費は `guard::consume` として送信成功後に別途呼ぶ。
+クォータは §1.3 の `evaluate_with_preflight` callback が各送信前に `Guard::check` で判定し、成功した操作の全使用量を `Guard::consume_all` で確定する。レート待機は `ReqwestClient::wait_interval` が送信処理内で実施し、`Guard` の責務には含めない。

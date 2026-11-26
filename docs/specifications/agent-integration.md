@@ -37,14 +37,14 @@ JSON の本文フィールドは `context.maxChars` に従う。出力サイズ�
 | `session` | 文字列 | セッション識別子（確定していない実行では空文字） |
 | `at` | 文字列 | 実行日時（UTC、`YYYY-MM-DDTHH:MM:SSZ`） |
 
-検索・文書を扱うイベント（`search` / `next` / `refine` / `document` / `outline`）は、実行中に出た警告を `warnings[]`（各要素は `code` と `message`）として持つ。警告が無い場合も空配列を必ず含める。同じ内容を標準エラーにも出力する。`error` は失敗に至る過程で出た警告を同じ形で持つ。
+検索・文書を扱うイベント（`search` / `next` / `refine` / `document` / `outline`）は、実行中に出た警告を `warnings[]`（各要素は `code` と `message`）として持つ。警告が無い場合も空配列を必ず含める。同じ内容を標準エラーにも出力するが、`--quiet` では標準エラーの警告表示だけを抑制する。`error` は失敗に至る過程で出た警告を同じ形で持つ。
 
 ### 2.2 イベント種別
 
 | `event` | 主なフィールド |
 |---|---|
 | `search` | `query`, `engine`, `results[]`, `page`, `hasMore`, `filtered`, `quota` |
-| `next` | `page`, `results[]`, `hasMore`, `terminated`, `filtered`, `quota` |
+| `next` | `query`, `engine`, `page`, `results[]`, `hasMore`, `terminated`, `terminationReason`, `filtered`, `warnings[]`, `quota` |
 | `refine` | `query`, `previousQuery`, `results[]`, `warnings[]`, `quota` |
 | `document` | `documentId`, `url`, `finalUrl`, `title`, `site`, `chars`, `warnings[]`, `quota`（`outline` / `read` の本文出力の前に必ず 1 回出る） |
 | `outline` | `documentId`, `depth`, `sections[]`, `totalChars`, `hidden`, `warnings[]` |
@@ -55,8 +55,9 @@ JSON の本文フィールドは `context.maxChars` に従う。出力サイズ�
 | `filters` | `ids[]`, `active`（一覧）／`id`, `path`, `definition`（`filters show`） |
 | `config` | `values[]`（`config show`）／`key`, `value`, `origin`（`config explain`）／`paths[]`（`config path`） |
 | `diagnostics` | `checks[]`（`engines validate`, `engines test`, `network validate`, `filters validate`, `config validate`, `doctor`） |
-| `quota` | `metrics[]`, `policy`, `kind`, `amount`, `allowed`（`quota check`）／`action`, `scope`（`quota reset`） |
+| `quota` | `metrics[]`, `policy`, `kind`, `amount`, `allowed`（`quota check`。許可時は `usage[]` も含む）／`action`, `scope`（`quota reset`） |
 | `history` | `entries[]`, `total`（`history list` / `show` / `grep` / `export`）／`removed`（`history clear`） |
+| `warnings` | `warnings[]`（例: `--color --json` の `W1001`。`--quiet` 時は抑制） |
 | `done` | `command`, `summary` |
 | `error` | `code`, `message`, `hint`, `details`, `warnings[]` |
 
@@ -73,11 +74,11 @@ JSON の本文フィールドは `context.maxChars` に従う。出力サイズ�
 
 ### 2.5 フィルタ集計オブジェクト
 
-`filtered` は `kept`, `removed`, `reasons`（キーと件数の対応）, `disabled`, `truncatedByLimit`（1 ページ分の `limit` で切り捨てた件数）を持つ。
+`filtered` は `kept`, `removed`, `reasons`（キーと件数の対応）, `disabled`, `truncatedByMaxPerHost`, `truncatedByMaxResults`, `truncatedByLimit` を持つ。`removed` は規則除外・重複 URL・`maxPerHost` 超過の合計。`truncatedByMaxResults` はフィルタ集合上限、`truncatedByLimit` は表示ページの `limit` で今回出さなかった件数を示す。
 
 ### 2.6 クォータオブジェクト
 
-`quota` は `metrics[]` を持ち、各要素は `name`（`session.searches` 等）, `used`, `limit`（未設定は `null`）, `resetsAt` を持つ。`resetsAt` は `YYYY-MM-DDT00:00 local`（端末のローカル日付の 0 時）または `null`。
+`quota` は `metrics[]` を持ち、各要素は `name`（`session.searches` 等）, `used`, `limit`, `remaining`, `resetsAt` を持つ。`metrics[]` には上限が設定された項目だけを含め、無制限項目は省略する。セッション未選択時は `session.*` メトリクスを省略する。`remaining` は `max(limit - used, 0)`。`resetsAt` は日次項目の次のローカル 0 時（`YYYY-MM-DDT00:00 local`）で、セッション・累積・窓の各項目は `null`。クォータ超過エラーの詳細には日次・窓のリセット時刻を含める。
 
 ### 2.7 エラーオブジェクト
 

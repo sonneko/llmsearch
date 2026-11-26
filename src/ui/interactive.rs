@@ -77,7 +77,15 @@ impl Interactive {
                 }
                 Screen::Results => {
                     self.show_results(out)?;
-                    write!(out, "{}", menu::results_menu()).map_err(io_error)?;
+                    write!(
+                        out,
+                        "{}",
+                        menu::results_menu(
+                            self.session.next_result_id(),
+                            !self.session.page.exhausted,
+                        )
+                    )
+                    .map_err(io_error)?;
                     out.flush().map_err(io_error)?;
                     let Some(line) = read_line(input)? else {
                         return Ok(());
@@ -210,7 +218,9 @@ impl Interactive {
                     out,
                     "search: {} results {} / {}",
                     outcome.hits.len(),
-                    outcome.filtered.summary_line(),
+                    outcome
+                        .filtered
+                        .summary_line_for(outcome.hits.len(), outcome.truncated_by_limit),
                     self.quota_text(Metric::Searches)
                 )
                 .map_err(io_error)?;
@@ -458,7 +468,9 @@ impl Interactive {
     }
 
     fn show_history(&mut self, out: &mut dyn Write) -> Result<(), AppError> {
-        match history_uc::list(&self.app, Some(20), None) {
+        let session_id = self.app.current_session_id();
+        let session_filter = (!session_id.is_empty()).then_some(session_id.as_str());
+        match history_uc::list(&self.app, Some(20), session_filter) {
             Ok(entries) => {
                 if entries.is_empty() {
                     writeln!(out, "no history entries").map_err(io_error)?;

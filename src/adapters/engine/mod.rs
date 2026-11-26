@@ -3,5 +3,5 @@
 pub mod eval;
 pub mod loader;
 
-pub use eval::{EngineCall, evaluate};
+pub use eval::{EngineCall, evaluate, evaluate_with_preflight};
 pub use loader::{LoadedEngines, load_registry};

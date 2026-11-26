@@ -16,6 +16,7 @@ pub struct Guard {
     clock: Arc<dyn Clock>,
     reporter: Arc<dyn Reporter>,
     session: Usage,
+    session_active: bool,
     counters: Counters,
 }
 
@@ -28,8 +29,10 @@ impl Guard {
         session_id: &str,
     ) -> Result<Self, AppError> {
         let mut counters = store.load()?;
-        // セッションが変わったらセッション消費量を 0 に戻す
-        if counters.session_key != session_id {
+        let session_active = !session_id.is_empty();
+        // セッションが指定されている場合だけ持ち主を切り替える。
+        // `quota show` などセッションを持たないコマンドで空 ID を保存しない。
+        if session_active && counters.session_key != session_id {
             counters.session_key = session_id.to_string();
             counters.session = Usage::default();
         }
@@ -45,13 +48,18 @@ impl Guard {
         if !policy.enabled {
             reporter.verbose("the quota is disabled (no limits are applied)");
         }
-        let session = counters.session;
+        let session = if session_active {
+            counters.session
+        } else {
+            Usage::default()
+        };
         Ok(Self {
             policy,
             store,
             clock,
             reporter,
             session,
+            session_active,
             counters,
         })
     }
@@ -61,7 +69,7 @@ impl Guard {
         match quota::check(
             &self.policy,
             &self.counters,
-            &self.session,
+            self.session_active.then_some(&self.session),
             metric,
             amount,
             self.clock.today_local(),
@@ -105,8 +113,10 @@ impl Guard {
     }
 
     fn apply(&mut self, metric: Metric, amount: u64) {
-        self.session.add(metric, amount);
-        self.counters.session.add(metric, amount);
+        if self.session_active {
+            self.session.add(metric, amount);
+            self.counters.session.add(metric, amount);
+        }
         self.counters.day.add(metric, amount);
         self.counters.total.add(metric, amount);
         let now = self.clock.now_utc();
@@ -145,7 +155,7 @@ impl Guard {
         quota::remaining(
             &self.policy,
             &self.counters,
-            &self.session,
+            self.session_active.then_some(&self.session),
             self.clock.now_utc(),
             self.clock.today_local(),
         )
@@ -243,6 +253,38 @@ mod tests {
         guard.consume(Metric::Searches, 1).unwrap();
         let err = guard.consume(Metric::Searches, 1).unwrap_err();
         assert_eq!(err.code, crate::core::errors::ErrorCode::E5005);
+    }
+
+    #[test]
+    fn sessionless_guard_does_not_replace_or_display_an_existing_session_counter() {
+        let saved = Counters {
+            session_key: "prior-session".into(),
+            session: Usage {
+                searches: 3,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let store = Arc::new(MemoryCounters(std::sync::Mutex::new(saved.clone())));
+        let mut guard = Guard::new(
+            QuotaPolicy::default(),
+            store.clone(),
+            Arc::new(SystemClock::new()),
+            Arc::new(Silent),
+            "",
+        )
+        .unwrap();
+        assert!(
+            guard
+                .metrics()
+                .iter()
+                .all(|metric| !metric.name.starts_with("session."))
+        );
+        guard.consume(Metric::Searches, 1).unwrap();
+        let after = store.load().unwrap();
+        assert_eq!(after.session_key, "prior-session");
+        assert_eq!(after.session.searches, 3);
+        assert_eq!(after.day.searches, 1);
     }
 
     #[test]

@@ -12,7 +12,7 @@
 
 状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
 
-純粋な判定ロジックは `src/core/config/quota.rs` に置く（`Counter`, `QuotaPolicy`, `Decision`）。レート制限は `src/usecases/guard.rs`、クォータは `src/usecases/guard.rs` が担当し、両者を `src/usecases/guard.rs` の `Guard` がまとめる。
+純粋なクォータ判定ロジックは `src/core/config/quota.rs` に置く（`Counters`, `QuotaPolicy`, `QuotaDecision`）。`src/usecases/guard.rs` の `Guard` はクォータ判定と消費を担当する。ホスト単位のレート間隔は `src/adapters/http.rs::ReqwestClient::wait_interval` が `NetworkProfile.min_interval_ms` に従って待機し、必要時に `W2001` を通知する。
 
 ### 1.2 ポリシーの参照
 
@@ -24,7 +24,7 @@
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-`Guard::check(metric, amount) -> Result<(), AppError>` が `core::config::quota::check` に委譲する。超過時は `ExceedInfo::to_error()` が `E5005` を作り、`detail` に `<scope>.<項目> = <使用量>/<上限>`（窓なら `(resets <時刻>)` 付き）を入れる。`onExceed=warn` で上限の 2 倍未満のときは `QuotaDecision::Allowed { warn: true }` を返し、`Guard` が `W5005` を出す。
+`Guard::check(metric, amount) -> Result<(), AppError>` が `core::config::quota::check` に委譲する。超過時は `ExceedInfo::to_error()` が `E5005` を作り、`detail` に `<scope>.<項目>: requested <要求量>, used <現在>/<上限> (projected <要求後>/<上限>)`（日次・窓ならリセット時刻付き）を入れる。`quota check` の許可時は `used/limit` と残量を返す。`onExceed=warn` で実効上限の 2 倍未満のときは `QuotaDecision::Allowed { warn: true }` を返し、`Guard` が `W5005` を出す。
 
 ---
 
@@ -80,8 +80,8 @@
 
 `Guard::consume_all(usage: Usage)` を各ユースケースの成功直後に 1 回だけ呼ぶ。消費は 1 か所にまとめ、経路ごとに散らばらせない。
 
-- 検索（`REF:src/usecases/search.rs`）: 送信した回数を `Usage.searches`、得られた件数（フィルタ前）を `Usage.results` に入れる。`chars` は消費しない（仕様 §2.2 の `chars` は `read` の出力のみ）。フォールバックで複数エンジンを試した場合は、試行ごとに 1 を積む。積み上げた `Usage` はローカル変数 `pending` に保持し、**操作が成功したときだけ** `consume_all` で永続化する。そのため、次に試すエンジンの判定は `guard.check(Searches, pending.searches + 1)` のように「既に送った分 + これから送る 1 回」で行う。
-- 同一エンジン内での再送信（抽出結果 0 件による再試行。`REF:src/adapters/engine/eval.rs`）は `EngineCall.requests` として送信回数を返し、検索がそれを `searches` に合算する。
+- 検索（`REF:src/usecases/search.rs`）: 実際の HTTP 送信ごとに `Guard::check(Metric::Searches, pending.searches + 1)` を行い、通過した回数を `pending.searches` に積む。`call_engine` は `evaluate_with_preflight` に callback を渡し、`HttpClient::send_blocking_with_preflight` が `ReqwestClient` の transport retry ごとにも callback を呼ぶため、page-style の隣接 provider page・抽出 retry・HTTP retry すべてを送信直前に判定する。取得できた件数（フィルタ前）は `Usage.results` に入れ、`chars` は消費しない（仕様 §2.2 の `chars` は `read` の出力のみ）。積み上げた `Usage` はローカル変数 `pending` に保持し、**操作が成功したときだけ** `consume_all` で永続化する。
+- `EngineCall.requests` は成功した評価で実際の送信回数を返すが、クォータ判定の累積値は各送信前の callback が保持するため、エンジン評価が最終的に失敗しても fallback / merge の次試行で既送信回数を含められる。
 - 取得（`REF:src/usecases/document.rs`）: `Usage.fetches` のみを消費する。取得した本文の文字数は `chars` に入れない（`outline` だけで本文の予算を減らさないため）。`chars` は `read` が出力文字数で消費する。
 
 ### 3.2 失敗時の扱い
@@ -108,25 +108,25 @@
 
 状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
 
-`Counters { day_key, session_key, session: Usage, day: Usage, window: Vec<WindowCounter>, total: Usage, updated_at }` を `counters.json` に保存する。セッション消費量もこのファイルが持ち、`session_key` が現在のセッションと異なれば 0 に戻す（`Guard::new`）。
+`Counters { day_key, session_key, session: Usage, day: Usage, window: Vec<WindowCounter>, total: Usage, updated_at }` を `counters.json` に保存する。明示セッション ID がある場合だけ `Guard::new` は `session_key` を比較・切り替え、異なる ID ならセッション消費量を 0 に戻す。ID が空のコマンドはセッション判定・表示・更新を行わず、既存 `session_key` と使用量を保持する。
 
 ### 4.2 残量の表示
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-`core::config::quota::remaining(policy, counters, session, now_utc, now_local_date) -> Vec<MetricUsage>` で一覧を作り、`src/ui/commands.rs` が `quota show` の表に、`usecases::guard::usage_line(metric)` が対話モードの 1 行注記に整形する。
+`core::config::quota::remaining(policy, counters, session: Option<&Usage>, now_utc, now_local_date) -> Vec<MetricUsage>` で設定済み上限の一覧を作る。セッション未選択時は session scope を含めない。`quota show` / `quota check` は `counters.session_key` が指す有効なセッションを暗黙再開して使用量を表示し、該当セッションが無ければ session scope を省く。`src/ui/commands.rs` がテキスト / JSON に整形し、`usecases::guard::usage_line(metric)` が対話モードの注記に使う。
 
 ### 4.3 例
 
 状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
 
-`remaining` の各要素は `name` / `used` / `limit` / `resets_at` を持ち、`quota show` が `name used / limit resets_at` の 3 列で表示する。`resets_at` は日次項目についてだけ `YYYY-MM-DDT00:00 local` を返し、それ以外は `null` とする。
+`MetricUsage` は `name` / `used` / `limit: Option<u64>` / `resets_at` を持ち、`remaining()` は上限から使用量を差し引く。`quota show` はテキストで `used / limit (remaining N)` を出し、JSON 各要素は `name` / `used` / `limit` / `remaining` / `resetsAt` を持つ。設定済み上限のあるメトリクスだけ列挙し、セッション未選択時は `session.*` を省く。`resets_at` は日次の次のローカル 0 時、その他は `null`。
 
 ### 4.4 コマンド
 
 状態: 実装完了（REF:src/ui/commands.rs）
 
-`src/ui/commands.rs` の `run_quota` が `show` / `reset` / `check` を実装する。`reset` は `--yes` を要求し、`--scope` が `session` / `day` / `window` / `total` / `all` 以外なら `E1004`（全消去にしない）。成功後は `type: "quota"` の履歴 1 件（`payload.action = "reset"`）を記録する。
+`src/ui/commands.rs` の `run_quota` が `show` / `reset` / `check` を実装する。`show` / `check` は最新の有効セッションを再開し、セッション ID と使用量を標準エラーへ通知する（`--quiet` なら抑制）。`check` は許可時に要求メトリクスの `used/limit` と残量を返し、超過時は要求量・現在量・要求後の見込み量を `E5005` detail に含める。`reset` は `--yes` を要求し、`--scope` が `session` / `day` / `window` / `total` / `all` 以外なら `E1004` を返し、許容される `--scope` 値を hint に全て示す（全消去にしない）。成功後は `type: "quota"` の履歴 1 件（`payload.action = "reset"`）を記録する。
 
 ---
 
@@ -146,7 +146,7 @@
 
 状態: 実装完了（REF:src/ui/commands.rs, REF:src/core/history.rs）
 
-消費を伴う操作は `HistoryEntry` の `cost` / `remaining` に消費量と残量を入れて記録する。`quota reset` は `EventType::Quota` の 1 レコードとして `src/ui/commands.rs` の `record_quota_reset` が記録する。`payload` は `{ "action": "reset", "scope": ..., "policy": ..., "note": ... }` とし、`cost` にリセット前、`remaining` にリセット後の消費量を入れる（`Cost` は 4 項目のため、`MetricUsage` の一覧は `payload` に入れない）。
+検索・ページングなど消費を伴う操作の件数やエンジン情報は対応する `HistoryEntry.payload` に記録する。現在 `cost` / `remaining` の両フィールドを設定するのは `quota reset` の監査記録で、`EventType::Quota` の 1 レコードとして `src/ui/commands.rs::record_quota_reset` が書く。`payload` は `{ "action": "reset", "scope": ..., "policy": ..., "note": ... }` とし、`cost` にリセット前、`remaining` にリセット後の消費量を入れる（`Cost` は 4 項目のため、`MetricUsage` の一覧は `payload` に入れない）。
 
 リセット前の値は `Counters` から読み、`app.counters.reset(scope)` の直後に記録する。履歴の追記に失敗してもリセットは成功として扱い、`Reporter::warn` で 1 行通知する（監査の失敗で解除を巻き戻すと、上限に張り付いたまま操作できなくなるため）。`scope` の解釈は `CounterStore::reset` と同じ語（`session` は `Counters.session`、`day` は `day` と `day_key`、`window` は `window`、`total` は `total`、`all` は `Counters::default()`）を用いる。
 

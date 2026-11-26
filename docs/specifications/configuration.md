@@ -51,10 +51,10 @@
 
 1. `--config <path>` で明示指定（不在は `E1003`）
 2. 環境変数 `LLMSEARCH_CONFIG`（不在は `E1003`）
-3. 状態ディレクトリの `settings.json`（`<state.dir>/settings.json`）
-4. 利用者設定ディレクトリの `settings.json`（`~/.config/llmsearch/settings.json` 等）
+3. 利用者設定ディレクトリの `settings.json`（`~/.config/llmsearch/settings.json` 等）
+4. 状態ディレクトリの `settings.json`（`<state.dir>/settings.json`）
 
-3 と 4 は下に行くほど弱く、1 と 2 は「そのファイルだけを使う」指定である。3・4 が両方存在する場合は 3 を先に読み、4 を深いマージで上書きする（結果として 3 が強い）。3・4 が存在しない場合は読み飛ばす。
+1 と 2 は「そのファイルだけを使う」指定である。3 と 4 が両方存在する場合は 3 を先に読み、4 を深いマージで後から適用するため状態ディレクトリの設定が強い。`--state-dir` と `LLMSEARCH_STATE_DIR` は状態設定ファイル候補の場所を指定する。どちらも無い場合、利用者設定の `state.dir` を候補に使い、それも無ければプラットフォームの状態ディレクトリ配下 `llmsearch` を使う。候補が存在しない場合は読み飛ばすが、`config path` では候補として表示する。
 
 読み込んだパスは `config show` と `--verbose` に表示する。ファイルが 1 つも無い場合は既定値で動作し、`config init` で雛形を生成できる。読み込みの対象は `settings.json` だけでなく、`settings.json` が `$ref` で参照するファイル、`network` / `filters` / `quota` の ID 参照で解決したファイル、エンジン定義を含む。
 

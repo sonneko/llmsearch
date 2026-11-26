@@ -31,6 +31,8 @@ pub struct LoadedSettings {
 #[derive(Debug, Clone, Default)]
 pub struct LoadOptions {
     pub config_path: Option<PathBuf>,
+    /// `--state-dir` が指す `settings.json` の探索先。
+    pub state_dir: Option<PathBuf>,
     /// `--no-color` / `--quiet` 等の CLI 上書き。
     pub overrides: Vec<(String, Value)>,
 }
@@ -110,13 +112,41 @@ fn candidate_paths(env: &dyn Env, options: &LoadOptions) -> Result<Vec<PathBuf>,
         }
         return Ok(vec![path]);
     }
+    let user_settings = env
+        .config_home()
+        .map(|dir| dir.join("llmsearch/settings.json"));
+
+    // state.dir は利用者設定からも指定できる。明示 CLI / 環境変数が
+    // 無いときに限り、状態設定ファイルの候補を先に導出する。
+    let configured_state =
+        if options.state_dir.is_none() && env.var("LLMSEARCH_STATE_DIR").is_none() {
+            match user_settings.as_ref().filter(|path| path.is_file()) {
+                Some(path) => read_json(path)?
+                    .get("state")
+                    .and_then(|state| state.get("dir"))
+                    .and_then(Value::as_str)
+                    .filter(|dir| !dir.trim().is_empty())
+                    .map(PathBuf::from),
+                None => None,
+            }
+        } else {
+            None
+        };
+
+    let state_candidate = options
+        .state_dir
+        .clone()
+        .or_else(|| env.var("LLMSEARCH_STATE_DIR").map(PathBuf::from))
+        .or(configured_state)
+        .or_else(|| env.state_home().map(|dir| dir.join("llmsearch")));
+
     let mut out = Vec::new();
     // 強い順は「状態ディレクトリ → 利用者設定ディレクトリ」なので、
     // 後勝ちで畳み込むこの一覧では利用者設定を先に置く。
-    if let Some(dir) = env.config_home() {
-        out.push(dir.join("llmsearch/settings.json"));
+    if let Some(path) = user_settings {
+        out.push(path);
     }
-    if let Some(dir) = state_dir(env, None) {
+    if let Some(dir) = state_candidate {
         out.push(dir.join("settings.json"));
     }
     Ok(out)

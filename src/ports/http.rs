@@ -62,6 +62,20 @@ pub trait HttpClient: Send + Sync {
         request: &HttpRequest,
     ) -> Result<HttpResponse, AppError>;
 
+    /// 送信の直前に呼び出し側の判定を行ってから HTTP 要求を送る。
+    ///
+    /// 標準実装は 1 回の送信を想定する。内部で再試行する実装は、各実送信の直前に
+    /// `preflight` を呼ぶよう override する。
+    fn send_blocking_with_preflight(
+        &self,
+        profile: &NetworkProfile,
+        request: &HttpRequest,
+        preflight: &mut dyn FnMut() -> Result<(), AppError>,
+    ) -> Result<HttpResponse, AppError> {
+        preflight()?;
+        self.send_blocking(profile, request)
+    }
+
     /// プロファイルの内容を表示用に要約する。
     fn describe(&self, profile: &NetworkProfile) -> String;
 }

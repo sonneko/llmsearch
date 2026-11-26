@@ -18,13 +18,13 @@
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`SessionStore::open(id: Option<&str>) -> Result<OpenedSession>`。`OpenedSession { state, created: bool, expired: bool }`。期限切れの場合は `state` を返さず `expired: true` を返し、呼び出し側が新規作成を提案する。
+`App::select_session(id)` は `SessionStore::load(id)` で既存状態を確認し、見つからなければ `E5001` を返して新規作成しない。`App::ensure_session()` は ID を割り当てるだけで、新規 `search` の `apply_to_session` が状態ファイルを保存する。`App::resume_latest_session()` は空の現行 ID の場合に `counters.json` の `session_key` を読み、対応するセッションがあれば再開する。`App::require_existing_session()` は現行または直近の既存セッションを要求し、`next` / `refine` / 識別子を使う `read` / `outline` が利用する。
 
 ### 1.3 表示
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`src/ui/interactive.rs` の `Interactive::run` が開始時に `session {id} (resume with --session {id})` を 1 行出す。`--quiet` 時は出さない。
+`src/ui/interactive.rs` の `Interactive::run` が開始時に `session {id} (resume with --session {id})` を 1 行出す。非対話 `search` は `commands.rs` が案内を標準エラーへ出し、暗黙に再開した `next` / `refine` / `quota show` / `quota check` も再開 ID を通知する。`--quiet` 時は通知しない。JSON イベントには `session` フィールドで ID を含める。
 
 ### 1.4 有効期間
 
@@ -42,7 +42,7 @@
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
 
-`SessionState` は仕様の項目に加え、`usage: Usage`（クォータ消費）、`quota_policy: String`、`engine: Option<String>` を持つ。`serde` の `#[serde(default)]` を全フィールドに付け、項目追加時に古いセッションを読めるようにする。未知フィールドは `extra` で温存する。
+`SessionState` は `schema_version` / `session_id` / 作成・更新時刻 / `queries` / `active_query` / `results` / `page` / `documents` / `outline_depth` / `selections` / `pending_selections` / `last_query` / `last_engine` を持つ。`QueryRecord` は検索語・エンジン・時刻・結果件数・除外件数を保持し、`PageState` は現在ページ・次ページ・終端フラグを持つ。クォータ消費量はセッション JSON ではなく `counters.json` の `session_key` 付きカウンタに保存する。全フィールドに既定値を適用して古いセッションを読み込む。
 
 ### 2.2 文書キャッシュ
 

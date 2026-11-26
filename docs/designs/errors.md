@@ -12,7 +12,7 @@
 
 状態: 実装完了（REF:src/core/errors.rs）
 
-`src/core/errors.rs` に `enum ErrorCode`（`E1001`〜`E5005` を網羅）と `enum Severity` を置く。分類は `ErrorCode::kind() -> ErrorKind` が返し、`src/core/errors.rs` が `ErrorKind` → 終了コードへ写像する。`AppError` は `thiserror` の `#[derive(Error)]` で定義し、`code()` を実装する。
+`src/core/errors.rs` に `ErrorCode`（`E1001`〜`E5005`）、`ErrorKind`、`Diagnostic`、`AppError` を置く。`ErrorCode::kind()` が種別を返し、`ErrorKind::exit_code()` が終了コードを決める。`AppError` は `code` / 任意の `detail` / `hint` / 警告列などを保持する通常の構造体で、`Display` はコードカタログの文言を使う。
 
 ### 1.2 警告
 
@@ -30,7 +30,7 @@
 
 状態: 実装完了（REF:src/core/errors.rs）
 
-発生箇所は「引数解析（`ui/cli/args.rs`）」「設定検証（`core/config/*::validate`）」「エンジン定義検証（`usecases/engines/validate`）」「入力解釈（`core/parse/`）」「対象解決（`REF:src/ui/commands.rs` の `resolve_target`）」に限定する。各所は `Result<_, AppError>` を返し、`panic!` / `unwrap` を使わない（`tests/architecture.rs` で `unwrap_used` 系の clippy lint を有効化）。
+`AppError` の既定文面・hint は `src/core/errors.rs` に置き、原因が分かるコマンド経路では生成側が個別 hint を設定する。`commands::resource_not_found` は E1003 detail に要求された network profile / filter set ID を示し、hint に利用可能な ID と対応する list command を添える。`quota reset --scope` の E1004 は許可される各 scope を `--scope` 付きで列挙する。`parse_sections` は `read --section` の E1005 を `S0` / `S3` / `D1:S3` の例で案内し、存在しない節の E1006 は `outline` を案内する。
 
 ### 2.2 ネットワークエラー（`E2xxx`）
 
@@ -54,7 +54,7 @@
 
 状態: 実装完了（REF:src/core/errors.rs）
 
-`adapters::state::errors::map_io(io::Error, path) -> AppError` が `PermissionDenied` / `StorageFull` / `NotFound` を写像する。`E5005` は `usecases::guard::quota` が生成する。
+状態ストアの読み書きは `src/adapters/state/` から `AppError` を返す。`E5005` は `src/usecases/guard.rs` の `ExceedInfo::to_error()` が要求量、現在量／上限、要求後の見込み量、該当すればリセット時刻を detail に含めて生成する。
 
 ---
 
@@ -66,7 +66,7 @@
 
 | コード | 発行箇所 |
 |---|---|
-| `W1001` | `REF:src/main.rs`（色付けを要求されたが端末でない） |
+| `W1001` | `REF:src/main.rs`（`--color --json` 併用時に ANSI を無効化。JSON `warnings` イベントで通知） |
 | `W1002` | `REF:src/usecases/config.rs`, `REF:src/adapters/engine/loader.rs` |
 | `W1003` | `REF:src/usecases/search.rs`（検索語の切り詰め） |
 | `W1004` | `REF:src/adapters/http.rs`（地の文の認証情報） |
@@ -118,7 +118,7 @@
 
 状態: 実装完了（REF:src/core/errors.rs）
 
-`Reporter::error` / `warn` は標準エラーへ書く。JSON モードでは加えて `error` イベントを標準出力へ出し、`warnings` は対象イベントへ付す。
+`Renderer::error` は標準エラーへ書き、`--quiet` でもエラー表示は維持する。`Renderer::warn` は `--quiet` でない場合だけ標準エラーへ書く。JSON モードでは加えて `error` イベントを出し、操作内の警告配列は quiet に関わらず対象イベントへ付す。`--color --json` の `W1001` は `main.rs` が標準エラーと独立した `warnings` JSON イベントの両方へ出すが、`--quiet` ではイベントも含めて抑制する。
 
 ### 4.4 秘匿情報
 

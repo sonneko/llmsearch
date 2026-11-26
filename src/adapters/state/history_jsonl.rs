@@ -116,7 +116,16 @@ impl JsonlHistory {
                 continue;
             }
             // 壊れた行は読み飛ばす（`history` の表示は継続する）。
-            if let Ok(entry) = serde_json::from_str::<HistoryEntry>(line) {
+            if let Ok(mut entry) = serde_json::from_str::<HistoryEntry>(line) {
+                // M13-era entries kept the engine only in payload; hydrate the indexed field
+                // so list/show/filter/export stay consistent with newly written records.
+                if entry.engine.is_none() {
+                    entry.engine = entry
+                        .payload
+                        .get("engine")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string);
+                }
                 out.push(entry);
             }
         }

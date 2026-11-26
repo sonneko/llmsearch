@@ -147,13 +147,13 @@
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
 
-`PagingSpec { style: Style, offset_param: String, page_param: String, page_base: u32, page_size: Option<u32>, max_results: u32, offset_step: Option<u32> }`。`Style` は `Offset` / `Page`。`style=offset` のとき `offsetParam`、`style=page` のとき `pageParam` のみを `TmplCtx` に渡す（不要な変数を定義に混ぜない）。
+`PagingSpec { style: PagingStyle, offset_param: String, page_param: String, page_base: u32, page_size: Option<u32>, max_results: u32, offset_step: Option<u32> }`。`PagingStyle` は `Offset` / `Page`。`style=offset` は `min(search.limit, limits.maxPageSize)` 件を要求し、その実要求数が `pageSize`（未設定時は `offsetStep`、さらに未設定なら要求数）より小さい場合は実要求数を offset 増分に使う。それ以外は `offsetStep`（省略時は `pageSize`）に従う。CLI のページ範囲も同じ実増分で検証する。`style=page` は `pageSize`（省略時は要求件数、`limits.maxPageSize` で上限）をプロバイダ幅として、論理ページを満たす隣接プロバイダページを順次取得して切り出す。`style=offset` のとき `offsetParam`、`style=page` のとき `pageParam` のみを `TmplCtx` に渡す。
 
 ### 5.2 ページング非対応
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
 
-`paging: Option<PagingSpec>` が `None` のとき `PageSlice::single(len)` を返し、`has_more = false`。`next` ユースケースは定義を見てこの判別を行う（エンジン ID では分岐しない）。
+`paging: Option<PagingSpec>` が `None` のエンジンは `search_once` で `has_more = false` とし、CLI は `search --page 1` だけを許可する。`next` は保存済み `PageState.exhausted` を確認して、終端後の要求を拒否する。
 
 ---
 
@@ -161,7 +161,7 @@
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
 
-`Limits` は既定値を `impl Default` で持ち、`usecases::search::effective_limits(def, network)` が `limits.*` とネットワークプロファイル、`search.max_results` の最小値を採る。`requiresApiKey` は `secrets` の解決可否と併せて `engines list` の `available` 列に反映する。
+`Limits` は `impl Default` で既定値を持つ。`EngineDef::max_results(global_max)` は `limits.maxResults` / `paging.maxResults` / `search.max_results` の最小値を返し、各 `call_engine` 要求の `limit` は `limits.maxPageSize` で制限する。`requiresApiKey` は `secrets` の解決可否と併せて `engines list` の `available` 列に反映する。
 
 ---
 
@@ -185,7 +185,7 @@
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
 
-`usecases::search::run_with_fallback(chain, query)` が `chain` を順に試す。再試行するのは `AppError::Provider { kind: NoResults | Blocked }` のみで、他は即座に返す。成功時は `used_engine` と `W4005` を結果に含める。
+`usecases::search::run` は `search.merge` に応じて `run_fallback` または `run_merge` へ分岐する。`run_fallback` は `candidate_engines` の候補を順に試し、`ports::classify` が `FallbackClass::RetryOtherEngine`（`E4001` / `E4003` / `E4004`）を返す場合に限り次へ進む。それ以外（`E5005` を含む）は即座に返す。後続候補で成功した場合は `W4003` を付け、結果には実際に使ったエンジンを記録する。
 
 ### 7.4 複数エンジンのマージ（任意機能）
 
@@ -193,7 +193,7 @@
 
 `src/core/search.rs` の `merge_round_robin(lists: Vec<Vec<RawHit>>, engines: &[String]) -> (Vec<RawHit>, Vec<String>, usize)` は純粋関数。各エンジンの結果を 1 件ずつ順に取り出し、URL の正規形（`url::dedup_key`）をキーに `HashSet` で重複を除去して、由来エンジン名を並べて返す。識別子の付与はマージ後に `assign_ids` で 1 回だけ行い、連番を保証する。
 
-`usecases::search::run` は `search.merge=true` のとき `run_merge` へ分岐する。`run_merge` は `search.engines` を列挙順に逐次呼び、各エンジンの結果を集めて `merge_round_robin` に渡す。失敗したエンジンはエラーコード付きの警告 1 行に変換して捨て、全滅した場合だけ最初のエラーを返す。`pending.searches` には成功・失敗にかかわらず送信回数を積み、統合結果を返すときに `Guard::consume_all` で確定する（`quotas.md` §3.2）。既存の `candidate_engines` はマージ時に `search.engines` をそのまま返す（フォールバックの連鎖は作らない）。
+`run_merge` は `search.engines` を列挙順に逐次呼び、各エンジンの `search_once` が返す同じ論理ページを `merge_round_robin` に渡す。offset 方式は要求件数を `maxPageSize` で制限して 1 回送り、page 方式は必要な provider page を取得して論理ページを切り出す。失敗したエンジンはエラーコード付きの警告 1 行に変換して除外し、全滅した場合だけ最初のエラーを返す。`pending.searches` は各送信前の callback で成功・失敗にかかわらず積み、統合結果を返すときに `Guard::consume_all` で確定する（`quotas.md` §3.2）。クォータ拒否 `E5005` は途中でもマージ全体を中止し、他エンジンへの送信に進まない。マージ時は `search.fallback` の連鎖を作らない。
 
 ---
 

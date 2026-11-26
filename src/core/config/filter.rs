@@ -9,6 +9,7 @@ use crate::core::url;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct FilterSet {
+    #[serde(alias = "schema_version")]
     pub schema_version: u32,
     pub id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -36,23 +37,76 @@ pub struct FilterStats {
 
 impl FilterStats {
     pub fn record(&mut self, key: impl Into<String>) {
-        *self.reasons.entry(key.into()).or_insert(0) += 1;
-        self.removed += 1;
+        self.record_count(key, 1);
+    }
+
+    pub fn record_count(&mut self, key: impl Into<String>, count: usize) {
+        if count == 0 {
+            return;
+        }
+        let reason = self.reasons.entry(key.into()).or_insert(0);
+        *reason = reason.saturating_add(count);
+        self.removed = self.removed.saturating_add(count);
     }
 
     pub fn summary_line(&self) -> String {
-        if self.disabled {
+        self.summary_line_for(self.kept, 0)
+    }
+
+    /// 表示件数と `--limit` による切り捨てを含む要約。
+    pub fn summary_line_for(&self, shown: usize, truncated_by_limit: usize) -> String {
+        // `truncated_by_limit` is a subset of `kept`; adding it here would double-count.
+        let total = self
+            .kept
+            .saturating_add(self.removed)
+            .saturating_add(self.truncated_by_max_results);
+        if self.disabled
+            && self.removed == 0
+            && self.truncated_by_max_results == 0
+            && truncated_by_limit == 0
+        {
             return "(filters: disabled)".to_string();
         }
-        if self.removed == 0 {
-            return format!("(filters: all {} shown)", self.kept);
+        if !self.disabled
+            && self.removed == 0
+            && self.truncated_by_max_results == 0
+            && truncated_by_limit == 0
+        {
+            return format!("(filters: all {shown} shown)");
         }
-        format!(
-            "(filters: showing {} of {} results, {} filtered out)",
-            self.kept + self.removed,
-            self.kept,
-            self.removed
-        )
+
+        let mut details = Vec::new();
+        if self.disabled {
+            details.push("disabled".to_string());
+        }
+        details.push(format!("showing {shown} of {total} results"));
+        let duplicate_removed = self.reasons.get("duplicateUrl").copied().unwrap_or(0);
+        let rule_removed = self
+            .removed
+            .saturating_sub(self.truncated_by_max_per_host)
+            .saturating_sub(duplicate_removed);
+        if rule_removed > 0 {
+            details.push(format!("{rule_removed} filtered out"));
+        }
+        if duplicate_removed > 0 {
+            details.push(format!("{duplicate_removed} duplicate URLs removed"));
+        }
+        if self.truncated_by_max_per_host > 0 {
+            details.push(format!(
+                "{} omitted by maxPerHost",
+                self.truncated_by_max_per_host
+            ));
+        }
+        if self.truncated_by_max_results > 0 {
+            details.push(format!(
+                "{} omitted by maxResults",
+                self.truncated_by_max_results
+            ));
+        }
+        if truncated_by_limit > 0 {
+            details.push(format!("{truncated_by_limit} beyond --limit"));
+        }
+        format!("(filters: {})", details.join("; "))
     }
 }
 
@@ -63,9 +117,9 @@ pub struct ResultFilters {
     pub deny: Vec<RuleSpec>,
     pub allow: Vec<RuleSpec>,
     pub require: Vec<RuleSpec>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "max_results", skip_serializing_if = "Option::is_none")]
     pub max_results: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "max_per_host", skip_serializing_if = "Option::is_none")]
     pub max_per_host: Option<usize>,
     pub diversity: bool,
 }
@@ -76,23 +130,23 @@ pub struct ResultFilters {
 pub struct RuleSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub host: Option<OneOrMany>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "host_regex", skip_serializing_if = "Option::is_none")]
     pub host_regex: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "url_regex", skip_serializing_if = "Option::is_none")]
     pub url_regex: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "path_prefix", skip_serializing_if = "Option::is_none")]
     pub path_prefix: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "title_regex", skip_serializing_if = "Option::is_none")]
     pub title_regex: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "snippet_regex", skip_serializing_if = "Option::is_none")]
     pub snippet_regex: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "title_contains", skip_serializing_if = "Option::is_none")]
     pub title_contains: Option<OneOrMany>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheme: Option<OneOrMany>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "older_than_days", skip_serializing_if = "Option::is_none")]
     pub older_than_days: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "newer_than_days", skip_serializing_if = "Option::is_none")]
     pub newer_than_days: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extension: Option<OneOrMany>,
@@ -313,31 +367,32 @@ pub fn apply_results(
         disabled,
         ..Default::default()
     };
-    if disabled {
-        stats.kept = hits.len();
-        return (hits, stats);
-    }
     let Some(rf) = filters.result_filters() else {
         stats.kept = hits.len();
         return (hits, stats);
     };
 
     let mut kept: Vec<SearchHit> = Vec::new();
-    for hit in hits {
-        if let Some(rule) = filters.deny.iter().find(|r| r.matches(&hit, now))
-            && !filters.allow.iter().any(|r| r.matches(&hit, now))
-        {
-            stats.record(rule.id.clone());
-            continue;
+    if disabled {
+        // `--no-filter` bypasses user rules, but the result-set caps remain in force.
+        kept = hits;
+    } else {
+        for hit in hits {
+            if let Some(rule) = filters.deny.iter().find(|r| r.matches(&hit, now))
+                && !filters.allow.iter().any(|r| r.matches(&hit, now))
+            {
+                stats.record(rule.id.clone());
+                continue;
+            }
+            if let Some(rule) = filters.require.iter().find(|r| !r.matches(&hit, now)) {
+                stats.record(rule.id.clone());
+                continue;
+            }
+            kept.push(hit);
         }
-        if let Some(rule) = filters.require.iter().find(|r| !r.matches(&hit, now)) {
-            stats.record(rule.id.clone());
-            continue;
-        }
-        kept.push(hit);
     }
 
-    // maxPerHost
+    // maxPerHost は規則フィルタと独立した集約上限として常に適用する。
     if let Some(max) = rf.max_per_host {
         let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
         let mut out = Vec::new();
@@ -349,6 +404,7 @@ pub fn apply_results(
             let c = counts.entry(host).or_insert(0);
             if *c >= max {
                 stats.truncated_by_max_per_host += 1;
+                stats.record("maxPerHost");
                 continue;
             }
             *c += 1;
@@ -414,15 +470,20 @@ pub fn interleave_by_host(hits: Vec<SearchHit>) -> Vec<SearchHit> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ContentFilters {
+    #[serde(alias = "strip_selectors")]
     pub strip_selectors: Vec<String>,
+    #[serde(alias = "strip_patterns")]
     pub strip_patterns: Vec<String>,
+    #[serde(alias = "strip_lines")]
     pub strip_lines: Vec<LineRule>,
+    #[serde(alias = "keep_only")]
     pub keep_only: Vec<LineRule>,
     pub normalize: NormalizeOptions,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "min_section_chars", skip_serializing_if = "Option::is_none")]
     pub min_section_chars: Option<usize>,
+    #[serde(alias = "drop_empty_sections")]
     pub drop_empty_sections: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "max_heading_depth", skip_serializing_if = "Option::is_none")]
     pub max_heading_depth: Option<u8>,
 }
 
@@ -433,9 +494,9 @@ pub struct LineRule {
     pub regex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub equals: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "shorter_than", skip_serializing_if = "Option::is_none")]
     pub shorter_than: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "repeated_at_least", skip_serializing_if = "Option::is_none")]
     pub repeated_at_least: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub boilerplate: Option<Vec<String>>,
@@ -444,9 +505,13 @@ pub struct LineRule {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct NormalizeOptions {
+    #[serde(alias = "collapse_blank_lines")]
     pub collapse_blank_lines: bool,
+    #[serde(alias = "trim_line_ends")]
     pub trim_line_ends: bool,
+    #[serde(alias = "ensure_trailing_newline")]
     pub ensure_trailing_newline: bool,
+    #[serde(alias = "decode_entities")]
     pub decode_entities: bool,
 }
 
@@ -654,6 +719,77 @@ mod tests {
         );
         assert_eq!(kept.len(), 2);
         assert_eq!(stats.truncated_by_max_per_host, 1);
+        assert_eq!(stats.removed, 1);
+        assert_eq!(stats.reasons.get("maxPerHost"), Some(&1));
+    }
+
+    #[test]
+    fn no_filter_keeps_user_denied_hits_but_still_counts_host_cap() {
+        let f = compiled(serde_json::json!({
+            "schemaVersion": 2,
+            "id": "t",
+            "results": {
+                "deny": [{"host": "blocked.example"}],
+                "maxPerHost": 1
+            }
+        }));
+        let hits = vec![
+            hit(1, "a", "https://blocked.example/a"),
+            hit(2, "b", "https://blocked.example/b"),
+            hit(3, "c", "https://other.example/c"),
+        ];
+        let (kept, stats) = apply_results(
+            &f,
+            hits,
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+            true,
+        );
+        assert_eq!(kept.len(), 2);
+        assert!(stats.disabled);
+        assert_eq!(stats.removed, 1);
+        assert_eq!(stats.reasons.get("maxPerHost"), Some(&1));
+        assert!(!stats.reasons.contains_key("results.deny[0]"));
+    }
+
+    #[test]
+    fn snake_case_filter_keys_are_accepted_and_normalized_to_camel_case() {
+        let set: FilterSet = serde_json::from_value(serde_json::json!({
+            "schema_version": 2,
+            "id": "legacy",
+            "results": {
+                "deny": [{"url_regex": "example"}],
+                "max_per_host": 2
+            },
+            "content": {
+                "strip_selectors": ["nav"],
+                "strip_lines": [{"repeated_at_least": 2}],
+                "normalize": {"collapse_blank_lines": false}
+            }
+        }))
+        .unwrap();
+        let normalized = serde_json::to_value(set).unwrap();
+        assert_eq!(normalized["schemaVersion"], 2);
+        assert_eq!(normalized["results"]["maxPerHost"], 2);
+        assert_eq!(normalized["results"]["deny"][0]["urlRegex"], "example");
+        assert_eq!(normalized["content"]["stripSelectors"][0], "nav");
+        assert_eq!(normalized["content"]["stripLines"][0]["repeatedAtLeast"], 2);
+        assert_eq!(
+            normalized["content"]["normalize"]["collapseBlankLines"],
+            false
+        );
+        assert!(normalized["results"].get("max_per_host").is_none());
+    }
+
+    #[test]
+    fn summary_does_not_double_count_page_limit_truncation() {
+        let stats = FilterStats {
+            kept: 10,
+            ..Default::default()
+        };
+        let line = stats.summary_line_for(3, 7);
+        assert!(line.contains("showing 3 of 10 results"));
+        assert!(line.contains("7 beyond --limit"));
+        assert!(!line.contains("17 results"));
     }
 
     #[test]

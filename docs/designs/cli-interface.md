@@ -26,7 +26,7 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`Global` 構造体（`Cli` に `#[command(flatten)]`）に集約し、`main.rs` が `Bootstrap` へ写して `resolve` 層への入力とする。`--engines-dir` は `Vec<PathBuf>` で複数指定を受け付ける。`--language <tag>` を追加し（M10）、`Bootstrap.language` として `search.language` を上書きする。`--language` を指定できるのは全体設定の一時上書きとして扱い、`--json` の `config show` でも由来 `argv` として出る。`--no-filter` / `--no-cache` / `--refresh` / `--no-color` / `--color` は値なしの真偽フラグ（`bool`）とする。`--color` は `--no-color` と `conflicts_with` で排他にし、`main.rs` が `color = !no_color && (color || tty)` を計算する。`--color` を指定したのに stdout が端末でない場合は装飾を無効化し、`W1001` を 1 度だけ出す（`--json` / `--quiet` 時は出さない）。
+`Global` 構造体（`Cli` に `#[command(flatten)]`）に集約し、`main.rs` が `Bootstrap` へ写して `resolve` 層への入力とする。`--engines-dir` は `Vec<PathBuf>` で複数指定を受け付ける。`--language <tag>` を追加し（M10）、`Bootstrap.language` として `search.language` を上書きする。`--language` は全体設定の一時上書きとして扱い、`--json` の `config show` でも由来 `argv` として出る。`--no-filter` / `--no-cache` / `--refresh` / `--no-color` / `--color` は値なしの真偽フラグ（`bool`）とする。`--color` は `--no-color` と排他的で、テキスト出力では tty 判定を上書きして ANSI 色を強制する。`--json` では ANSI 色を常に無効にし、`--color` 併用時は `--quiet` でない限り stderr の W1001 と独立した `warnings` JSON イベントを出す。`--quiet` は進捗・警告テキスト・セッション案内を抑制するが、操作イベント内の構造化警告配列は保持する。
 
 ---
 
@@ -38,7 +38,7 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`src/ui/menu.rs` の `Screen`（`Query` / `Results` / `SelectResults` / `Outline` / `SelectSections` / `History`）と `parse_input(screen, line) -> Input` が入力の解釈を担い、`results_menu()` / `outline_menu()` が表示文言を返す。番号と項目の対応は両関数に固定し、`tests` の `results_menu_numbers_are_fixed` が並びを検査する。状態遷移そのものは `REF:src/ui/interactive.rs` のループが持つ。
+`src/ui/menu.rs` の `Screen`（`Query` / `Results` / `SelectResults` / `Outline` / `SelectSections` / `History`）と `parse_input(screen, line) -> Input` が入力の解釈を担い、`results_menu(next_result_id, has_more)` / `outline_menu()` が表示文言を返す。結果メニューの 3 番は次の `R<n>`、または終端時の `No more results` を表示する。番号と項目の対応は関数に固定し、`tests` の `results_menu_numbers_are_fixed_and_continuation_is_dynamic` が検査する。状態遷移そのものは `REF:src/ui/interactive.rs` のループが持つ。
 
 ### 2.2 結果選択の入力規則
 
@@ -82,15 +82,15 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 サブコマンドの定義は `REF:src/ui/cli.rs` の `clap` derive に置き、実行時の振り分けは `REF:src/ui/commands.rs` の `run(app, renderer, command) -> Result<i32, AppError>` が 1 か所で行う（機能群ごとの `run_engines` / `run_network` / `run_filters` / `run_quota` / `run_config` / `run_history` / `run_doctor`）。
 
-`REF:src/ui/commands.rs` が非対話コマンドを振り分ける。`search --limit` と `outline --depth` は省略時に解決済み設定値を使い、指定時のみ上書きする。`read` は既定で子節を含み、`--no-children` で除外する（`--children` と排他）。`REF:src/main.rs` は非対話でも `--session` を App に適用する。回帰テストは `REF:tests/m5.rs`。
+`REF:src/ui/commands.rs` が非対話コマンドを振り分ける。`search --limit` は 1〜30 の範囲を検証し、`--page` は 1 から engine の有効結果上限内に制限する。`outline --depth` は省略時に設定値を使い、明示値は 2〜4 にクランプする。`read` は既定で子節を含み、`--no-children` で除外する（`--children` と排他）。`REF:src/main.rs` は `--session` を App に適用し、既存 ID であることを検証する。回帰テストは `REF:tests/m5.rs` と `REF:tests/m14.rs`。
 
 ### 3.2 対象の指定方法
 
 状態: 実装完了（REF:src/ui/commands.rs）
 
-`src/ui/commands.rs` の `resolve_target(app, input) -> Result<(session_id, Url)>`。`Target` は `Url(Url)` / `ResultId(u32)` / `DocumentId(u32)`。数値はまず結果番号、次に文書番号として解釈し、どちらも無ければ `E1006`（利用可能な識別子を `details` に添える）。
+`src/ui/commands.rs` の `resolve_target(app, input) -> Result<(session_id, Url)>`。`Target` は `Url(Url)` / `ResultId(u32)` / `DocumentId(u32)`。数値は結果番号として解釈し、無ければ `E1006`（利用可能な識別子を detail に添える）。`read --section` は `parse_sections` が選択パーサーの汎用 hint を `S0` / `S3` / `D1:S3` の例へ置き換え、実在しない節 ID を `document::read` が `E1006` と `outline` hint で返す。
 
-セッションの扱いは入口で分ける。URL 指定は `app.ensure_session()` を呼んでから解決する（取得だけならセッション未作成でも成立するため）。識別子指定は `app.current_session_id()` が空なら `E5001` と「`search` で開始する」hint を返し、セッションを暗黙に作らない（失敗した参照解決で状態を変えない）。`next` も同じ規則で、セッション無しは `E5001` とする（`REF:tests/m6.rs`）。
+セッションの扱いは入口で分ける。URL 指定は必要なら `app.ensure_session()` で ID を割り当ててから解決する。識別子指定は `app.require_existing_session()` が現行セッションまたは `counters.json` の `session_key` が指す既存セッションを再開し、どちらも無ければ `E5001` を返す（参照解決のために新規状態を作らない）。`next` / `refine` も既存セッションを要求し、暗黙再開時は ID を標準エラーへ通知する。明示 `--session` は `main.rs` が既存 ID のみ受け付ける（`REF:tests/m14.rs`）。
 
 ### 3.3 終了コード
 
@@ -114,7 +114,7 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-描画関数は `src/ui/render.rs` に集約し、`Renderer::out` に渡す文字列を組み立てる。色の有無は `Renderer` の `color` フラグ（`ui.color` / `NO_COLOR` / `--no-color` / tty 判定）で決める。
+描画関数は `src/ui/render.rs` に集約し、`Renderer::out` に渡す文字列を組み立てる。色の有無は `Renderer` の `color` フラグ（`--color` / `--no-color` / tty 判定）で決め、検索結果・アウトラインの識別子に ANSI 色を適用する。JSON 出力では常に装飾を無効にする。
 
 文言は英語で固定する（M10）。`[untrusted] <url>` マーカー、`[truncated: ...]`、件数・クォータの行など既存の書式は変えず、語だけを英語にする。`[使用]` / `[候補]` の接頭辞は `[used]` / `[candidate]` にする。外部から得た文字列（タイトル・本文・`description`）は翻訳しない。日本語リテラルの混入は `REF:tests/architecture.rs` の検査で防ぐ。
 

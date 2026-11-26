@@ -57,7 +57,7 @@ pub struct App {
 }
 
 impl App {
-    /// ガード（レート制限 + クォータ）を作る。
+    /// クォータ判定用のガードを作る（レート待機は HTTP アダプタが担当）。
     pub fn guard(&self) -> Result<Guard, AppError> {
         let session = self.current_session_id();
         Guard::new(
@@ -109,7 +109,52 @@ impl App {
         Ok(guard.clone())
     }
 
-    /// セッション識別子を設定する（`--session`）。
+    /// 明示されたセッションを選ぶ。未知の ID は暗黙に作成しない。
+    pub fn select_session(&self, id: &str) -> Result<crate::core::session::SessionState, AppError> {
+        let session = self.sessions.load(id)?.ok_or_else(|| {
+            AppError::new(crate::core::errors::ErrorCode::E5001)
+                .detail(format!("session '{id}' does not exist"))
+                .hint("choose an existing session ID, or run `search` without `--session`")
+        })?;
+        self.set_session(id);
+        Ok(session)
+    }
+
+    /// `counters.json` が指す既存セッションを再開する（存在しなければ `None`）。
+    pub fn resume_latest_session(
+        &self,
+    ) -> Result<Option<crate::core::session::SessionState>, AppError> {
+        let current = self.current_session_id();
+        if !current.is_empty() {
+            return self.sessions.load(&current);
+        }
+        let counters = self.counters.load()?;
+        if counters.session_key.is_empty() {
+            return Ok(None);
+        }
+        let Some(session) = self.sessions.load(&counters.session_key)? else {
+            return Ok(None);
+        };
+        self.set_session(&counters.session_key);
+        Ok(Some(session))
+    }
+
+    /// 既存の現行または直近セッションを必須として取得する。
+    pub fn require_existing_session(&self) -> Result<crate::core::session::SessionState, AppError> {
+        let requested = self.current_session_id();
+        self.resume_latest_session()?.ok_or_else(|| {
+            let detail = if requested.is_empty() {
+                "no existing session is available".to_string()
+            } else {
+                format!("session '{requested}' does not exist")
+            };
+            AppError::new(crate::core::errors::ErrorCode::E5001)
+                .detail(detail)
+                .hint("run `search` to start a session, then retry")
+        })
+    }
+
+    /// セッション識別子を設定する（新規セッション生成後など）。
     pub fn set_session(&self, id: impl Into<String>) {
         if let Ok(mut guard) = self.session_id.lock() {
             *guard = id.into();

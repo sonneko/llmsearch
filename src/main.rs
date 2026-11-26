@@ -17,7 +17,7 @@ fn main() {
     let cli = Cli::parse();
     let deps = config_uc::default_deps();
     let tty = deps.1.is_stdout_tty();
-    let color = !cli.global.no_color && (cli.global.color || tty);
+    let color = !cli.global.no_color && !cli.global.json && (cli.global.color || tty);
     let renderer = std::sync::Arc::new(Renderer::new(
         cli.global.json,
         color,
@@ -29,12 +29,19 @@ fn main() {
         std::sync::Arc::clone(&renderer),
         cli.global.verbose,
     ));
-    // 色付けを要求されたが端末でない場合は、装飾を無効化した旨を 1 度だけ知らせる
-    if cli.global.color && !cli.global.no_color && !tty && !cli.global.json && !cli.global.quiet {
-        use llmsearch::ports::Reporter as _;
-        reporter.warn(&llmsearch::core::errors::Diagnostic::new(
+    // JSON Lines に ANSI 装飾を混ぜず、CLI 要求との不一致を通知する。
+    // `--quiet` は stderr の警告と、この独立した W1001 イベントを抑制する。
+    if cli.global.color && cli.global.json && !cli.global.quiet {
+        let warning = llmsearch::core::errors::Diagnostic::new(
             llmsearch::core::errors::WarningCode::W1001,
-            "color was requested but stdout is not a terminal; decorations disabled",
+            "--color is ignored with --json to preserve machine-readable output",
+        );
+        renderer.warn(&warning);
+        renderer.event(&renderer.envelope(
+            "warnings",
+            serde_json::json!({
+                "warnings": llmsearch::ui::render::warnings_json(&[warning]),
+            }),
         ));
     }
 
@@ -70,7 +77,7 @@ fn main() {
         overrides,
     };
 
-    let (app, resolved) = match config_uc::build(
+    let (mut app, resolved) = match config_uc::build(
         &bootstrap,
         std::sync::Arc::clone(&deps.0),
         std::sync::Arc::clone(&deps.1),
@@ -94,25 +101,23 @@ fn main() {
     for warning in &resolved.warnings {
         renderer.warn(warning);
     }
-    if let Some(id) = cli.global.session.clone() {
+    if let Some(id) = cli.global.session.as_deref() {
         renderer.set_session(id);
+        if let Err(err) = app.select_session(id) {
+            renderer.error(&err);
+            std::process::exit(err.exit_code());
+        }
     }
 
     let code = match &cli.command {
-        Some(command) => {
-            let mut app = app;
-            if let Some(id) = &cli.global.session {
-                app.set_session(id);
+        Some(command) => match commands::run(&mut app, &renderer, &resolved, command) {
+            Ok(code) => code,
+            Err(err) => {
+                renderer.set_session(app.current_session_id());
+                renderer.error(&err);
+                err.exit_code()
             }
-            match commands::run(&mut app, &renderer, &resolved, command) {
-                Ok(code) => code,
-                Err(err) => {
-                    renderer.set_session(app.current_session_id());
-                    renderer.error(&err);
-                    err.exit_code()
-                }
-            }
-        }
+        },
         None => run_interactive(app, renderer, cli.global.session.clone()),
     };
     std::process::exit(code);

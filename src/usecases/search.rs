@@ -11,6 +11,7 @@ use crate::core::template::{self, TmplCtx};
 use crate::core::text;
 use crate::ports::state::HistoryQuery;
 use crate::usecases::App;
+use crate::usecases::guard::Guard;
 
 /// 1 回の検索結果。
 #[derive(Debug, Clone)]
@@ -24,6 +25,8 @@ pub struct SearchOutcome {
     pub truncated_by_limit: usize,
     pub page: PageState,
     pub has_more: bool,
+    /// `next` が終了した理由（`maxResults` / `emptyPage` / `filtered` など）。
+    pub termination_reason: Option<String>,
     pub warnings: Vec<Diagnostic>,
 }
 
@@ -52,17 +55,127 @@ pub fn prepare_query(input: &str) -> Result<(String, Vec<Diagnostic>), AppError>
 /// `search.merge=true` のときは全エンジンへ送ってラウンドロビン統合し、
 /// そうでなければフォールバックの連鎖として実行する。
 pub fn run(app: &mut App, query: &str, page: u32) -> Result<SearchOutcome, AppError> {
+    run_with_event(
+        app,
+        query,
+        page,
+        crate::core::history::EventType::Search,
+        true,
+    )
+}
+
+/// 明示的なセッションを持たない診断検索（`engines test`）を実行する。
+///
+/// 既存セッションは引き継ぐが、存在しない場合に架空のセッション ID は作らない。
+pub fn run_without_session(
+    app: &mut App,
+    query: &str,
+    page: u32,
+) -> Result<SearchOutcome, AppError> {
+    run_with_event(
+        app,
+        query,
+        page,
+        crate::core::history::EventType::Search,
+        false,
+    )
+}
+
+/// 1 つのエンジン定義を試す。診断操作では fallback / merge や架空セッションを使わない。
+pub fn run_engine_test(
+    app: &mut App,
+    selector: &str,
+    query: &str,
+) -> Result<SearchOutcome, AppError> {
+    if app.engines.get(selector).is_none() {
+        return Err(AppError::with_detail(
+            ErrorCode::E4002,
+            format!("engine '{selector}' was not found"),
+        ));
+    }
+
+    let original_search = app.settings.search.clone();
+    let original_engine = app.default_engine.clone();
+    app.settings.search.merge = false;
+    app.settings.search.engines.clear();
+    app.settings.search.fallback.clear();
+    app.default_engine = selector.to_string();
+    let result = run_without_session(app, query, 1);
+    app.settings.search = original_search;
+    app.default_engine = original_engine;
+    result
+}
+
+fn run_with_event(
+    app: &mut App,
+    query: &str,
+    page: u32,
+    event: crate::core::history::EventType,
+    create_session: bool,
+) -> Result<SearchOutcome, AppError> {
     let (query, warnings) = prepare_query(query)?;
 
-    // セッションを確定してからクォータを判定する（セッション単位の上限のため）
-    let session_id = app.ensure_session()?;
-    app.set_session(session_id);
-
-    if app.settings.search.merge {
-        run_merge(app, &query, page, warnings)
-    } else {
-        run_fallback(app, &query, page, warnings)
+    if create_session && app.current_session_id().is_empty() {
+        // `search` は `--session` なしなら新しいセッションを開始する。
+        let session_id = app.ensure_session()?;
+        app.set_session(session_id);
     }
+
+    let result = if app.settings.search.merge {
+        run_merge(app, &query, page, warnings, event)
+    } else {
+        run_fallback(app, &query, page, warnings, event)
+    };
+    if event == crate::core::history::EventType::Next
+        && result
+            .as_ref()
+            .is_err_and(|error| error.code == ErrorCode::E5005)
+    {
+        record_next_termination(app, &query, page, "quota");
+    }
+    result
+}
+
+fn record_next_termination(app: &App, query: &str, page: u32, reason: &str) {
+    let limit = app.settings.search.limit.max(1);
+    let logical_offset = (page.saturating_sub(1) as usize).saturating_mul(limit);
+    let offset = if app.settings.search.merge {
+        logical_offset
+    } else {
+        app.engines
+            .get(&app.default_engine)
+            .map(|def| match def.paging.as_ref() {
+                Some(paging) if paging.style == PagingStyle::Offset => {
+                    let request_limit = def.limits.max_page_size.min(limit as u32).max(1);
+                    template::paging_values(Some(paging), page, request_limit).0 as usize
+                }
+                _ => logical_offset,
+            })
+            .unwrap_or(logical_offset)
+    };
+    let engine = if app.settings.search.merge {
+        app.settings.search.engines.join("+")
+    } else {
+        app.default_engine.clone()
+    };
+    let mut entry = crate::core::history::HistoryEntry::new(
+        app.history.next_id().unwrap_or_else(|_| "H?".to_string()),
+        app.clock.now_utc(),
+        app.current_session_id(),
+        crate::core::history::EventType::Next,
+        serde_json::json!({
+            "query": query,
+            "page": page,
+            "offset": offset,
+            "added": 0,
+            "filtered": 0,
+            "engine": engine,
+            "hasMore": false,
+            "terminationReason": reason,
+        }),
+    );
+    entry.engine = Some(engine);
+    let _ = app.history.append(&entry);
 }
 
 /// 1 エンジン分の検索（正規化・重複除去まで済ませた生の結果）。
@@ -73,31 +186,150 @@ struct EngineOutcome {
     hits: Vec<search_core::RawHit>,
     /// フィルタ前の取得件数。
     obtained: usize,
-    /// 送信した回数（抽出結果 0 件による再送を含む）。
-    requests: u32,
+    /// 取得範囲の先頭位置（0 始まり）。
+    page_start: usize,
+    /// URL 重複として正規化段階で取り除いた件数。
+    deduplicated: usize,
+    /// 最後に取得した provider page が満杯で、次の provider page がありうるか。
+    has_more: bool,
     warnings: Vec<Diagnostic>,
 }
 
-/// エンジンを 1 つ呼び、結果を正規化する（重複除去・リダイレクト展開まで）。
+/// エンジンを呼び、重複除去・リダイレクト展開を行う。
+///
+/// `page` は利用者が見る論理ページ。page-style エンジンでは `pageSize` と
+/// `search.limit` が異なる場合に隣接する provider page を必要な分だけ取得し、
+/// 論理ページの範囲を切り出す。各 provider request と抽出 retry は個別に quota-check する。
 fn search_once(
     app: &App,
     def: &EngineDef,
     query: &str,
     page: u32,
     limit: u32,
+    guard: &Guard,
+    pending_searches: &mut u64,
 ) -> Result<EngineOutcome, AppError> {
-    let call = call_engine(app, def, query, page, limit)?;
-    let mut warnings: Vec<Diagnostic> = Vec::new();
-    let hits = call.outcome.hits;
-    if call.outcome.items_seen == 0 && hits.is_empty() {
-        return Err(AppError::with_detail(
-            ErrorCode::E4001,
-            format!("{query} / {}", def.selector()),
-        ));
+    let max_results = def.max_results(app.settings.search.max_results);
+    let mut warnings = Vec::new();
+    let mut hits = Vec::new();
+    let retrieved;
+    let page_start;
+    let deduplicated;
+    let mut has_more;
+
+    if let Some(paging) = def.paging.as_ref().filter(|p| p.style == PagingStyle::Page) {
+        let native_size = paging
+            .page_size
+            .unwrap_or(limit)
+            .min(def.limits.max_page_size)
+            .max(1) as usize;
+        let start = (page.saturating_sub(1) as usize).saturating_mul(limit as usize);
+        let end = start.saturating_add(limit as usize).min(max_results);
+        let relative_start = start % native_size;
+        let mut provider_has_more = false;
+
+        if end > start {
+            let first_provider_page = start / native_size + 1;
+            let last_provider_page = end.saturating_sub(1) / native_size + 1;
+            for provider_page in first_provider_page..=last_provider_page {
+                let call = call_engine(
+                    app,
+                    def,
+                    query,
+                    provider_page as u32,
+                    native_size as u32,
+                    guard,
+                    pending_searches,
+                )?;
+                warnings.extend(call.outcome.warnings.iter().cloned());
+                let items_seen = call.outcome.items_seen;
+                if items_seen == 0 && call.outcome.hits.is_empty() {
+                    if hits.is_empty() && page == 1 {
+                        return Err(AppError::with_detail(
+                            ErrorCode::E4001,
+                            format!("{query} / {}", def.selector()),
+                        ));
+                    }
+                    provider_has_more = false;
+                    break;
+                }
+                hits.extend(call.outcome.hits);
+                if items_seen < native_size {
+                    // A short provider page is the end of this engine's result list.
+                    provider_has_more = false;
+                    break;
+                }
+                provider_has_more = provider_page == last_provider_page;
+            }
+        }
+
+        let (normalized, mut normalization_warnings, duplicates) = normalize_hits(hits);
+        warnings.append(&mut normalization_warnings);
+        deduplicated = duplicates;
+        retrieved = normalized.len();
+        hits = normalized
+            .into_iter()
+            .skip(relative_start)
+            .take(limit as usize)
+            .collect();
+        page_start = start;
+        has_more = provider_has_more;
+    } else {
+        let request_limit = def.limits.max_page_size.min(limit).max(1);
+        let call = call_engine(
+            app,
+            def,
+            query,
+            page,
+            request_limit,
+            guard,
+            pending_searches,
+        )?;
+        warnings.extend(call.outcome.warnings.iter().cloned());
+        if call.outcome.items_seen == 0 && call.outcome.hits.is_empty() && page == 1 {
+            return Err(AppError::with_detail(
+                ErrorCode::E4001,
+                format!("{query} / {}", def.selector()),
+            ));
+        }
+        let requested_size = request_limit as usize;
+        has_more = def.paging.is_some() && call.outcome.items_seen >= requested_size;
+        let (normalized, mut normalization_warnings, duplicates) =
+            normalize_hits(call.outcome.hits);
+        warnings.append(&mut normalization_warnings);
+        deduplicated = duplicates;
+        retrieved = normalized.len();
+        hits = normalized;
+        page_start = match def.paging.as_ref() {
+            Some(paging) if paging.style == PagingStyle::Offset => {
+                crate::core::template::paging_values(Some(paging), page, request_limit).0 as usize
+            }
+            _ => (page.saturating_sub(1) as usize).saturating_mul(limit as usize),
+        };
     }
 
+    // Enforce this engine's cumulative cap before merge combines it with other engines.
+    hits.truncate(max_results.saturating_sub(page_start));
+    has_more = has_more && !hits.is_empty() && page_start.saturating_add(hits.len()) < max_results;
+
+    Ok(EngineOutcome {
+        def: def.clone(),
+        max_results,
+        obtained: retrieved,
+        page_start,
+        deduplicated,
+        has_more,
+        hits,
+        warnings,
+    })
+}
+
+fn normalize_hits(
+    hits: Vec<search_core::RawHit>,
+) -> (Vec<search_core::RawHit>, Vec<Diagnostic>, usize) {
+    let mut warnings = Vec::new();
     // 抽出でリダイレクトを解けなかった結果をここで解く（取得時に
-    // エンジン側のページを読んでしまうのを防ぐ）
+    // エンジン側のページを読んでしまうのを防ぐ）。
     let (hits, unwrapped, example) = search_core::unwrap_redirects(hits);
     if unwrapped > 0 {
         warnings.push(Diagnostic::new(
@@ -117,15 +349,7 @@ fn search_once(
             format!("removed {removed} duplicate URLs"),
         ));
     }
-    warnings.extend(call.outcome.warnings.iter().cloned());
-    Ok(EngineOutcome {
-        def: def.clone(),
-        max_results: def.max_results(app.settings.search.max_results),
-        obtained: deduped.len(),
-        hits: deduped,
-        requests: call.requests,
-        warnings,
-    })
+    (deduped, warnings, removed)
 }
 
 /// フィルタを適用し、1 ページ分に切り出して結果を組み立てる。
@@ -135,23 +359,77 @@ fn finish(
     query: &str,
     page: u32,
     limit: usize,
+    page_start: usize,
+    supports_paging: bool,
+    provider_has_more: bool,
+    deduplicated: usize,
     raw: Vec<search_core::RawHit>,
     owners: Vec<String>,
-    _obtained: usize,
     max_results: usize,
     engine: String,
     fallback_from: Option<String>,
     mut warnings: Vec<Diagnostic>,
 ) -> SearchOutcome {
     let now = app.clock.today_local();
+    // `maxResults` is a cumulative provider cap. A page starting near that cap
+    // must not expose rows beyond it even if the provider returned a full page.
+    let raw: Vec<_> = raw
+        .into_iter()
+        .take(max_results.saturating_sub(page_start))
+        .collect();
+    // Filtering may reduce the displayed count, but must not reopen a page after the
+    // provider result cap has been consumed.
+    let consumed = page_start.saturating_add(raw.len());
     let assigned = search_core::assign_ids(raw, 1, &owners);
-    let (kept, filtered) =
+    let (mut kept, mut filtered) =
         crate::core::config::filter::apply_results(&app.filters, assigned, now, app.no_filter);
+    filtered.record_count("duplicateUrl", deduplicated);
+
+    let session_id = app.current_session_id();
+    let current_session = if session_id.is_empty() {
+        None
+    } else {
+        app.sessions.load(&session_id).ok().flatten()
+    };
+    let same_query = current_session
+        .as_ref()
+        .and_then(|s| s.queries.last())
+        .is_some_and(|record| record.query == query);
+    let start_id = if page == 1 {
+        1
+    } else if same_query {
+        current_session
+            .as_ref()
+            .map(|s| s.next_result_id())
+            .unwrap_or_else(|| page_start.saturating_add(1) as u32)
+    } else {
+        page_start.saturating_add(1) as u32
+    };
+    for (index, hit) in kept.iter_mut().enumerate() {
+        let id = start_id.saturating_add(index as u32);
+        hit.id = id;
+        hit.rank = id;
+    }
+
     let truncated_by_limit = kept.len().saturating_sub(limit);
     let page_hits: Vec<SearchHit> = kept.into_iter().take(limit).collect();
-
-    let max_results = max_results.max(limit);
-    let has_more = page_hits.len() == limit && (page as usize) * limit < max_results;
+    let has_more =
+        supports_paging && provider_has_more && !page_hits.is_empty() && consumed < max_results;
+    let termination_reason = if has_more {
+        None
+    } else if !supports_paging {
+        Some("pagingUnsupported".to_string())
+    } else if consumed >= max_results {
+        Some("maxResults".to_string())
+    } else if page_hits.is_empty()
+        && (filtered.removed > 0 || filtered.truncated_by_max_results > 0)
+    {
+        Some("filtered".to_string())
+    } else if page_hits.is_empty() || !provider_has_more {
+        Some("emptyPage".to_string())
+    } else {
+        Some("maxResults".to_string())
+    };
 
     if let Some(from) = &fallback_from {
         warnings.push(Diagnostic::new(
@@ -169,10 +447,11 @@ fn finish(
         truncated_by_limit,
         page: PageState {
             page,
-            next_page: page + 1,
+            next_page: page.saturating_add(1),
             exhausted: !has_more,
         },
         has_more,
+        termination_reason,
         warnings,
     }
 }
@@ -183,16 +462,16 @@ fn run_fallback(
     query: &str,
     page: u32,
     mut warnings: Vec<Diagnostic>,
+    event: crate::core::history::EventType,
 ) -> Result<SearchOutcome, AppError> {
     let limit = app.settings.search.limit.max(1);
     let limit_u32 = limit as u32;
     let mut guard = app.guard()?;
-    guard.check(Metric::Searches, 1)?;
 
     let candidates = candidate_engines(app)?;
     let mut last_error: Option<AppError> = None;
     let mut used_fallback: Option<String> = None;
-    // 送信した回数（フォールバックで試したエンジン数だけ増える）。
+    // 各ネットワーク送信前に quota-check して回数を積む。
     // 操作が成功したときだけ `consume_all` で永続化する（仕様 quotas.md §3.2）。
     let mut pending = Usage::default();
 
@@ -200,58 +479,79 @@ fn run_fallback(
         let Some(def) = app.engines.get(selector) else {
             continue;
         };
-        // これから送る 1 回分を含めて判定する（送った分は未消費のため）。
-        guard.check(Metric::Searches, pending.searches + 1)?;
-        match search_once(app, def, query, page, limit_u32) {
+        match search_once(
+            app,
+            def,
+            query,
+            page,
+            limit_u32,
+            &guard,
+            &mut pending.searches,
+        ) {
             Ok(call) => {
                 if index > 0 {
                     used_fallback = Some(candidates[0].clone());
                 }
-                // 消費量の確定（クォータ）
-                // `searches` は送信した回数（同一エンジン内の再送も合算）。
-                // `results` はフィルタ前の取得件数。`chars` は `read` でのみ
-                // 消費するため、ここでは加算しない（仕様 quotas.md §2.2 / §3.1）。
-                pending.searches += call.requests.max(1) as u64;
+                // `searches` は送信直前の preflight で回数を積み、
+                // `results` は成功した取得件数（フィルタ前）を記録する。
                 pending.results += call.obtained as u64;
                 guard.consume_all(pending)?;
 
                 warnings.extend(call.warnings.iter().cloned());
                 let engine = call.def.selector();
+                let page_start = call.page_start;
+                let supports_paging = call.def.paging.is_some();
                 let owners: Vec<String> = vec![engine.clone(); call.hits.len()];
                 let outcome = finish(
                     app,
                     query,
                     page,
                     limit,
+                    page_start,
+                    supports_paging,
+                    call.has_more,
+                    call.deduplicated,
                     call.hits,
                     owners,
-                    call.obtained,
                     call.max_results,
                     engine.clone(),
                     used_fallback.clone(),
                     warnings,
                 );
 
-                // 履歴
-                let entry = crate::core::history::HistoryEntry::new(
-                    app.history.next_id().unwrap_or_else(|_| "H?".to_string()),
-                    app.clock.now_utc(),
-                    app.current_session_id(),
-                    crate::core::history::EventType::Search,
+                // 履歴には Search と Next を別種のイベントとして記録する。
+                let payload = if event == crate::core::history::EventType::Next {
+                    serde_json::json!({
+                        "query": query,
+                        "page": page,
+                        "offset": page_start,
+                        "added": outcome.hits.len(),
+                        "filtered": outcome.filtered.removed,
+                        "engine": engine.clone(),
+                        "hasMore": outcome.has_more,
+                        "terminationReason": outcome.termination_reason.clone(),
+                    })
+                } else {
                     serde_json::json!({
                         "query": query,
                         "page": page,
                         "results": outcome.hits.len(),
                         "filtered": outcome.filtered.removed,
-                        "engine": engine,
-                    }),
+                        "engine": engine.clone(),
+                    })
+                };
+                let mut entry = crate::core::history::HistoryEntry::new(
+                    app.history.next_id().unwrap_or_else(|_| "H?".to_string()),
+                    app.clock.now_utc(),
+                    app.current_session_id(),
+                    event,
+                    payload,
                 );
+                entry.engine = Some(engine.clone());
                 let _ = app.history.append(&entry);
                 return Ok(outcome);
             }
             Err(err) => {
-                // 送信しているので 1 回として数える（成功時にまとめて消費する）。
-                pending.searches += 1;
                 let class = crate::ports::classify(&err);
                 if class == crate::ports::FallbackClass::RetryOtherEngine
                     && index + 1 < candidates.len()
@@ -273,6 +573,7 @@ fn run_merge(
     query: &str,
     page: u32,
     mut warnings: Vec<Diagnostic>,
+    event: crate::core::history::EventType,
 ) -> Result<SearchOutcome, AppError> {
     let limit = app.settings.search.limit.max(1);
     let limit_u32 = limit as u32;
@@ -286,13 +587,12 @@ fn run_merge(
     }
 
     let mut guard = app.guard()?;
-    guard.check(Metric::Searches, 1)?;
 
     let mut pending = Usage::default();
     let mut lists: Vec<Vec<search_core::RawHit>> = Vec::new();
     let mut owners: Vec<String> = Vec::new();
-    // フィルタ前の取得件数（各エンジンの合計。クォータの `results` 用）
-    let mut obtained = 0usize;
+    let mut deduplicated = 0usize;
+    let mut provider_has_more = false;
     let mut first_error: Option<AppError> = None;
 
     for selector in &selectors {
@@ -303,18 +603,27 @@ fn run_merge(
             ));
             continue;
         };
-        guard.check(Metric::Searches, pending.searches + 1)?;
-        match search_once(app, def, query, page, limit_u32) {
+        match search_once(
+            app,
+            def,
+            query,
+            page,
+            limit_u32,
+            &guard,
+            &mut pending.searches,
+        ) {
             Ok(call) => {
-                pending.searches += call.requests.max(1) as u64;
                 pending.results += call.obtained as u64;
-                obtained += call.obtained;
                 warnings.extend(call.warnings.iter().cloned());
+                deduplicated = deduplicated.saturating_add(call.deduplicated);
+                provider_has_more |= call.has_more;
                 owners.push(call.def.selector());
                 lists.push(call.hits);
             }
             Err(err) => {
-                pending.searches += 1;
+                if err.code == ErrorCode::E5005 {
+                    return Err(err);
+                }
                 warnings.push(Diagnostic::new(
                     WarningCode::W4004,
                     format!(
@@ -337,46 +646,72 @@ fn run_merge(
     }
 
     let (merged, merged_owners, removed) = search_core::merge_round_robin(lists, &owners);
-    let merged_len = merged.len();
     if removed > 0 {
         warnings.push(Diagnostic::new(
             WarningCode::W4005,
             format!("removed {removed} duplicate URLs while merging"),
         ));
+        deduplicated = deduplicated.saturating_add(removed);
     }
 
     guard.consume_all(pending)?;
 
     let engine = selectors.join("+");
+    let supports_paging = selectors.iter().any(|selector| {
+        app.engines
+            .get(selector)
+            .is_some_and(|def| def.paging.is_some())
+    });
+    let page_start = (page.saturating_sub(1) as usize).saturating_mul(limit);
     let outcome = finish(
         app,
         query,
         page,
         limit,
+        page_start,
+        supports_paging,
+        provider_has_more,
+        deduplicated,
         merged,
         merged_owners,
-        obtained + merged_len,
         app.settings.search.max_results,
         engine.clone(),
         None,
         warnings,
     );
 
-    let entry = crate::core::history::HistoryEntry::new(
-        app.history.next_id().unwrap_or_else(|_| "H?".to_string()),
-        app.clock.now_utc(),
-        app.current_session_id(),
-        crate::core::history::EventType::Search,
+    let payload = if event == crate::core::history::EventType::Next {
+        serde_json::json!({
+            "query": query,
+            "page": page,
+            "offset": page_start,
+            "added": outcome.hits.len(),
+            "filtered": outcome.filtered.removed,
+            "engine": engine.clone(),
+            "hasMore": outcome.has_more,
+            "terminationReason": outcome.termination_reason.clone(),
+            "merged": true,
+            "engines": selectors,
+        })
+    } else {
         serde_json::json!({
             "query": query,
             "page": page,
             "results": outcome.hits.len(),
             "filtered": outcome.filtered.removed,
-            "engine": engine,
+            "engine": engine.clone(),
             "merged": true,
             "engines": selectors,
-        }),
+        })
+    };
+    let mut entry = crate::core::history::HistoryEntry::new(
+        app.history.next_id().unwrap_or_else(|_| "H?".to_string()),
+        app.clock.now_utc(),
+        app.current_session_id(),
+        event,
+        payload,
     );
+    entry.engine = Some(engine.clone());
     let _ = app.history.append(&entry);
     Ok(outcome)
 }
@@ -408,6 +743,8 @@ fn call_engine(
     query: &str,
     page: u32,
     limit: u32,
+    guard: &Guard,
+    pending_searches: &mut u64,
 ) -> Result<crate::adapters::engine::eval::EngineCall, AppError> {
     let (offset, page_number) = template::paging_values(def.paging.as_ref(), page, limit);
     let ctx = TmplCtx {
@@ -426,7 +763,7 @@ fn call_engine(
     // API キーは定義の `value_env` から解決する（値はここでは保持しない）
     let secrets: Secrets = app.secrets.clone();
     let profile = engine_profile(app, def);
-    crate::adapters::engine::evaluate(
+    crate::adapters::engine::evaluate_with_preflight(
         app.clock.as_ref(),
         app.http.as_ref(),
         &profile,
@@ -434,6 +771,12 @@ fn call_engine(
         &ctx,
         &secrets,
         &app.tracking,
+        || {
+            let requested = (*pending_searches).saturating_add(1);
+            guard.check(Metric::Searches, requested)?;
+            *pending_searches = requested;
+            Ok(())
+        },
     )
 }
 
@@ -467,7 +810,13 @@ pub fn next(app: &mut App, query: &str, current: &PageState) -> Result<SearchOut
             "no more results".to_string(),
         ));
     }
-    run(app, query, current.next_page)
+    run_with_event(
+        app,
+        query,
+        current.next_page,
+        crate::core::history::EventType::Next,
+        true,
+    )
 }
 
 /// 検索語を変更して再検索する。
@@ -500,7 +849,12 @@ pub fn apply_to_session(
         .load(&id)?
         .unwrap_or_else(|| crate::core::session::SessionState::new(&id, app.clock.now_utc()));
 
-    if outcome.page.page == 1 {
+    let new_query = outcome.page.page == 1
+        || session
+            .queries
+            .last()
+            .is_none_or(|record| record.query != query);
+    if new_query {
         session.results.clear();
         session.queries.push(QueryRecord {
             query: query.to_string(),
@@ -511,15 +865,8 @@ pub fn apply_to_session(
         });
         session.active_query = session.queries.len().saturating_sub(1);
     }
-    let start = session.next_result_id();
-    let engines: Vec<String> = outcome.hits.iter().map(|h| h.engine.clone()).collect();
-    let mut hits = outcome.hits.clone();
-    for (i, hit) in hits.iter_mut().enumerate() {
-        hit.id = start + i as u32;
-        hit.rank = start + i as u32;
-    }
-    let _ = engines;
-    session.results.extend(hits);
+    // `finish()` はページ内表示とセッション内参照に共通の ID をすでに採番している。
+    session.results.extend(outcome.hits.iter().cloned());
     session.page = outcome.page.clone();
     session.last_query = query.to_string();
     session.last_engine = outcome.engine.clone();

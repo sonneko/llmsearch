@@ -18,7 +18,7 @@
 
 状態: 実装完了（REF:src/adapters/config/mod.rs）
 
-`FilterSet` は `src/core/config/filter.rs` に定義する。解決は `src/adapters/config/mod.rs` の `resolve_filters(env, settings, base_dir, bundled, cli)` が担い、`--filters` → `LLMSEARCH_FILTERS` → 設定 `filters`（ID またはインライン）→ `default` の順で決める。ID の場合は `resolve_resource_dir` の探索順（作業ディレクトリ → 状態ディレクトリ → 設定ディレクトリ → 同梱 `assets/`）で `<id>.json` を探し、見つからなければ `embedded_as` の埋め込み（`assets/filters/default.json`）へフォールバックする。読み込み失敗は `E1004`、未発見は `E1003`。
+`FilterSet` は `src/core/config/filter.rs` に定義する。`serde(rename_all = "camelCase")` を正規形とし、互換性のためスキーマ版・結果規則・本文規則・正規化オプションの対応 snake_case キーに `alias` を定義する。読み込んだ定義を通常の `filters show` で再シリアライズすると camelCase になり、`--raw` は元の JSON をそのまま出す。解決は `src/adapters/config/mod.rs` の `resolve_filters(env, settings, base_dir, bundled, cli)` が担い、`--filters` → `LLMSEARCH_FILTERS` → 設定 `filters`（ID またはインライン）→ `default` の順で決める。ID の場合は `resolve_resource_dir` の探索順（作業ディレクトリ → 状態ディレクトリ → 設定ディレクトリ → 同梱 `assets/`）で `<id>.json` を探し、見つからなければ `embedded_as` の埋め込み（`assets/filters/default.json`）へフォールバックする。読み込み失敗は `E1004`、未発見は `E1003`。
 
 ### 1.3 評価の原則
 
@@ -66,7 +66,7 @@
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`apply_results` は 1) `deny` に該当し `allow` に該当しないものを除外（`allow` が先に効く）、2) `require` のいずれかを満たさないものを除外、3) `maxPerHost`（`BTreeMap<String, usize>` でホスト別件数を数え、上限に達したら `truncated_by_max_per_host` を増やして捨てる＝先着優先）、4) `diversity` なら `interleave_by_host(hits)`、5) `maxResults` で末尾を切り捨て（`truncated_by_max_results`）、6) 残った結果の `id` と `rank` を 1 から振り直す、の順に適用する。`interleave_by_host` はホストの初出順にキューを作り、1 件ずつ取り出す（同一ホスト内の元順序は保つ）。
+`apply_results` は通常、1) `deny` に該当し `allow` に該当しないものを除外、2) `require` を満たさないものを除外、3) `maxPerHost`（`BTreeMap<String, usize>` でホスト別件数を数え、上限に達したら `truncated_by_max_per_host` と `removed` / `reasons.maxPerHost` を増やして除外＝先着優先）、4) `diversity` なら `interleave_by_host(hits)`、5) `maxResults` で末尾を切り捨て（`truncated_by_max_results`）、6) 残った結果の `id` と `rank` を 1 から振り直す、の順に適用する。`--no-filter` では 1・2 を迂回するが、3〜5 の結果セット上限は適用する。`interleave_by_host` はホストの初出順にキューを作り、1 件ずつ取り出す（同一ホスト内の元順序は保つ）。
 
 ### 3.4 既定のフィルタ集合
 
@@ -126,16 +126,16 @@
 
 状態: 実装完了（REF:src/core/config/filter.rs）
 
-`FilterStats { kept, removed, reasons: BTreeMap<String, usize>, truncated_by_max_results, truncated_by_max_per_host, disabled }` を返す。`removed` は規則で除いた件数のみを数え、切り捨ては別フィールドに分ける。`reasons` のキーは `results.deny[2]` / `content.stripLines[0]` のような安定した文字列で、`BTreeMap` により順序を固定する。
+`FilterStats { kept, removed, reasons: BTreeMap<String, usize>, truncated_by_max_results, truncated_by_max_per_host, disabled }` を返す。結果側の `removed` は規則除外に加えて `maxPerHost` 超過と、検索正規化後に取り除いた重複 URL を含む。フィルタ集合の `maxResults` と表示ページの `--limit` による切り捨ては `removed` に含めず、別フィールドで示す。`reasons` は規則 ID / `maxPerHost` / `duplicateUrl` の件数を持つ `BTreeMap` で、順序を固定する。
 
 ### 5.2 表示
 
 状態: 実装完了（REF:src/ui/commands.rs）
 
-`FilterStats::summary_line()` が 1 行の要約（`(filters: all N shown)` / `(filters: showing N of M results, K filtered out)` / `(filters: disabled)`）を返し、`src/ui/commands.rs` と `src/ui/interactive.rs` が一覧の末尾に出力する。理由の内訳を出す `detail_lines` は持たない（`--verbose` でも内訳は出さない）。JSON では `src/ui/commands.rs` の `filtered_json` が `kept` / `removed` / `reasons` / `disabled` / `truncatedByLimit` を組み立てる（`truncatedByLimit` はページ用 `limit` による切り捨て件数で、`FilterStats` のフィールドではない）。
+`FilterStats::summary_line_for(shown, truncated_by_limit)` が表示件数と除外・切り捨て区分の要約を返し、`src/ui/commands.rs` と `src/ui/interactive.rs` が一覧の末尾に出力する。規則除外・重複 URL・`maxPerHost`・フィルタ集合の `maxResults`・表示 `--limit` を区別する。理由の内訳は一覧に出さない（`--verbose` でも規則 ID ごとの内訳は出さない）。JSON の `filtered_json` は `kept` / `removed` / `reasons` / `disabled` / `truncatedByMaxPerHost` / `truncatedByMaxResults` / `truncatedByLimit` を組み立てる。`truncatedByLimit` はページ用 `limit` による切り捨て件数で、`FilterStats` のフィールドではない。
 
 ### 5.3 無効化
 
 状態: 実装完了（REF:src/usecases/search.rs）
 
-`--no-filter`（値なしの真偽フラグ）は `App::no_filter` として `apply_results` / `apply_content` の `disabled` 引数に渡す。`disabled` のときは結果をそのまま返し、`FilterStats::disabled` に `true` を立てる。`DEFAULT_STRIP` は `convert` 側の処理であり `disabled` の影響を受けないため、`--no-filter` でも既定の除去要素は常に適用される。
+`--no-filter`（値なしの真偽フラグ）は `App::no_filter` として `apply_results` / `apply_content` の `disabled` 引数に渡す。結果側は利用者の `deny` / `allow` / `require` 規則を迂回するが、`maxPerHost` と `maxResults` は引き続き適用し、その除外数を `removed` / `reasons` に計上する。`FilterStats::disabled` は `true` になる。本文の後処理フィルタは無効になるが、`DEFAULT_STRIP` は `convert` 側の処理であり `disabled` の影響を受けないため、`--no-filter` でも既定の除去要素は常に適用される。

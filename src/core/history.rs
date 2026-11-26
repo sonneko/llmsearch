@@ -239,21 +239,26 @@ impl Filter<'_> {
 
 /// Markdown へのエクスポート（本文は含めない）。
 pub fn export_markdown(entries: &[HistoryEntry]) -> String {
-    let mut out = String::new();
-    let mut current = String::new();
-    for e in entries {
-        if e.session != current {
-            if !current.is_empty() {
+    let mut out = String::from("# History\n\n");
+    let mut current: Option<String> = None;
+    for entry in entries {
+        if current.as_deref() != Some(entry.session.as_str()) {
+            if current.is_some() {
                 out.push('\n');
             }
-            current = e.session.clone();
-            out.push_str(&format!("## session {current}\n\n"));
+            current = Some(entry.session.clone());
+            let session = if entry.session.is_empty() {
+                "(no session)"
+            } else {
+                entry.session.as_str()
+            };
+            out.push_str(&format!("### session {session}\n\n"));
         }
         out.push_str(&format!(
             "- `{}` **{}** {}\n",
-            e.at,
-            e.kind.as_str(),
-            e.summary()
+            entry.at,
+            entry.kind.as_str(),
+            entry.summary()
         ));
     }
     out
@@ -315,7 +320,15 @@ mod tests {
     fn export_groups_by_session() {
         let e = entry(EventType::Search, serde_json::json!({"query": "q"}));
         let md = export_markdown(&[e]);
-        assert!(md.contains("## session s1"));
+        assert!(md.starts_with("# History\n\n### session s1"));
         assert!(md.contains("**search**"));
+    }
+
+    #[test]
+    fn export_labels_entries_without_a_session() {
+        let mut e = entry(EventType::Search, serde_json::json!({"query": "q"}));
+        e.session.clear();
+        let md = export_markdown(&[e]);
+        assert!(md.contains("### session (no session)"));
     }
 }
