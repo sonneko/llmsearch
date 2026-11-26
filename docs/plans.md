@@ -22,7 +22,7 @@
 | 表示言語とエンジン言語（M10） | 完了 | CLI メッセージの全英語化・嘘をつく `ui.locale` の削除・`search.language` の追加 | `REF:docs/plans.md#m10-english-and-language` |
 | 配布互換ゲート（M11） | 完了 | CI の Build & Distribution Compatibility の `E1003`（ステージした `assets/` の入れ子）を直し、同梱既定の解決を配布配置に依存させない | `REF:docs/plans.md#m11-distribution-assets` |
 | ドキュメントとソースの同期（M12） | 完了 | docs 全 31 本の総点検・未実装仕様の切り分け・`GUIDE.md` の統合・未使用コードの削除 | `REF:docs/plans.md#m12-docs-source` |
-| M5 棚卸し残課題の再監査（M15） | 進行中 | Issue #4/#5/#7/#9/#12/#21/#23 の仕様・設計・実装・回帰検証 | `REF:docs/plans.md#m15-m5-residuals` |
+| M5 棚卸し残課題の再監査（M15） | 完了（PR #46 作成・未マージ） | Issue #4/#5/#7/#9/#12/#21/#23 の仕様・設計・実装・回帰検証 | `REF:docs/plans.md#m15-m5-residuals` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -155,7 +155,7 @@ M5 棚卸しの Issue #4、#5、#7、#9、#12、#21、#23 を、M9 / M12 の修�
 - [x] README・ガイド・仕様・設計全体を再検索し、実装との不一致を修正
 - [x] OS 割り当てポートの `127.0.0.1` 自作スタブで実バイナリを検証。外部サイトには接続しない
 - [x] `bash scripts/verify.sh --quick`（docs / release-gate / fmt-check / clippy / all-target tests）と `git diff --check` を実行
-- [ ] 7 Issue を `Closes` する `develop` 向け PR を 1 件作成。マージしない
+- [x] 7 Issue を `Closes` する `develop` 向け PR #46 を作成（未マージ）
 
 ## 3. フェーズ別実行順序
 
