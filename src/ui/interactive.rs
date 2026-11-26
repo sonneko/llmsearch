@@ -28,6 +28,10 @@ pub struct Interactive {
 impl Interactive {
     pub fn new(app: App, renderer: Renderer) -> Self {
         let depth = app.settings.context.outline_depth;
+        renderer.set_secrets(crate::core::secret::redaction_list_for_engines(
+            &app.secrets,
+            &app.engines,
+        ));
         Self {
             app,
             renderer,
@@ -577,6 +581,6 @@ fn io_error(e: std::io::Error) -> AppError {
 fn display_url(url: &str, secrets: &[String]) -> String {
     match url::Url::parse(url) {
         Ok(parsed) => crate::core::url::redact(&parsed, secrets),
-        Err(_) => crate::core::secret::redact_text(url, secrets),
+        Err(_) => crate::core::secret::redact_display_text(url, secrets),
     }
 }

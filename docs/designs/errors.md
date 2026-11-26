@@ -124,7 +124,7 @@
 
 状態: 実装完了（REF:src/core/errors.rs）
 
-`details` に動的な値を入れる場合は `core::url::redact(url, secrets)` または `core::secret::redact_text(text, secrets)` を通した値のみを使う。`Secret` の保持する値を `details` へそのまま渡す API を用意しない。
+`details` に動的な値を入れる場合は `core::url::redact(url, secrets)` または `core::secret::redact_text(text, secrets)` を通した値のみを使う。`Secret` の保持する値を `details` へそのまま渡す API を用意しない。さらに `Renderer::error()` は既知の秘匿値を JSON と標準エラーの双方で伏字化し、個別 `AppError::hint` をカタログ hint より優先する。
 
 ### 4.5 廃止した `ui.locale`
 

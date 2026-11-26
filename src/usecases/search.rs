@@ -175,7 +175,7 @@ fn record_next_termination(app: &App, query: &str, page: u32, reason: &str) {
         }),
     );
     entry.engine = Some(engine);
-    let _ = app.history.append(&entry);
+    let _ = app.append_history(&entry);
 }
 
 /// 1 エンジン分の検索（正規化・重複除去まで済ませた生の結果）。
@@ -548,7 +548,7 @@ fn run_fallback(
                     payload,
                 );
                 entry.engine = Some(engine.clone());
-                let _ = app.history.append(&entry);
+                let _ = app.append_history(&entry);
                 return Ok(outcome);
             }
             Err(err) => {
@@ -712,7 +712,7 @@ fn run_merge(
         payload,
     );
     entry.engine = Some(engine.clone());
-    let _ = app.history.append(&entry);
+    let _ = app.append_history(&entry);
     Ok(outcome)
 }
 
@@ -829,7 +829,7 @@ pub fn refine(app: &mut App, previous: &str, new_query: &str) -> Result<SearchOu
         crate::core::history::EventType::Refine,
         serde_json::json!({"query": new_query, "previous": previous}),
     );
-    let _ = app.history.append(&entry);
+    let _ = app.append_history(&entry);
     outcome.warnings.push(Diagnostic::new(
         WarningCode::W4001,
         format!("changed the query from '{previous}' to '{new_query}'"),

@@ -44,7 +44,7 @@ fn upper_check(lower: &str) -> bool {
     lower.starts_with("utm_") || DEFAULT_TRACKING.contains(&lower)
 }
 
-fn is_sensitive(name: &str) -> bool {
+pub fn is_sensitive_param_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     SENSITIVE_PARAMS.iter().any(|p| lower.contains(p))
 }
@@ -220,6 +220,13 @@ pub fn html_redirect_target(body: &str, base: &Url) -> Option<Url> {
 /// パス全体は置換しない（無関係な語を巻き込むため）。
 pub fn redact(url: &Url, secrets: &[String]) -> String {
     let mut out = url.clone();
+    // Never expose URL userinfo, even when the credential does not use a recognized query key.
+    if !url.username().is_empty() || url.password().is_some() {
+        let _ = out.set_username("***");
+        if url.password().is_some() {
+            let _ = out.set_password(Some("***"));
+        }
+    }
     if let Some(path) = url.path().strip_prefix('/') {
         let redacted = redact_path_segments(path);
         if redacted != path {
@@ -233,7 +240,7 @@ pub fn redact(url: &Url, secrets: &[String]) -> String {
             .map(|(k, v)| {
                 let key = k.into_owned();
                 let val = v.into_owned();
-                let hidden = is_sensitive(&key)
+                let hidden = is_sensitive_param_name(&key)
                     || secrets
                         .iter()
                         .any(|s| !s.is_empty() && val.contains(s.as_str()));
@@ -270,7 +277,7 @@ fn redact_path_segments(path: &str) -> String {
     let joined = path
         .split('/')
         .map(|seg| match seg.split_once('=') {
-            Some((name, value)) if !value.is_empty() && is_sensitive(name) => {
+            Some((name, value)) if !value.is_empty() && is_sensitive_param_name(name) => {
                 changed = true;
                 format!("{name}=***")
             }
@@ -355,6 +362,15 @@ mod tests {
         let out = redact(&u, &[]);
         assert!(out.contains("token=***"));
         assert!(out.contains("q=ok"));
+    }
+
+    #[test]
+    fn redacts_url_userinfo() {
+        let url = Url::parse("https://alice:supersecret@example.com/a").unwrap();
+        assert_eq!(redact(&url, &[]), "https://***:***@example.com/a");
+
+        let password_only = Url::parse("https://:supersecret@example.com/a").unwrap();
+        assert_eq!(redact(&password_only, &[]), "https://***:***@example.com/a");
     }
 
     #[test]

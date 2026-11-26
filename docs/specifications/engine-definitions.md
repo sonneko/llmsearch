@@ -93,7 +93,7 @@
 - `{"value_env": "SEARXNG_TOKEN"}` : 環境変数の値を展開する。
 - `{"value": "fixed"}` : 固定値。API キー以外の用途に限定する。
 
-`value_env` が指す環境変数が未設定の場合、そのエンジンは「利用不可」と判定し、選択時に `E4002` を返す。値そのものはログ・履歴・`engines list` に表示しない。
+`value_env` が指す環境変数が未設定の場合、そのエンジンは「利用不可」と判定し、選択時に `E4002` を返す。値そのものはログ・履歴・`engines list` に表示しない。`engines show` の要約・JSON・`--raw` 表示と `engines test --dry-run` でも、解決済みの秘匿値と定義に直接書かれた固定値を表示しない。dry-run の `request.url` / `request.headers` / `request.body` を伏せ、認証ヘッダは値の出自にかかわらずヘッダ名で判定する（`agent-integration.md` §4.2）。
 
 ### 3.4 送信前の検証
 

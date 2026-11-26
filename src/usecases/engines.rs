@@ -163,29 +163,29 @@ pub fn dry_run(app: &App, def: &EngineDef, query: &str, page: u32) -> Result<Dry
             .headers
             .insert("Accept-Language".to_string(), ctx.locale.clone());
     }
-    let secrets: Vec<String> = app
-        .secrets
-        .names()
-        .filter_map(|n| app.secrets.value_of(n))
-        .map(|s| s.to_string())
-        .collect();
-    let headers = prepared
+    let definition = serde_json::to_value(def).unwrap_or_default();
+    let mut secrets = crate::core::secret::redaction_list(&app.secrets);
+    crate::core::secret::collect_explicit_values(&definition, &mut secrets);
+    let mut headers: Vec<(String, String)> = prepared
         .headers
         .iter()
-        .map(|(k, v)| {
-            let masked = if secrets.iter().any(|s| v.contains(s.as_str())) {
-                "***".to_string()
-            } else {
-                v.clone()
-            };
-            (k.clone(), masked)
+        .map(|(name, value)| {
+            (
+                name.clone(),
+                crate::core::secret::redact_display_text(value, &secrets),
+            )
         })
         .collect();
+    crate::core::secret::redact_headers(&mut headers);
+    let body = prepared
+        .body
+        .as_deref()
+        .map(|body| crate::core::secret::redact_body(body, &secrets));
     Ok(DryRun {
         url: crate::core::url::redact(&crate::core::url::parse(&prepared.url)?, &secrets),
         method: prepared.method,
         headers,
-        body: prepared.body,
+        body,
     })
 }
 

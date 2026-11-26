@@ -1,5 +1,6 @@
 //! 出力（テキスト・JSON Lines）。
 
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use serde_json::{Value, json};
@@ -20,6 +21,8 @@ pub struct Renderer {
     width: usize,
     clock: Arc<dyn Clock>,
     session: Arc<Mutex<String>>,
+    secrets: Arc<Mutex<Vec<String>>>,
+    pending_warnings: Arc<Mutex<Vec<Diagnostic>>>,
 }
 
 impl Renderer {
@@ -31,6 +34,8 @@ impl Renderer {
             width,
             clock,
             session: Arc::new(Mutex::new(String::new())),
+            secrets: Arc::new(Mutex::new(Vec::new())),
+            pending_warnings: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -59,29 +64,128 @@ impl Renderer {
         }
     }
 
+    /// 出力で伏字化する環境変数値を登録する。
+    pub fn set_secrets(&self, secrets: Vec<String>) {
+        let mut values: Vec<String> = secrets
+            .into_iter()
+            .filter(|value| value.chars().count() >= 4)
+            .collect();
+        values.sort();
+        values.dedup();
+        if let Ok(mut guard) = self.secrets.lock() {
+            *guard = values;
+        }
+    }
+
+    fn redactions(&self) -> Vec<String> {
+        self.secrets
+            .lock()
+            .map(|values| values.clone())
+            .unwrap_or_default()
+    }
+
+    fn safe_text(&self, text: &str) -> String {
+        crate::core::secret::redact_display_text(text, &self.redactions())
+    }
+
+    fn queue_warning(&self, diagnostic: &Diagnostic) {
+        if !self.json {
+            return;
+        }
+        let safe = Diagnostic::new(diagnostic.code, self.safe_text(&diagnostic.message));
+        if let Ok(mut pending) = self.pending_warnings.lock()
+            && !pending
+                .iter()
+                .any(|old| old.code == safe.code && old.message == safe.message)
+        {
+            pending.push(safe);
+        }
+    }
+
+    fn take_pending_warnings(&self) -> Vec<Diagnostic> {
+        self.pending_warnings
+            .lock()
+            .map(|mut pending| std::mem::take(&mut *pending))
+            .unwrap_or_default()
+    }
+
+    /// JSON 値を表示境界で伏字化した複製を返す。
+    pub fn redacted_value(&self, value: &Value) -> Value {
+        let mut safe = value.clone();
+        crate::core::secret::redact_json_output(&mut safe, &self.redactions());
+        safe
+    }
+
+    fn write_event(&self, value: &Value) {
+        let mut safe = self.redacted_value(value);
+        if let Some(warnings) = safe.get_mut("warnings").and_then(Value::as_array_mut) {
+            deduplicate_warnings(warnings);
+        }
+        match serde_json::to_string(&safe) {
+            Ok(text) => println!("{text}"),
+            Err(e) => eprintln!("failed to build JSON: {e}"),
+        }
+    }
+
+    fn print_warning(&self, diagnostic: &Diagnostic) {
+        if !self.quiet {
+            eprintln!(
+                "warning: {} {}",
+                diagnostic.code.as_str(),
+                self.safe_text(&diagnostic.message)
+            );
+        }
+    }
+
     /// 標準出力（データ）。
     pub fn out(&self, line: &str) {
-        println!("{line}");
+        println!("{}", self.safe_text(line));
     }
 
     /// 標準エラー（メニュー・進捗・警告）。
     pub fn err(&self, line: &str) {
-        eprintln!("{line}");
+        eprintln!("{}", self.safe_text(line));
     }
 
     /// 進捗（`--quiet` で抑制）。
     pub fn info(&self, line: &str) {
         if !self.quiet {
-            eprintln!("{line}");
+            eprintln!("{}", self.safe_text(line));
         }
     }
 
-    /// JSON Lines を 1 行出力する。
+    /// JSON Lines を 1 行出力する。Reporter 警告は次のイベントへ集約する。
     pub fn event(&self, value: &Value) {
-        match serde_json::to_string(value) {
-            Ok(text) => println!("{text}"),
-            Err(e) => eprintln!("failed to build JSON: {e}"),
+        let pending = self.take_pending_warnings();
+        if pending.is_empty() {
+            self.write_event(value);
+            return;
         }
+
+        let mut event = value.clone();
+        if let Some(warnings) = event.get_mut("warnings").and_then(Value::as_array_mut) {
+            append_warnings(warnings, &pending);
+            self.write_event(&event);
+        } else {
+            self.write_event(
+                &self.envelope("warnings", json!({"warnings": warnings_json(&pending)})),
+            );
+            self.write_event(&event);
+        }
+    }
+
+    /// 独立警告イベント（`W1001` など）。操作警告キューには追加しない。
+    pub fn warning_event(&self, warnings: &[Diagnostic]) {
+        if self.json && !self.quiet && !warnings.is_empty() {
+            self.write_event(
+                &self.envelope("warnings", json!({"warnings": warnings_json(warnings)})),
+            );
+        }
+    }
+
+    /// `--json` と同時に指定された装飾要求など、独立警告の stderr 表示。
+    pub fn warn_independent(&self, diagnostic: &Diagnostic) {
+        self.print_warning(diagnostic);
     }
 
     /// イベントの共通枠（`v` / `event` / `session` / `at`）を足したペイロードを作る。
@@ -102,11 +206,13 @@ impl Renderer {
 
     /// エラーを出力する（JSON のときは `error` イベント）。
     pub fn error(&self, err: &AppError) {
-        // 個別の hint があれば優先し、無ければカタログの定型文を使う
+        // 個別の hint があれば優先し、無ければカタログの定型文を使う。
         let hint = err
             .hint
             .clone()
             .unwrap_or_else(|| crate::core::errors::hint(err.code).to_string());
+        let hint = self.safe_text(&hint);
+        let detail = err.detail.as_deref().map(|text| self.safe_text(text));
         if self.json {
             self.event(&serde_json::json!({
                 "v": 1,
@@ -116,7 +222,7 @@ impl Renderer {
                 "code": err.code.as_str(),
                 "message": crate::core::errors::message(err.code),
                 "hint": hint,
-                "details": err.detail,
+                "details": detail,
                 "warnings": warnings_json(&err.warnings),
             }));
         }
@@ -125,26 +231,21 @@ impl Renderer {
             err.code.as_str(),
             crate::core::errors::message(err.code)
         );
-        if let Some(detail) = &err.detail {
+        if let Some(detail) = detail {
             eprintln!("  detail: {detail}");
         }
         eprintln!("  hint: {hint}");
         // 失敗に至る過程で出た警告は捨てずに標準エラーへ出す（errors.md §1.2）。
         for diagnostic in &err.warnings {
-            self.warn(diagnostic);
+            self.print_warning(diagnostic);
         }
     }
 
-    /// 警告を標準エラーへ出力する（`--quiet` では抑制。JSON イベントの payload は別経路）。
+    /// 警告を stderr へ表示し、JSON 実行では次イベントに結び付ける。
+    /// `--quiet` は stderr のみ抑制し、構造化警告は保持する。
     pub fn warn(&self, diagnostic: &Diagnostic) {
-        if self.quiet {
-            return;
-        }
-        eprintln!(
-            "warning: {} {}",
-            diagnostic.code.as_str(),
-            diagnostic.message
-        );
+        self.queue_warning(diagnostic);
+        self.print_warning(diagnostic);
     }
 
     /// 検証結果の 1 行。
@@ -174,7 +275,7 @@ impl Renderer {
             let trimmed = truncate(snippet, self.width.saturating_sub(5));
             out.push_str(&format!("     {trimmed}\n"));
         }
-        out
+        self.safe_text(&out)
     }
 
     /// 結果一覧（1 行 1 件の要約）。
@@ -191,9 +292,12 @@ impl Renderer {
             .unwrap_or_default();
         let label = self.style(&format!("[{}]", hit.label()), "36");
         if snippet.is_empty() {
-            format!("{label} {} <{}>", hit.title, url)
+            self.safe_text(&format!("{label} {} <{}>", hit.title, url))
         } else {
-            format!("{label} {}\n      {} <{}>", hit.title, snippet, url)
+            self.safe_text(&format!(
+                "{label} {}\n      {} <{}>",
+                hit.title, snippet, url
+            ))
         }
     }
 
@@ -228,7 +332,7 @@ impl Renderer {
                 "  ({hidden} headings deeper than {depth} are hidden; choose 3) to change the depth)\n"
             ));
         }
-        out
+        self.safe_text(&out)
     }
 
     /// 節本文のブロック。
@@ -255,7 +359,7 @@ impl Renderer {
             ));
         }
         out.push_str("--- end ---\n");
-        out
+        self.safe_text(&out)
     }
 
     /// 履歴の 1 行。
@@ -266,14 +370,14 @@ impl Renderer {
             .chars()
             .take(16)
             .collect::<String>();
-        format!(
+        self.safe_text(&format!(
             "{:<5} {}  {:<8} {:<16} {}",
             entry.id,
             at,
             entry.kind.as_str(),
             entry.engine.as_deref().unwrap_or("-"),
             entry.summary()
-        )
+        ))
     }
 
     /// クォータ余力の 1 行。
@@ -306,7 +410,7 @@ impl Renderer {
                 r.check.text()
             ));
         }
-        out
+        self.safe_text(&out)
     }
 }
 
@@ -324,15 +428,32 @@ pub fn format_at(now: chrono::DateTime<chrono::Utc>) -> String {
 
 /// 警告を JSON イベント用の配列へ変換する（仕様 errors.md §1.2）。
 pub fn warnings_json(warnings: &[Diagnostic]) -> Vec<Value> {
-    warnings
-        .iter()
-        .map(|w| {
-            serde_json::json!({
-                "code": w.code.as_str(),
-                "message": w.message,
-            })
-        })
-        .collect()
+    let mut out = Vec::new();
+    append_warnings(&mut out, warnings);
+    out
+}
+
+fn append_warnings(values: &mut Vec<Value>, warnings: &[Diagnostic]) {
+    for warning in warnings {
+        values.push(json!({
+            "code": warning.code.as_str(),
+            "message": warning.message,
+        }));
+    }
+    deduplicate_warnings(values);
+}
+
+fn deduplicate_warnings(values: &mut Vec<Value>) {
+    let mut seen = HashSet::new();
+    values.retain(|value| {
+        let Some(code) = value.get("code").and_then(Value::as_str) else {
+            return true;
+        };
+        let Some(message) = value.get("message").and_then(Value::as_str) else {
+            return true;
+        };
+        seen.insert((code.to_string(), message.to_string()))
+    });
 }
 
 /// 本文中の信頼境界マーカー様の行を無害化する（仕様 context-assembly.md §5.2）。
@@ -447,6 +568,47 @@ mod tests {
             format_at(now.with_timezone(&chrono::Utc)),
             "2026-11-14T01:11:12Z"
         );
+    }
+
+    #[test]
+    fn quiet_json_mode_buffers_and_deduplicates_structured_warnings() {
+        let r = Renderer::new(
+            true,
+            false,
+            true,
+            80,
+            Arc::new(crate::ports::system::SystemClock::new()),
+        );
+        r.set_secrets(vec!["secret-value".to_string()]);
+        let warning = Diagnostic::new(
+            crate::core::errors::WarningCode::W2001,
+            "request https://example.test/?token=secret-value was delayed",
+        );
+        r.warn(&warning);
+        r.warn(&warning);
+
+        let pending = r.take_pending_warnings();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            pending[0].message,
+            "request https://example.test/?token=*** was delayed"
+        );
+        assert_eq!(
+            warnings_json(&[warning.clone(), warning]).len(),
+            1,
+            "the command warning list must use the same deduplication rule"
+        );
+
+        let mut warnings = json!([
+            {"code": "W2001", "message": "failed with secret-one"},
+            {"code": "W2001", "message": "failed with secret-two"}
+        ]);
+        crate::core::secret::redact_json_output(
+            &mut warnings,
+            &["secret-one".to_string(), "secret-two".to_string()],
+        );
+        deduplicate_warnings(warnings.as_array_mut().unwrap());
+        assert_eq!(warnings.as_array().unwrap().len(), 1);
     }
 
     #[test]

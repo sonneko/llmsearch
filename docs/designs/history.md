@@ -16,15 +16,15 @@
 
 ### 1.2 記録しない情報
 
-状態: 実装完了（REF:src/core/history.rs）
+状態: 実装完了（REF:src/usecases/mod.rs, REF:src/core/secret.rs, REF:src/core/url.rs）
 
-`HistoryEntry.payload` は汎用 `serde_json::Value` で、本文を型で禁止する仕組みや append 時の一括 redaction はない。各記録呼び出し側が本文を payload に入れず、URL を保存する場合は `core::url::redact` などで秘匿パラメータを伏せる（例: `usecases::document`）。履歴への新規フィールド追加時は、本文・認証情報を含めないことを呼び出し側で守る。
+`HistoryEntry.payload` は汎用 `serde_json::Value` で、本文を型で禁止する仕組みはない。各記録呼び出し側は本文を payload に入れず、`App::append_history()` を通して追記する。同関数は履歴エンジン名と payload の文字列を既知の環境 secret / `TmplValue::Explicit` に照らして伏字化し、URL には `core::url::redact()` のユーザー情報・秘匿 query/path パラメータ処理も適用する。JSON イベントは `Renderer::event()`、テキストの詳細・JSONL エクスポートは `Renderer::redacted_value()` を使って出力境界でも伏字化する。
 
 ### 1.3 記録の単位
 
 状態: 実装完了（REF:src/core/history.rs, REF:src/adapters/state/history_jsonl.rs）
 
-呼び出し側は `HistoryStore::next_id()` で保存済み ID の最大番号 +1（`H<n>`）を取得し、`HistoryEntry::new()` で `at` を `Clock` から UTC 文字列として設定した後、`append()` する。`cost` / `remaining` は任意の `Cost`（4 種のカウンタ値）であり、現在は `quota reset` がリセット前後の値を設定する。検索・次ページの個別情報は汎用 `payload: serde_json::Value` に記録し、`search` / `next` はトップレベル `engine` も設定する。
+呼び出し側は `HistoryStore::next_id()` で保存済み ID の最大番号 +1（`H<n>`）を取得し、`HistoryEntry::new()` で `at` を UTC 文字列として設定した後、`App::append_history()`（`src/usecases/mod.rs`）で秘匿値を伏字化してから `HistoryStore::append()` する。`cost` / `remaining` は任意の `Cost`（4 種のカウンタ値）であり、現在は `quota reset` がリセット前後の値を設定する。検索・次ページの個別情報は汎用 `payload: serde_json::Value` に記録し、`search` / `next` はトップレベル `engine` も設定する。
 
 ---
 
@@ -42,7 +42,7 @@
 
 状態: 実装完了（REF:src/core/history.rs, REF:src/adapters/state/history_jsonl.rs）
 
-`history show <id>` はレコード全フィールドを整形して出力する。`REF:src/usecases/history.rs` の `get` が `next_id` を使わず全件から識別子で引く。本文の再出力は行わない（§3.1）。
+`history show <id>` はレコード全フィールドを整形して出力する。`REF:src/usecases/history.rs` の `get` が `next_id` を使わず全件から識別子で引き、テキストの payload は `Renderer::redacted_value()` で伏字化する。JSON イベントは `Renderer::event()` の出力境界で同じ伏字化を行う。本文の再出力は行わない（§3.1）。
 
 ### 2.3 検索
 
@@ -72,7 +72,7 @@
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-Markdown は `src/core/history.rs` の `export_markdown(&[HistoryEntry])` が組み立てる（`REF:src/usecases/history.rs` の `export` が新しい順の一覧を古い順へ直してから渡す）。JSON Lines は各エントリを `serde_json::to_string` で 1 行ずつ出す。`--json` のときは形式にかかわらず `history` イベント（`entries[]` / `total`）へ包み、生テキストを標準出力へ出さない（`REF:src/ui/commands.rs` の `run_history`）。
+Markdown は `src/core/history.rs` の `export_markdown(&[HistoryEntry])` が組み立てる（`REF:src/usecases/history.rs` の `export` が新しい順の一覧を古い順へ直してから渡す）。テキストの JSON Lines は各エントリを `Renderer::redacted_value()` で伏字化してから `serde_json::to_string` で 1 行ずつ出す。`--json` のときは形式にかかわらず `history` イベント（`entries[]` / `total`）へ包み、生テキストを標準出力へ出さない（`REF:src/ui/commands.rs` の `run_history`）。
 
 ---
 

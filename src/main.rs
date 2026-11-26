@@ -36,13 +36,8 @@ fn main() {
             llmsearch::core::errors::WarningCode::W1001,
             "--color is ignored with --json to preserve machine-readable output",
         );
-        renderer.warn(&warning);
-        renderer.event(&renderer.envelope(
-            "warnings",
-            serde_json::json!({
-                "warnings": llmsearch::ui::render::warnings_json(&[warning]),
-            }),
-        ));
+        renderer.warn_independent(&warning);
+        renderer.warning_event(&[warning]);
     }
 
     let mut overrides = match config_uc::env_overrides(deps.1.as_ref()) {
@@ -90,6 +85,11 @@ fn main() {
             std::process::exit(err.exit_code());
         }
     };
+
+    renderer.set_secrets(llmsearch::core::secret::redaction_list_for_engines(
+        &app.secrets,
+        &app.engines,
+    ));
 
     if app.verbose {
         for check in &resolved.checks {

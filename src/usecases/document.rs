@@ -107,21 +107,22 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
     session.touch(app.clock.now_utc());
     app.sessions.save(&session)?;
 
-    // 履歴
+    // 履歴へ書く URL も、検索・表示 URL と同じ環境 secret の規則で伏せる。
+    let redactions = crate::core::secret::redaction_list(&app.secrets);
     let entry = crate::core::history::HistoryEntry::new(
         app.history.next_id().unwrap_or_else(|_| "H?".to_string()),
         app.clock.now_utc(),
         id_hint,
         crate::core::history::EventType::Fetch,
         serde_json::json!({
-            "url": crate::core::url::redact(url, &[]),
+            "url": crate::core::url::redact(url, &redactions),
             "document": format!("D{id}"),
             "chars": chars,
             "cached": fetched.cached,
             "robotsSkipped": !app.network.robots.respect,
         }),
     );
-    let _ = app.history.append(&entry);
+    let _ = app.append_history(&entry);
 
     let warnings: Vec<Diagnostic> = fetched.warnings.clone();
     Ok(Fetched {
@@ -204,7 +205,7 @@ pub fn outline(app: &mut App, document: &DocumentRef, depth: u8) -> Result<Outli
             "hidden": hidden,
         }),
     );
-    let _ = app.history.append(&entry);
+    let _ = app.append_history(&entry);
     Ok(OutlineView {
         document: loaded.document,
         headings,
@@ -344,7 +345,7 @@ pub fn read(
                 "truncated": truncated,
             }),
         );
-        let _ = app.history.append(&entry);
+        let _ = app.append_history(&entry);
     }
 
     let mut guard = app.guard()?;
@@ -408,7 +409,7 @@ pub fn record_selection(app: &mut App, selections: &[(u32, u32)]) -> Result<(), 
                 .collect::<Vec<_>>(),
         }),
     );
-    let _ = app.history.append(&entry);
+    let _ = app.append_history(&entry);
     Ok(())
 }
 

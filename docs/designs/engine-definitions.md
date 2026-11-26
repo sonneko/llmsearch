@@ -61,7 +61,7 @@
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
 
-`RequestSpec` は `method: Method`, `url: String`, `query: BTreeMap<String, Tmpl>`, `headers: BTreeMap<String, Tmpl>`, `body: Option<String>`, `content_type: Option<String>`, `encoding: Encoding`, `timeout_ms: Option<u64>` を持つ。`query` を `BTreeMap` にして順序を固定し、リクエスト文字列を決定論的にする。
+`RequestSpec` は `method: String`, `url: String`, `query: BTreeMap<String, TmplValue>`, `headers: BTreeMap<String, TmplValue>`, `body: Option<String>`, `content_type: Option<String>`, `encoding: String`, `timeout_ms: Option<u64>` を持つ。`query` を `BTreeMap` にして順序を固定し、リクエスト文字列を決定論的にする。`body` は送信時のテンプレート展開後も実体を保持するが、`engines test --dry-run` の表示では環境変数値・明示値・認証パラメータを伏字化する。
 
 ### 3.2 テンプレート変数
 
@@ -79,7 +79,7 @@
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
 
-`Tmpl` は `Value(String)` / `Env(String)` の列挙。`Env(name)` は `usecases::config::secrets` が起動時に解決し、`SecretString`（`Debug` 実装で `***` を返す newtype）として保持する。`serde::Serialize` を通さない型にすることで、出力経路への混入を型で防ぐ。
+`TmplValue` は `Value(String)` / `Env { value_env }` / `Explicit { value }` の列挙。`Env` は `Secrets` にある `Secret` から評価時に解決し、`Secret` は `Serialize` を実装せず `Debug` も値を出さない。`Explicit` は固定値としてリクエストへ展開できるが、定義表示では値を伏せる。JSON 定義の表示は `core::secret::redact_json()` を通し、`engines test --dry-run` は環境変数値と明示値を redaction list に含め、URL・認証ヘッダ・本文の認証フィールドを伏せる。
 
 ### 3.4 送信前の検証
 
@@ -225,4 +225,4 @@
 
 状態: 実装完了（REF:src/ui/render.rs）
 
-`--dry-run` は `EngineDef::validate()` と `template::prepare` の結果を `src/ui/render.rs` で表示する（`Authorization` 等のヘッダは `***` へ置換）。実送信時は通常の `search` ユースケースを `limit=3` で呼び、クォータ消費を `Reporter` で事前に通知する。
+`--dry-run` は `EngineDef::validate()` と `template::prepare` の結果を `usecases::engines::dry_run()` で組み立て、`commands.rs` がテキストまたは JSON で表示する。URL・ヘッダ名・本文の秘匿値を伏せ、`Authorization` / Cookie 類は出自にかかわらずヘッダ名で `***` にする。実送信時は通常の `search` ユースケースを `limit=3` で呼び、クォータ消費を `Reporter` で事前に通知する。

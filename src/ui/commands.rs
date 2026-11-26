@@ -22,6 +22,11 @@ pub fn run(
     resolved: &crate::usecases::config::Resolved,
     command: &Command,
 ) -> Result<i32, AppError> {
+    // 出力境界で URL・既知の secret を伏せる。実プロセス以外からの呼び出しでも同じ。
+    renderer.set_secrets(crate::core::secret::redaction_list_for_engines(
+        &app.secrets,
+        &app.engines,
+    ));
     // 共通枠の `session` を、設定読み込み後の現行セッションに合わせる。
     renderer.set_session(app.current_session_id());
     match command {
@@ -592,9 +597,10 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                     renderer.out(&format!("  engine: {engine}"));
                 }
                 renderer.out(&format!("  {}", entry.summary()));
+                let payload = renderer.redacted_value(&entry.payload);
                 renderer.out(&format!(
                     "  payload: {}",
-                    serde_json::to_string_pretty(&entry.payload).unwrap_or_default()
+                    serde_json::to_string_pretty(&payload).unwrap_or_default()
                 ));
             }
             Ok(0)
@@ -642,7 +648,9 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
                     );
                 } else {
                     for entry in entries.iter().rev() {
-                        renderer.out(&serde_json::to_string(entry).unwrap_or_default());
+                        let value = serde_json::to_value(entry).unwrap_or_default();
+                        let safe = renderer.redacted_value(&value);
+                        renderer.out(&serde_json::to_string(&safe).unwrap_or_default());
                     }
                 }
             } else if renderer.json {
@@ -1414,7 +1422,7 @@ fn record_quota_reset(
     );
     entry.cost = Some(to_cost(usage_for(&before, scope)));
     entry.remaining = Some(to_cost(usage_for(&after, scope)));
-    app.history.append(&entry)
+    app.append_history(&entry)
 }
 
 fn run_config(
@@ -1680,7 +1688,7 @@ fn display_document(
 fn display_url(url: &str, secrets: &[String]) -> String {
     match url::Url::parse(url) {
         Ok(parsed) => crate::core::url::redact(&parsed, secrets),
-        Err(_) => crate::core::secret::redact_text(url, secrets),
+        Err(_) => crate::core::secret::redact_display_text(url, secrets),
     }
 }
 
