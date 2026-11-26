@@ -77,11 +77,10 @@ where
     }
     request.body = prepared.body.as_ref().map(|b| b.clone().into_bytes());
     request.timeout_ms = prepared.timeout_ms;
-    request.secrets = secrets
-        .names()
-        .filter_map(|n| secrets.value_of(n))
-        .map(|s| s.to_string())
-        .collect();
+    let mut eval_secrets = crate::core::secret::redaction_list(secrets);
+    crate::core::secret::collect_engine_secrets(def, &mut eval_secrets);
+    crate::core::secret::collect_network_secrets(profile, &mut eval_secrets);
+    request.secrets = eval_secrets.clone();
 
     // 応答は得られたが抽出規則に 1 件も一致しない場合は、送出側の一時的な揺れ
     // （中継ページ・版面の一部違い）としてプロファイルの再試行方針に従い再送する。
@@ -125,7 +124,17 @@ where
         let elapsed_ms = clock.monotonic_ns().saturating_sub(started) as u128 / 1_000_000;
 
         let (body, _had_errors) = decode(&response, def);
-        let mut outcome = extract::extract(&def.response, &body, &response.final_url, tracking)?;
+        let mut outcome = extract::extract(&def.response, &body, &response.final_url, tracking)
+            .map_err(|mut err| {
+                if let Some(detail) = &mut err.detail {
+                    *detail = crate::core::secret::redact_display_text(detail, &eval_secrets);
+                }
+                if carried.is_empty() {
+                    err
+                } else {
+                    err.warnings(carried.clone())
+                }
+            })?;
         if response.truncated {
             outcome.warnings.push(Diagnostic::new(
                 WarningCode::W3003,
@@ -133,16 +142,17 @@ where
             ));
         }
         if outcome.hits.is_empty() && outcome.items_seen == 0 && !body.trim().is_empty() {
-            // 抽出規則が合っていない可能性（先頭 2048 文字のみ示す。本文は出さない）
-            let head: String = body.chars().take(2048).collect();
+            // 切り詰め前に JSON / form / HTTP ヘッダ行・既知の秘匿値を伏せてから先頭のみ示す。
+            let safe_body = crate::core::secret::redact_body(&body, &eval_secrets);
+            let head: String = safe_body.chars().take(2048).collect();
             carried.push(Diagnostic::new(
                 WarningCode::W4004,
                 format!(
                     "the response may not match the expected shape: {}",
-                    head.replace('\n', " ")
+                    head.replace(['\n', '\r'], " ")
                 ),
             ));
-            last_error = Some(unmatched_response_error(&body).warnings(carried.clone()));
+            last_error = Some(unmatched_response_error(&safe_body).warnings(carried.clone()));
             continue;
         }
 

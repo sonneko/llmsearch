@@ -23,7 +23,8 @@
 | 配布互換ゲート（M11） | 完了 | CI の Build & Distribution Compatibility の `E1003`（ステージした `assets/` の入れ子）を直し、同梱既定の解決を配布配置に依存させない | `REF:docs/plans.md#m11-distribution-assets` |
 | ドキュメントとソースの同期（M12） | 完了 | docs 全 31 本の総点検・未実装仕様の切り分け・`GUIDE.md` の統合・未使用コードの削除 | `REF:docs/plans.md#m12-docs-source` |
 | M5 棚卸し残課題の再監査（M15） | 完了（PR #46 マージ済み） | Issue #4/#5/#7/#9/#12/#21/#23 の仕様・設計・実装・回帰検証 | `REF:docs/plans.md#m15-m5-residuals` |
-| 実環境検証のフォローアップ（M16） | 実装・ローカル検証完了（レビュー待ち） | 同一 refine の W4001 抑制（#47）・JSON 非信頼属性（#48）・Muse 検証記録 | `REF:docs/plans.md#m16-real-provider-followup` |
+| 実環境検証のフォローアップ（M16） | 完了（PR #49 マージ済み） | 同一 refine の W4001 抑制（#47）・JSON 非信頼属性（#48）・Muse 検証記録 | `REF:docs/plans.md#m16-real-provider-followup` |
+| 秘匿機能のスタブ検証と修正（M17） | 実装・ローカル検証完了（レビュー待ち） | G1 URL userinfo 成功系・埋込/不正 URL・robots 拒否（#50）と G2 応答ヘッダ・JSON/form body 秘匿・過剰変換修正（#51） | `REF:docs/plans.md#m17-secret-redaction-validation` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -267,3 +268,19 @@ M5 棚卸しの Issue #4、#5、#7、#9、#12、#21、#23 を、M9 / M12 の修�
 - 実装・検証: `tests/m16.rs` の loopback HTTP スタブと実プロセスで refine の変更あり／なし、quiet・非 quiet 警告伝播、outline/read の非信頼属性、テキスト境界、機微 query 秘匿と通常 query 保持を検証する。既存回帰テスト・fmt・clippy も実行する。
 - 状態: 実装済み、ローカル回帰検証完了。
 - CI と実環境記録を分離し、userinfo 成功系の実サイト検証は未検証のまま残す。PR は develop 向け、自己マージしない。
+
+<a id="m17-secret-redaction-validation"></a>
+### M17: M5 秘匿機能のローカルスタブ検証と修正
+
+- 前提: Muse のローカル検証（`develop` `5db4708` / 2026-11-26）で未確認だった G1（URL userinfo 成功系を含む秘匿）と G2（ヘッダ・JSON body・form body の秘匿および過剰マスク有無）を `127.0.0.1` ループバック HTTP スタブと実バイナリで検証する。実サイトへは接続しない。
+- 起票 Issue:
+  - Issue #50（G1）: `W4006` リダイレクト展開警告の埋込 URL userinfo/秘匿引数漏れ、`E2005` / `E1002` 等の不正・テンプレート・非 HTTP URL の `userinfo@` 漏れ、`RobotsGate` `E2006` の相対パス秘匿引数漏れ、リダイレクト先 userinfo URL での相対リンク認証情報伝播。
+  - Issue #51（G2）: `eval.rs` の抽出不一致プレビュー（`W4004` / `E4004`、リトライ後成功や 200 文字途中切断を含む）での応答 JSON body・form body・HTTP ヘッダ行の秘匿漏れ、`E3002` 等の応答ヘッダパラメータ（`; token=...`）漏れ、定義・プロファイル内固定秘匿値の収集統一と `filters show` への `redact_json` 適用、`engines show` における form body テンプレート `{{query}}` の `%7B%7Bquery%7D%7D` 過剰変換。
+- 仕様・設計: `agent-integration` §4.2 および `document-fetching` §3.1 を同期し、後方互換性（既存フィールド・イベント形式・通常クエリ/通常ヘッダ/通常 JSON・form 値の非破壊）を維持する。
+- 実装順序:
+  1. `src/core/url.rs`: ネスト URL クエリ値の再帰秘匿化と、構文エラー・任意スキーム URL 様トークンのフォールバック秘匿化関数を追加し、`parse` の `E2005` 詳細にも適用する。
+  2. `src/core/secret.rs`: `redact_display_text` の任意スキーム・不正 URL 対応、`redact_header_params` の追加、`redact_body` の JSON / form（非秘匿セグメント無変換）/ HTTP ヘッダ行 / 埋込断片対応、`is_sensitive_json_key` の認証トークン系キー拡充、エンジン定義・ネットワークプロファイルからの固定秘匿値収集統一を行う。
+  3. `src/core/markdown.rs`: `absolutize` で基底 URL から `username` / `password` を除去してから相対リンクを解決する。
+  4. `src/adapters/robots.rs`・`src/adapters/http.rs`・`src/adapters/extract/mod.rs`・`src/adapters/engine/eval.rs`・`src/usecases/**`・`src/ui/**`: `E2006` 拒否パス秘匿化、ヘッダパラメータ秘匿化、`W4004` / `E4004` 切り詰め前の `redact_body` 適用、`engines::describe` 要約 URL 秘匿化、`filters show` の `redact_json` 適用、統一 redaction list の配線を実装する。
+  5. 検証・記録: CI 再現可能な `REF:tests/m17.rs`（`127.0.0.1` OS 割り当てポートのループバックスタブ＋実バイナリ検証）と単体テストを追加し、`REF:reports/m17-validation.md`、`REF:docs/handoff.md`、`REF:docs/history.md` を更新して品質ゲートを通過させたうえで `develop` 向け PR を作成する（自己マージしない）。
+- 状態: 実装・ローカル回帰検証完了（レビュー待ち）。

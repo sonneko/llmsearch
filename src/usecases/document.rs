@@ -44,7 +44,7 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
             std::sync::Arc::clone(&app.clock),
             std::sync::Arc::clone(&app.reporter),
         )
-        .with_secrets(crate::core::secret::redaction_list(&app.secrets)),
+        .with_secrets(app.redaction_list()),
     ));
 
     let id_hint = app.ensure_session()?;
@@ -107,8 +107,8 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
     session.touch(app.clock.now_utc());
     app.sessions.save(&session)?;
 
-    // 履歴へ書く URL も、検索・表示 URL と同じ環境 secret の規則で伏せる。
-    let redactions = crate::core::secret::redaction_list(&app.secrets);
+    // 履歴へ書く URL も、検索・表示 URL と同じ規則で伏せる。
+    let redactions = app.redaction_list();
     let entry = crate::core::history::HistoryEntry::new(
         app.history.next_id().unwrap_or_else(|_| "H?".to_string()),
         app.clock.now_utc(),

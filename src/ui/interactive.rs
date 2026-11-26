@@ -28,10 +28,7 @@ pub struct Interactive {
 impl Interactive {
     pub fn new(app: App, renderer: Renderer) -> Self {
         let depth = app.settings.context.outline_depth;
-        renderer.set_secrets(crate::core::secret::redaction_list_for_engines(
-            &app.secrets,
-            &app.engines,
-        ));
+        renderer.set_secrets(app.redaction_list());
         Self {
             app,
             renderer,
@@ -266,7 +263,7 @@ impl Interactive {
                 crate::core::text::truncate_display(&hit.title, title_limit)
             )
             .map_err(io_error)?;
-            let secrets = crate::core::secret::redaction_list(&self.app.secrets);
+            let secrets = self.app.redaction_list();
             writeln!(out, "     {}", display_url(&hit.url, &secrets)).map_err(io_error)?;
             if !snippet.is_empty() {
                 writeln!(
@@ -359,7 +356,7 @@ impl Interactive {
         for doc in &documents {
             match document::outline(&mut self.app, doc, self.depth) {
                 Ok(view) => {
-                    let secrets = crate::core::secret::redaction_list(&self.app.secrets);
+                    let secrets = self.app.redaction_list();
                     let url = display_url(&view.document.final_url, &secrets);
                     let text = self.renderer.outline_lines(
                         &view.document,
@@ -443,7 +440,7 @@ impl Interactive {
                         } else {
                             None
                         };
-                        let secrets = crate::core::secret::redaction_list(&self.app.secrets);
+                        let secrets = self.app.redaction_list();
                         let block = self.renderer.section_block(
                             &header,
                             &display_url(&doc.final_url, &secrets),

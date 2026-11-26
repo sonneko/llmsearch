@@ -247,7 +247,7 @@ impl ReqwestClient {
         }
 
         if status >= 400 {
-            return Err(http_status_error(status, &headers, now));
+            return Err(http_status_error(status, &headers, now, &request.secrets));
         }
 
         // サイズ上限を意識して読み込む
@@ -267,9 +267,13 @@ impl ReqwestClient {
                 }
                 Ok(None) => break,
                 Err(e) => {
+                    let detail = crate::core::secret::redact_display_text(
+                        &e.without_url().to_string(),
+                        &request.secrets,
+                    );
                     return Err(AppError::with_detail(
                         ErrorCode::E2002,
-                        format!("failed to read the body: {}", e.without_url()),
+                        format!("failed to read the body: {detail}"),
                     ));
                 }
             }
@@ -338,7 +342,7 @@ fn map_reqwest_error(err: reqwest::Error, request: &HttpRequest) -> AppError {
     let err = err.without_url();
     let host = request.url.host_str().unwrap_or("(unknown)");
     // 送信エラーの文字列には URL や認証値が混ざることがあるため伏字化してから使う。
-    let text = crate::core::secret::redact_text(&err.to_string(), &request.secrets);
+    let text = crate::core::secret::redact_display_text(&err.to_string(), &request.secrets);
     if err.is_timeout() {
         return AppError::with_detail(ErrorCode::E2002, format!("{host}: {text}"));
     }
@@ -373,10 +377,14 @@ fn http_status_error(
     status: u16,
     headers: &[(String, String)],
     now: chrono::DateTime<chrono::Utc>,
+    secrets: &[String],
 ) -> AppError {
     let retry_after = retry_after_header(headers);
     let detail = match retry_after {
-        Some(v) => format!("HTTP {status} (Retry-After: {v})"),
+        Some(v) => {
+            let shown = crate::core::secret::redact_header_params(v, secrets);
+            format!("HTTP {status} (Retry-After: {shown})")
+        }
         None => format!("HTTP {status}"),
     };
     let wait_ms = retry_after.and_then(|v| crate::core::retry::parse_retry_after_ms(v, now));
@@ -415,6 +423,9 @@ impl HttpClient for ReqwestClient {
     ) -> Result<HttpResponse, AppError> {
         crate::core::url::validate_scheme(&request.url)?;
         let host = request.url.host_str().unwrap_or_default().to_string();
+        let mut enriched_request = request.clone();
+        crate::core::secret::collect_network_secrets(profile, &mut enriched_request.secrets);
+        let request = &enriched_request;
 
         // リダイレクト先にも同じプロキシ選択・除外規則を適用する。
         let client = self.build_client(profile)?;
@@ -567,16 +578,16 @@ mod tests {
     #[test]
     fn status_errors_map_to_codes() {
         let now = fixed_now();
-        assert_eq!(http_status_error(429, &[], now).code, ErrorCode::E4003);
-        assert_eq!(http_status_error(500, &[], now).code, ErrorCode::E2003);
-        assert_eq!(http_status_error(408, &[], now).code, ErrorCode::E2002);
+        assert_eq!(http_status_error(429, &[], now, &[]).code, ErrorCode::E4003);
+        assert_eq!(http_status_error(500, &[], now, &[]).code, ErrorCode::E2003);
+        assert_eq!(http_status_error(408, &[], now, &[]).code, ErrorCode::E2002);
     }
 
     #[test]
     fn status_errors_carry_retry_after() {
         let now = fixed_now();
         let headers = vec![("retry-after".to_string(), "120".to_string())];
-        let err = http_status_error(429, &headers, now);
+        let err = http_status_error(429, &headers, now, &[]);
         assert_eq!(err.retry_after_ms, Some(120_000));
     }
 
@@ -584,7 +595,7 @@ mod tests {
     fn unparsable_retry_after_is_ignored() {
         let now = fixed_now();
         let headers = vec![("retry-after".to_string(), "soon".to_string())];
-        let err = http_status_error(503, &headers, now);
+        let err = http_status_error(503, &headers, now, &[]);
         assert_eq!(err.retry_after_ms, None);
     }
 

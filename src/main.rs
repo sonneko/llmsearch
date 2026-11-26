@@ -86,10 +86,7 @@ fn main() {
         }
     };
 
-    renderer.set_secrets(llmsearch::core::secret::redaction_list_for_engines(
-        &app.secrets,
-        &app.engines,
-    ));
+    renderer.set_secrets(app.redaction_list());
 
     if app.verbose {
         for check in &resolved.checks {

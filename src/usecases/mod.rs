@@ -57,13 +57,17 @@ pub struct App {
 }
 
 impl App {
+    /// 環境・エンジン定義・ネットワークプロファイルに由来する秘匿値一覧を返す。
+    pub fn redaction_list(&self) -> Vec<String> {
+        crate::core::secret::redaction_list_for_app(&self.secrets, &self.engines, &self.network)
+    }
+
     /// 既知の秘匿値を伏せてから履歴へ追記する。
     pub fn append_history(
         &self,
         entry: &crate::core::history::HistoryEntry,
     ) -> Result<(), AppError> {
-        let redactions =
-            crate::core::secret::redaction_list_for_engines(&self.secrets, &self.engines);
+        let redactions = self.redaction_list();
         let mut safe = entry.clone();
         if let Some(engine) = &mut safe.engine {
             *engine = crate::core::secret::redact_display_text(engine, &redactions);
