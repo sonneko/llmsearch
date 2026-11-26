@@ -22,7 +22,8 @@
 | 表示言語とエンジン言語（M10） | 完了 | CLI メッセージの全英語化・嘘をつく `ui.locale` の削除・`search.language` の追加 | `REF:docs/plans.md#m10-english-and-language` |
 | 配布互換ゲート（M11） | 完了 | CI の Build & Distribution Compatibility の `E1003`（ステージした `assets/` の入れ子）を直し、同梱既定の解決を配布配置に依存させない | `REF:docs/plans.md#m11-distribution-assets` |
 | ドキュメントとソースの同期（M12） | 完了 | docs 全 31 本の総点検・未実装仕様の切り分け・`GUIDE.md` の統合・未使用コードの削除 | `REF:docs/plans.md#m12-docs-source` |
-| M5 棚卸し残課題の再監査（M15） | 完了（PR #46 作成・未マージ） | Issue #4/#5/#7/#9/#12/#21/#23 の仕様・設計・実装・回帰検証 | `REF:docs/plans.md#m15-m5-residuals` |
+| M5 棚卸し残課題の再監査（M15） | 完了（PR #46 マージ済み） | Issue #4/#5/#7/#9/#12/#21/#23 の仕様・設計・実装・回帰検証 | `REF:docs/plans.md#m15-m5-residuals` |
+| 実環境検証のフォローアップ（M16） | 実装・ローカル検証完了（レビュー待ち） | 同一 refine の W4001 抑制（#47）・JSON 非信頼属性（#48）・Muse 検証記録 | `REF:docs/plans.md#m16-real-provider-followup` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -221,7 +222,7 @@ M5 棚卸しの Issue #4、#5、#7、#9、#12、#21、#23 を、M9 / M12 の修�
 | 本文抽出の精度がサイト依存で不安定 | 節の欠落・ノイズ混入 | 抽出失敗を `W3001` として可視化し、`<body>` 全体へのフォールバックを提供する |
 | クォータの誤設定で作業が止まる | 調査が中断する | 上限到達メッセージにリセット時刻と解除方法を必ず含め、`quota check` で事前確認できる |
 | 状態ディレクトリの肥大化 | サンドボックスのスナップショット上限に影響 | 既定でリポジトリ外（`~/.local/state`）に保存し、容量管理を実装する |
-| 外部コンテンツ経由のプロンプトインジェクション | エージェントの誤動作 | 出所ヘッダと信頼境界マーカーを必須化し、JSON でも `event` と `url` を併記する |
+| 外部コンテンツ経由のプロンプトインジェクション | エージェントの誤動作 | 出所ヘッダと信頼境界マーカーを必須化し、JSON の content/document でも `event`・`url`・`untrusted: true` を併記する |
 
 ---
 
@@ -256,3 +257,13 @@ M5 棚卸しの Issue #4、#5、#7、#9、#12、#21、#23 を、M9 / M12 の修�
 - XML（RSS / Atom）応答の抽出器
 - エンジン定義の共有レジストリ
 - 複数利用者での履歴共有、サーバー常駐 API
+
+<a id="m16-real-provider-followup"></a>
+### M16: M15 実環境検証の修正
+
+- 前提: Muse が develop `5db4708` / 0.1.2 を実環境検証済み。エージェントは実サイトに再アクセスしない。記録は `reports/m16-validation.md`。
+- 仕様: 同一 refine の W4001 抑制（#47）、JSON content/document に boolean `untrusted: true` を追加（#48）。既存本文・文字数・v=1 は維持。
+- 設計: usecases/search.rs の警告条件、ui/commands.rs の 2 種のイベント生成だけを変更。テキスト境界と秘匿化は維持。
+- 実装・検証: `tests/m16.rs` の loopback HTTP スタブと実プロセスで refine の変更あり／なし、quiet・非 quiet 警告伝播、outline/read の非信頼属性、テキスト境界、機微 query 秘匿と通常 query 保持を検証する。既存回帰テスト・fmt・clippy も実行する。
+- 状態: 実装済み、ローカル回帰検証完了。
+- CI と実環境記録を分離し、userinfo 成功系の実サイト検証は未検証のまま残す。PR は develop 向け、自己マージしない。

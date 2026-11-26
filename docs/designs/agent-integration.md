@@ -130,6 +130,10 @@
 
 `content` イベントは `url` を必ず含み、`text` は外部由来である。`event` フィールドでデータ種別を機械的に判別できるようにする。指示文の解釈禁止は利用側の責務であり、本ツールは出所を明示することで支援する。
 
+M16: JSON の明示的信頼境界（#48）
+
+仕様 §4.1 に従い、`src/ui/commands.rs` の content 生成と共通の `document_event()` に `untrusted: true` を追加する。Renderer の秘匿化は維持する。本文・chars・v は変更せず、テキストの section_block 境界処理も変更しない。追加フィールドを許容する消費側と後方互換とする（未知フィールドを拒否する独自スキーマは更新が必要）。tests/m16.rs で実バイナリから outline/read 両経路、本文の不変性、テキストの境界を確認する。
+
 ### 4.2 秘匿情報
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/ui/commands.rs, REF:src/core/secret.rs, REF:src/core/url.rs）

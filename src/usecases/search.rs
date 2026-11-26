@@ -830,10 +830,12 @@ pub fn refine(app: &mut App, previous: &str, new_query: &str) -> Result<SearchOu
         serde_json::json!({"query": new_query, "previous": previous}),
     );
     let _ = app.append_history(&entry);
-    outcome.warnings.push(Diagnostic::new(
-        WarningCode::W4001,
-        format!("changed the query from '{previous}' to '{new_query}'"),
-    ));
+    if previous != new_query {
+        outcome.warnings.push(Diagnostic::new(
+            WarningCode::W4001,
+            format!("changed the query from '{previous}' to '{new_query}'"),
+        ));
+    }
     Ok(outcome)
 }
 

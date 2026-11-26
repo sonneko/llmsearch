@@ -149,3 +149,7 @@ robots.txt の解析は自前の小さな実装（`src/core/robots.rs`）とす�
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
 クォータは §1.3 の `evaluate_with_preflight` callback が各送信前に `Guard::check` で判定し、成功した操作の全使用量を `Guard::consume_all` で確定する。レート待機は `ReqwestClient::wait_interval` が送信処理内で実施し、`Guard` の責務には含めない。
+
+## M16: 同一クエリの refine（#47）
+
+`refine()` の run・履歴追記は従来どおり実行し、W4001 の追加だけを `previous != new_query` で分岐する。表示文言の変更ではなく偽の変更通知を抑制する。実プロセスで同一セッションの連続 refine を検証し、変更時の JSON 警告と非 quiet stderr も確認する。
