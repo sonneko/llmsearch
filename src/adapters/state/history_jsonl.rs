@@ -184,25 +184,30 @@ impl HistoryStore for JsonlHistory {
         let mut out: Vec<HistoryEntry> = all.into_iter().filter(|e| filter.matches(e)).collect();
         // 最新を先頭へ
         out.reverse();
+        // 上限は呼び出し側が負う（list は 200、export は全件）。ここでは指定の
+        // limit をそのまま適用し、export が 201 件目以降を黙って落さないようにする。
         if let Some(limit) = q.limit {
-            out.truncate(limit.min(200));
+            out.truncate(limit);
         }
         Ok(out)
     }
 
     fn clear(&self, before: Option<&str>) -> Result<usize, AppError> {
         let all = self.read_all()?;
+        // 削除件数は「全件 - 保持件数」で実測する（従来は常に 0 を返していた）。
+        let total = all.len();
         let kept: Vec<HistoryEntry> = match before {
             None => Vec::new(),
             Some(stamp) => all.into_iter().filter(|e| e.at.as_str() >= stamp).collect(),
         };
+        let removed = total.saturating_sub(kept.len());
         let text: String = kept
             .iter()
             .filter_map(|e| serde_json::to_string(e).ok())
             .map(|l| format!("{l}\n"))
             .collect();
         crate::adapters::state::write_atomic(&self.path, text.as_bytes())?;
-        Ok(0)
+        Ok(removed)
     }
 }
 

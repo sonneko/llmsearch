@@ -13,9 +13,7 @@ pub enum EventType {
     Outline,
     Read,
     Select,
-    Engine,
     Quota,
-    Config,
     Delete,
 }
 
@@ -29,9 +27,7 @@ impl EventType {
             EventType::Outline => "outline",
             EventType::Read => "read",
             EventType::Select => "select",
-            EventType::Engine => "engine",
             EventType::Quota => "quota",
-            EventType::Config => "config",
             EventType::Delete => "delete",
         }
     }
@@ -45,9 +41,7 @@ impl EventType {
             "outline" => EventType::Outline,
             "read" => EventType::Read,
             "select" => EventType::Select,
-            "engine" => EventType::Engine,
             "quota" => EventType::Quota,
-            "config" => EventType::Config,
             "delete" => EventType::Delete,
             _ => return None,
         })
@@ -131,11 +125,23 @@ impl HistoryEntry {
         let p = &self.payload;
         let get = |k: &str| p.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
         match self.kind {
-            EventType::Search | EventType::Refine => {
+            EventType::Search => {
                 let q = get("query");
                 let n = p.get("results").and_then(|v| v.as_u64()).unwrap_or(0);
                 let dropped = p.get("filtered").and_then(|v| v.as_u64()).unwrap_or(0);
                 format!("{q}  {n} results ({dropped} filtered out)")
+            }
+            // refine のペイロードは `{query, previous}` であり `results` / `filtered`
+            // を持たない（実装 src/adapters/engine/search.rs）。従来この分岐が
+            // 存在しないキーを読み `0 results (0 filtered out)` を固定表示していた。
+            EventType::Refine => {
+                let q = get("query");
+                let prev = get("previous");
+                if prev.is_empty() {
+                    q
+                } else {
+                    format!("{q} (from {prev})")
+                }
             }
             EventType::Next => {
                 let n = p.get("added").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -167,13 +173,7 @@ impl HistoryEntry {
                         .join(",")
                 })
                 .unwrap_or_default(),
-            EventType::Engine => {
-                let id = get("engine");
-                let fb = p.get("fallback").and_then(|v| v.as_bool()).unwrap_or(false);
-                if fb { format!("{id} (fallback)") } else { id }
-            }
             EventType::Quota => get("note"),
-            EventType::Config => get("path"),
             EventType::Delete => {
                 let kind = get("target");
                 let n = p.get("count").and_then(|v| v.as_u64()).unwrap_or(0);

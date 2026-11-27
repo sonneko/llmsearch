@@ -303,6 +303,7 @@ mod tests {
                 extractor: "density".to_string(),
                 warnings: Vec::new(),
                 cacheable: true,
+                ..Default::default()
             };
             store.put(&meta, "x".repeat(64).as_str()).unwrap();
         }

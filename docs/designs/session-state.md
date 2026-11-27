@@ -102,7 +102,7 @@
 
 状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/adapters/state/session_store.rs）
 
-`load` の JSON 解析に失敗したら `adapters::state::quarantine(path, stamp)` で退避し、`E5001` を詳細（退避先を含む）付きで返す（退避ファイル名末尾に `.json` が付かない点は Issue #62 で追跡）。警告は出さず、新規セッションへ自動で切り替えることもしない。
+`load` の JSON 解析に失敗したら `adapters::state::quarantine(path, stamp)` で退避し、`E5001` を詳細（退避先を含む）付きで返す（退避ファイル名はあえて末尾 `.json` を持たせず、`sessions/` を `*.json` で列挙して読む処理に再拾われず再解析ループにならないようにする）。警告は出さず、新規セッションへ自動で切り替えることもしない。
 
 ### 4.3 不整合
 

@@ -1,18 +1,19 @@
 //! 履歴の参照・エクスポート。
 
 use crate::core::errors::AppError;
-use crate::core::history::{HistoryEntry, export_markdown};
+use crate::core::history::HistoryEntry;
 use crate::ports::state::HistoryQuery;
 use crate::usecases::App;
 
-/// 一覧（新しい順）。
+/// 一覧（新しい順）。`limit` が `None` の場合は全件を返す（`history export` が
+/// 201 件目以降を黙って落とさないようにするため）。
 pub fn list(
     app: &App,
     limit: Option<usize>,
     session: Option<&str>,
 ) -> Result<Vec<HistoryEntry>, AppError> {
     app.history.query(&HistoryQuery {
-        limit: Some(limit.unwrap_or(20)),
+        limit,
         session: session.map(|s| s.to_string()),
         ..Default::default()
     })
@@ -43,13 +44,6 @@ pub fn get(app: &App, id: &str) -> Result<Option<HistoryEntry>, AppError> {
         ..Default::default()
     })?;
     Ok(all.into_iter().find(|e| e.id == id))
-}
-
-/// Markdown 形式で出力する。
-pub fn export(app: &App, limit: Option<usize>) -> Result<String, AppError> {
-    let mut entries = list(app, limit.or(Some(200)), None)?;
-    entries.reverse();
-    Ok(export_markdown(&entries))
 }
 
 /// 全削除。

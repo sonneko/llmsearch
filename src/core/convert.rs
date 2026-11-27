@@ -206,6 +206,11 @@ pub fn build_meta(
         extractor: converted.mode.as_str().to_string(),
         warnings: converted.warnings.iter().map(|w| w.text()).collect(),
         cacheable: ttl_hours > 0,
+        // 取得指標（status/bytes/duration_ms）は convert では未知なので 0 のまま。
+        // 実際の値は HttpFetcher::fetch_fresh が HTTP レスポンスから書き込む。
+        status: 0,
+        bytes: 0,
+        duration_ms: 0,
     }
 }
 

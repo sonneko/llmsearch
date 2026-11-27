@@ -59,6 +59,8 @@ impl HttpFetcher {
         let mut hops = 0usize;
         // HTTP の 3xx は HTTP 層が追う。ここでは HTML の中継ページ
         // （<meta refresh> / JS の location）で返るリダイレクトを追う。
+        // 取得（リダイレクト追従を含む）にかかった時間を計るため開始時刻を記録する。
+        let fetch_start = self.clock.monotonic_ns();
         let response = loop {
             // 取得の前に robots.txt を判定する（追従先についても判定する）。
             if let Some(gate) = &self.robots {
@@ -124,6 +126,12 @@ impl HttpFetcher {
             ));
         }
         let mut meta = meta;
+        // 取得指標（status/bytes/duration_ms）を HTTP レスポンスから記録する。
+        // キャッシュ由来（load_cached）はこの経路を通らないため 0 のままになる。
+        let fetch_ms = self.clock.monotonic_ns().saturating_sub(fetch_start) / 1_000_000;
+        meta.status = response.status;
+        meta.bytes = response.body.len() as u64;
+        meta.duration_ms = fetch_ms;
         // 文書メタデータは JSON として保存・表示するため文字列で持つ
         meta.warnings = converted.warnings.iter().map(|w| w.text()).collect();
         meta.cacheable = meta.cacheable && options.profile.robots.respect && cacheable(&response);

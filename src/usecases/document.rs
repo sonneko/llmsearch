@@ -115,7 +115,15 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
         id_hint,
         crate::core::history::EventType::Fetch,
         serde_json::json!({
+            // 仕様 history.md §1.1 と一致させるフィールド群（url/finalUrl/status/
+            // bytes/durationMs/extractor）。document/chars/cached/robotsSkipped は
+            // 実運用で有用な追加情報として併記する。
             "url": crate::core::url::redact(url, &redactions),
+            "finalUrl": crate::core::url::redact_url_str(&fetched.meta.final_url, &redactions),
+            "status": fetched.meta.status,
+            "bytes": fetched.meta.bytes,
+            "durationMs": fetched.meta.duration_ms,
+            "extractor": fetched.meta.extractor,
             "document": format!("D{id}"),
             "chars": chars,
             "cached": fetched.cached,
