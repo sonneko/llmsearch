@@ -10,9 +10,9 @@
 
 ### 1.1 形式
 
-状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
+状態: 実装完了（REF:src/ports/system.rs, REF:src/core/session.rs）
 
-`core::session::id::new_session_id(clock: &dyn Clock, ids: &dyn IdGen) -> String` が `YYYYMMDD-HHmmss-xxxx` を組み立てる。時刻は `Clock::now()`（UTC）を `chrono::format` で整形し、末尾 4 桁は `IdGen::alnum(4)`（`[a-z0-9]`）。テストでは固定値を注入する。
+`ports::IdGen::session_id(&self, now_utc: &str) -> String`（既定実装は `REF:src/ports/system.rs` の `SystemIdGen`）が `YYYYMMDD-HHMMSS-xxxx` を組み立てる。テストでは `SeqIds` の固定値を注入する。
 
 ### 1.2 生成と継続
 
@@ -46,9 +46,9 @@
 
 ### 2.2 文書キャッシュ
 
-状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
+状態: 実装完了（REF:src/adapters/state/session_store.rs, REF:src/core/model.rs）
 
-`DocumentMeta` と `body.md` に分ける（`REF:docs/designs/document-fetching.md` §3.4）。見出し索引は `meta.json` に保存し、`read` 時に Markdown を再解析しない。
+`DocumentMeta`（`meta.json`）と `body.md` に分ける（`REF:docs/designs/document-fetching.md` §3.4）。`meta.json` の `headings` は見出し件数（`usize`）を保持し、`outline` / `read` 時は `body.md` から見出しを再抽出する。
 
 ### 2.3 履歴
 
@@ -94,15 +94,15 @@
 
 ### 4.1 復元
 
-状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
+状態: 実装完了（REF:src/adapters/state/session_store.rs, REF:src/usecases/document.rs）
 
-`--session` 再開時は `REF:src/adapters/state/session_store.rs` の `FsSessionStore::load` が `SessionState` をそのまま復元する。文書キャッシュの鮮度はセッションに持たせず、取得のたびに `load_cached` が `expires_at` で判定する（`stale` フラグは持たない）。
+`--session` 再開時は `REF:src/adapters/state/session_store.rs` の `FsSessionStore::load` が `SessionState` をそのまま復元する（文書キャッシュ取得時の `expires_at` 失効判定漏れは Issue #60 で追跡）。
 
 ### 4.2 破損
 
-状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/core/session.rs）
+状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/adapters/state/session_store.rs）
 
-`load` の JSON 解析に失敗したら `adapters::state::quarantine(path, stamp)` で `sessions/<id>.corrupt-<YYYYMMDDHHMMSS>.json` へ退避し、`E5001` を詳細（退避先を含む）付きで返す。警告は出さず、新規セッションへ自動で切り替えることもしない。
+`load` の JSON 解析に失敗したら `adapters::state::quarantine(path, stamp)` で退避し、`E5001` を詳細（退避先を含む）付きで返す（退避ファイル名末尾に `.json` が付かない点は Issue #62 で追跡）。警告は出さず、新規セッションへ自動で切り替えることもしない。
 
 ### 4.3 不整合
 

@@ -103,10 +103,10 @@
 反映先は次の 3 経路で、いずれも同じ値を使う。
 
 1. **テンプレート変数 `{{language}}`**: エンジン定義のクエリ・ヘッダ・本文で使える。主言語タグ（`en`, `ja`）を渡す。
-2. **`{{locale}}`**: 後方互換のため残し、`search.language` の値を渡す。旧 `defaults.locale` は廃止する（`engine-definitions.md` §2.1）。
+2. **`{{locale}}`**: 後方互換のため残し、`search.language` の値を渡す。旧 `defaults.locale` は廃止する（エンジン定義の `defaults` は `region` のみを保持）。
 3. **`Accept-Language` ヘッダ**: エンジン定義が `Accept-Language` を指定していない場合、`Accept-Language: <language>` を付す（`q` 値は付けない）。
 
-ネットワークプロファイルの `acceptLanguage` は廃止する（`network.md` §2.1）。エンジンごとに異なる言語パラメータは定義側で表現する（Brave の `search_lang`、SearXNG の `language` など）。DuckDuckGo の `kl` は「地域と言語の固定対」（`jp-jp`, `us-en`）しか取れず言語単独では指定できないため、同梱定義では `kl` を書かず `Accept-Language` で言語を届ける（地域を寄せたい利用者は自前の定義で `kl` を書ける）。地域（`region`）は言語と独立で、従来どおり `defaults.region` で決める。
+ネットワークプロファイルの `acceptLanguage` は廃止する（ネットワークプロファイルに言語系のキーは存在しない）。エンジンごとに異なる言語パラメータは定義側で表現する（Brave の `search_lang`、SearXNG の `language` など）。DuckDuckGo の `kl` は「地域と言語の固定対」（`jp-jp`, `us-en`）しか取れず言語単独では指定できないため、同梱定義では `kl` を書かず `Accept-Language` で言語を届ける（地域を寄せたい利用者は自前の定義で `kl` を書ける）。地域（`region`）は言語と独立で、従来どおり `defaults.region` で決める。
 
 ### 3.3 `context`
 
@@ -151,7 +151,7 @@
 | `color` | 文字列 | `auto` | `auto` / `always` / `never` |
 | `pageSize` | 整数 | `7` | 対話メニューで一度に表示する件数（`search.limit` と独立） |
 
-表示言語の設定は無い。メッセージは常に英語である（`errors.md` §4.2）。旧版の `ui.locale` は廃止した（同 §4.5）。
+表示言語の設定は無い。メッセージは常に英語である（固定条件）。旧版の `ui.locale` は廃止した（未知キーとして警告 `W1002` を出して処理は継続する）。
 
 ### 3.8 `state`
 
@@ -184,7 +184,7 @@
 | `LLMSEARCH_UI_COLOR` | `ui.color` | `auto` / `always` / `never` |
 | `NO_COLOR` | `ui.color` | 設定時は `never`。`LLMSEARCH_UI_COLOR` より強い |
 
-`LLMSEARCH_UI_LOCALE` は廃止した。設定されていても無視する（`errors.md` §4.5）。
+`LLMSEARCH_UI_LOCALE` は廃止した。設定されていても無視する（エラーにしない。解決結果にも現れない）。
 
 `LLMSEARCH_CONFIG` は「そのファイルだけを使う」指定であり、指定先が存在しない場合は `E1003` で停止する（黙って既定値へ落ちない）。数値・真偽値として解釈できない値は、その変数を無視せず `E1004` として扱い、キーのパス・指定値・許容範囲を示す。
 

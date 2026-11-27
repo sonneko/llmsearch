@@ -12,7 +12,7 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`REF:src/core/outline.rs` の `extract_headings(markdown)` が行単位で走査する。ATX は `^ {0,3}(#{1,6})(\s+)(.*)$` で判定し、末尾の `#` 列を除去する。Setext は「次行が `^ {0,3}(=+|-+)\s*$` かつ前行が空でない」場合に認識する。
+`REF:src/core/outline.rs` の `extract_headings(markdown)` が行単位で走査する。Setext は「次行が `=` 列または `-` 列のみかつ前行が空でない」場合に認識する。ATX は先頭 `#`（1〜6 個）で判定し末尾の `#` 列を除去する（ただし現状 `atx()` は先頭空白 3 文字上限と `#` 直後の空白必須条件を課しておらず、Issue #60 で追跡）。
 
 ### 1.2 見出しの識別子
 
@@ -24,7 +24,7 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`Heading`（`REF:src/core/model.rs`）に `id`, `level`, `text`, `line`, `chars`, `has_children`, `hidden` を持たせる。行範囲は保持せず、節本文は `REF:src/core/outline.rs` の `section_text` が次の同レベル以下の見出しまでを切り出して求める。
+`Heading`（`REF:src/core/model.rs`）に `id`, `level`, `text`, `start_line`, `end_line`, `chars`, `has_children`, `hidden` を持たせる。節本文は `REF:src/core/outline.rs` の `section_text` が `start_line` から次の同レベル以下の見出しの直前（または最初の子見出しの直前）までを切り出して求める。
 
 ### 1.4 コードブロック内の除外
 
@@ -90,7 +90,7 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`include_children=false` / `--no-children` の場合、切り出しを最初の子見出しの直前で止める。子の有無と件数は `REF:src/core/outline.rs` の `child_count` で求める。
+`include_children=false` / `--no-children` の場合、切り出しを最初の子見出しの直前で止める。子の有無と件数は `REF:src/core/outline.rs` の `child_count` で求める。なお `REF:src/ui/commands.rs` の `Command::Read` は現状 `!no_children` のみを渡し `settings.context.include_children` と `--children` を参照しない点、および `SectionBody.omitted_children` を JSON / テキストへ出力しない点を Issue #55 / #60 で追跡する。
 
 ### 3.3 見出し行の扱い
 
@@ -132,7 +132,7 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`REF:src/core/context.rs` の `truncate_to_budget(text, limit)` は行境界で切り、未閉のフェンスを検出したら閉じフェンスを補う。注記文字列は `truncation_note(shown, total)` が `[truncated: shown {shown} / total {total} chars]` として生成する（現在の描画は `REF:src/ui/render.rs` の `section_block` が同じ書式を直接組み立てている）。
+`REF:src/core/context.rs` の `truncate_to_budget(text, limit)` は行境界で切り、未閉のフェンスを検出したら閉じフェンスを補う（現状チルダフェンス `~~~` もバッククォートで閉じる不具合があり Issue #60 で追跡）。注記文字列は `REF:src/ui/render.rs` の `section_block` が `[truncated: shown {shown} / total {total} chars]` として組み立てる。
 
 ### 4.4 予算超過時の案内
 
@@ -148,15 +148,15 @@
 
 ### 5.1 出所ヘッダ
 
-状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
+状態: 実装完了（REF:src/ui/render.rs）
 
-`REF:src/usecases/document.rs` の `section_header(document, body)` が `--- D1:S3 | 見出し | h2 | 3560 chars ---` を生成する（英語・桁区切りなし。機械的に読み取れる形を優先する）。
+`REF:src/ui/render.rs` の `section_block` が `--- D1:S3 | 見出し | h2 | 3560 chars ---` を生成する（英語・桁区切りなし。機械的に読み取れる形を優先する）。
 
 ### 5.2 信頼境界の明示
 
-状態: 実装完了（REF:src/ui/render.rs）
+状態: 実装完了（REF:src/ui/render.rs, REF:src/ui/commands.rs）
 
-`Renderer::section_block` が `[untrusted] <URL>` と `--- end ---` を付与する。本文中の同一マーカーは `neutralize_markers` で `[untrusted]` → `［untrusted］`、`--- end ---` → `— end —` に置換する。本文の改行とその他の記述は保持する。JSON の `content.text` は変更せず、イベントと URL で境界を示す。回帰テストは `REF:src/ui/render.rs` に置く。
+`Renderer::section_block` が `[untrusted] <URL>` と `--- end ---` を付与する。本文中の同一マーカーは `neutralize_markers` で `[untrusted]` → `［untrusted］`、`--- end ---` → `— end —` に置換する。本文の改行とその他の記述は保持する。JSON では `content` / `document` イベントに `untrusted: true` を付与し、`content.text` は変更しない（`REF:tests/m16.rs`）。回帰テストは `REF:src/ui/render.rs` と `REF:tests/m16.rs` に置く。
 
 ### 5.3 指示文の無害化
 

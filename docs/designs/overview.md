@@ -36,15 +36,15 @@
 
 ### 2.1 段階的開示（Progressive Disclosure）
 
-状態: 実装完了（REF:src/lib.rs, REF:src/main.rs）
+状態: 実装完了（REF:src/core/model.rs, REF:src/usecases/document.rs）
 
-`core/view.rs` に段階ごとのビュー型を置く。`SearchHit` にスニペット以外の本文フィールドを持たせず、`Outline` から節本文を取り出す API を設けない。
+`src/core/model.rs` と `src/usecases/document.rs` に段階ごとのモデル（`SearchHit`, `OutlineView`, `SectionBody`）を置く。`SearchHit` にスニペット以外の本文フィールドを持たせず、`OutlineView` から節本文を取り出す API を設けない。
 
 ### 2.2 コンテキスト予算の明示
 
-状態: 実装完了（REF:src/lib.rs, REF:src/main.rs）
+状態: 実装完了（REF:src/core/context.rs, REF:src/ui/render.rs）
 
-予算計算は `core/context/budget.rs` の純粋関数とし、書記素ではなく `char` 数で計測する（表示幅は `ui/render/width.rs` が `unicode-width` で別途計算する）。切り詰めと注記生成を同一関数で行う。
+予算計算は `src/core/context.rs` の純粋関数とし、書記素ではなく `char` 数で計測する（表示幅は `src/ui/render.rs` が `unicode-width` で別途計算する）。切り詰めと閉じフェンス補完を同一関数で行う。
 
 ### 2.3 探索と取得の分離
 
@@ -90,23 +90,23 @@
 
 仕様の用語とコード上の型名の対応を固定する。用語追加時はここへ追記する。
 
-| 用語 | 型・シンボル | 配置（実装予定） |
+| 用語 | 型・シンボル | 配置 |
 |---|---|---|
 | セッション | `SessionState` | `src/core/session.rs` |
 | 検索結果 | `SearchHit` | `src/core/model.rs` |
-| ページ | `PageSlice` | `src/core/search.rs` |
-| 文書 | `Document` | `src/core/model.rs` |
+| ページ | `PageState` | `src/core/session.rs` |
+| 文書 | `DocumentMeta`, `DocumentRef` | `src/core/model.rs`, `src/core/session.rs` |
 | 見出し | `Heading` | `src/core/model.rs` |
-| アウトライン | `Outline` | `src/core/outline.rs` |
-| 節 | `Section` | `src/core/model.rs` |
+| アウトライン | `OutlineView` | `src/usecases/document.rs` |
+| 節 | `SectionBody` | `src/core/model.rs` |
 | エンジン定義 | `EngineDef` | `src/core/engine.rs` |
-| 抽出ルール | `FieldSpec`, `ExtractSpec` | `src/core/engine.rs` |
+| 抽出ルール | `FieldSpec`, `ResponseSpec` | `src/core/engine.rs` |
 | ネットワークプロファイル | `NetworkProfile` | `src/core/config/network.rs` |
 | フィルタ | `FilterSet` | `src/core/config/filter.rs` |
-| クォータ | `QuotaPolicy`, `Counter` | `src/core/config/quota.rs` |
+| クォータ | `QuotaPolicy`, `WindowCounter` | `src/core/config/quota.rs` |
 | カウンタ | `Counters` | `src/core/config/quota.rs` |
 | 状態ディレクトリ | `StatePaths` | `src/adapters/state/mod.rs` |
-| 対話モード | `InteractiveSession` | `src/ui/interactive.rs` |
+| 対話モード | `Interactive` | `src/ui/interactive.rs` |
 
 ---
 
@@ -116,9 +116,9 @@
 
 ### 4.1 対話モードでの調査
 
-状態: 実装完了（REF:src/lib.rs, REF:src/main.rs）
+状態: 実装完了（REF:src/ui/menu.rs, REF:src/ui/interactive.rs）
 
-メニューは状態機械（`ui/cli/screens`）として実装し、遷移関数を純粋関数としてテストする。非同期ランタイム（tokio）は `ui/cli/runtime.rs` の 1 か所で `block_on` し、画面コードは同期で書く。
+メニューは状態機械（`src/ui/menu.rs` の `Screen` / `parse_input`）として実装し、遷移・入力解釈を純粋関数としてテストする。実行ループ（`src/ui/interactive.rs` の `Interactive::run`）は同期 I/O で動作し、HTTP クライアント内部のブロッキング呼び出しのみ非同期ランタイムを閉じ込める。
 
 ### 4.2 エージェントからの 1 回呼び出し
 
@@ -146,9 +146,9 @@
 
 ### 5.1 初期リリースのスコープ
 
-状態: 実装完了（REF:src/assets.rs, REF:.github/workflows/ci.yml）
+状態: 実装完了（REF:src/assets.rs, REF:.github/workflows/ci.yml, REF:scripts/check-release.sh）
 
-スコープの各項目は `REF:docs/plans.md` のマイルストーンに割り当てる。実装順序は同ファイルのフェーズに従う。項目 12（配布パッケージ）は M11 でゲートを直すまで未達である。
+スコープの各項目は `REF:docs/plans.md` のマイルストーンに割り当てる。項目 12（配布パッケージ）は M11 で埋め込み既定資産（`REF:src/assets.rs`）と 3 形態の配布互換ゲート（`REF:scripts/check-release.sh`）を導入して完了した（`network` / `filters` サブコマンド単体での埋め込み参照漏れは Issue #59 で追跡）。
 
 ### 5.2 非目標
 
@@ -189,7 +189,7 @@ ui/cli（対話・サブコマンド）
 
 `core::engine::EngineDef` のフィールド以外に、エンジン固有の知識をコードへ置かない。禁止パターン（特定ドメインの文字列リテラル、エンジン ID による分岐）を `tests/architecture.rs` で検出する。組み込み既定エンジンも `engines/*.json` として同梱し、コードへ埋め込まない。
 
-配布時はバイナリに加え JSON データの `assets/` を隣に同梱する。`REF:src/usecases/config.rs` の `bundled_root` が「バイナリの隣の `assets/`」→「作業ディレクトリから上方探索」の 2 段で探し、ファイルが 1 つも無い場合だけ `REF:src/assets.rs` の埋め込み既定へ落とす（ビルド元のパスには依存しない）。定義の読み込み・検証は既存のローダを通す。`REF:.github/workflows/release.yml` で梱包し、`REF:scripts/check-release.sh` がビルド元をマウントしないコンテナで検証する（Issue #27）。
+配布時はバイナリに加え JSON データの `assets/` を隣に同梱する。`REF:src/usecases/config.rs` の `bundled_root` が「バイナリの隣の `assets/`」→「作業ディレクトリから上方探索」の 2 段で探し、各設定・資源の探索で見つからない ID ごとに `REF:src/assets.rs` の埋め込み既定へ落とす（エンジン定義は登録 0 件のとき一括フォールバック。ビルド元のパスには依存しない）。定義の読み込み・検証は既存のローダを通す。`REF:.github/workflows/release.yml` で梱包し、`REF:scripts/check-release.sh` がビルド元をマウントしないコンテナで検証する（Issue #27）。
 
 ### 6.3 状態の保持単位
 

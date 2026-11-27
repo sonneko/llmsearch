@@ -42,9 +42,9 @@
 
 ### 2.2 マージ規則
 
-状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
+状態: 実装完了（REF:src/core/config/mod.rs）
 
-`merge(base: &mut Value, over: Value)` はオブジェクトを再帰的にマージし、配列とスカラーは置換する。`filter.*.rules` の追記は `mode: "append"` の場合に `merge_rules_append` で別扱いにする。`null` はそのままマージし、後段の検証で `E1004` とする。
+`merge_json(base: &mut Value, overlay: &Value)` はオブジェクトを再帰的にマージし、配列とスカラーは置換する。`null` はそのままマージし、後段の型変換・検証で `E1004` とする（フィルタ集合の `mode: "append"` による規則追記は未実装で、`REF:docs/designs/filters.md` §2.2 のとおり単純置換）。
 
 ### 2.3 探索順
 
@@ -84,7 +84,7 @@ DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列�
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
 
-`maxChars` は 500〜100000、`outlineDepth` は 2〜4。`minSectionChars` は描画時に `hidden_count` として件数のみ注記する（節そのものは保持し、`read` では指定可能とする）。
+`maxChars` は 500〜100000、`outlineDepth` は 2〜4。`Settings.context.min_section_chars` は設定値・`config show` 表示として保持するのみで本文・アウトライン処理には未接続（Issue #55）。
 
 ### 3.4 `cache`
 
@@ -112,9 +112,9 @@ DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列�
 
 ### 3.8 `state`
 
-状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
+状態: 実装完了（REF:src/adapters/config/mod.rs）
 
-`state.dir` の解決は `adapters/state/paths.rs` の `resolve_state_dir`。優先順は `--state-dir` → `LLMSEARCH_STATE_DIR` → `state.dir` → `dirs::state_dir()/llmsearch`。
+`state.dir` の解決は `REF:src/adapters/config/mod.rs` の `state_dir_with`。優先順は `--state-dir` → `LLMSEARCH_STATE_DIR` → `state.dir` → `env.state_home()/llmsearch`。
 
 ---
 
@@ -140,25 +140,25 @@ DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列�
 
 ## 5. キャッシュ
 
-状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
+状態: 実装中（REF:src/adapters/state/session_store.rs, REF:src/usecases/document.rs, REF:docs/plans.md）
 
 ### 5.1 キャッシュ対象
 
-状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
+状態: 実装中（REF:src/adapters/state/mod.rs, REF:src/core/search.rs）
 
-検索結果キャッシュのキーは `format!("{engine}/{hash}/{query_hash}/{position}/{size}")` を SHA-256 で短縮したディレクトリ名。文書キャッシュは `adapters/state/paths.rs` の `document_dir(url)`（URL の SHA-256 先頭 16 文字）。
+文書キャッシュは `REF:src/adapters/state/mod.rs` の `StatePaths::document_dir(url)`（URL の SHA-256 先頭 16 文字）に保存する。検索結果キャッシュ（`core::search::query_hash`）は未接続であり保存・参照を行わない（Issue #55）。
 
 ### 5.2 有効期限と無効化
 
-状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
+状態: 実装中（REF:src/usecases/document.rs）
 
-再利用判定は `REF:src/adapters/extract/mod.rs` の `load_cached` が `meta.expires_at` と現在時刻を比べて行う。`--refresh` と `--no-cache` は `load_cached` を呼ばずに取得へ回す。
+保存時は `cache.enabled` と `--no-cache` を検査して `expires_at` 付きで書き込むが、読込側（`REF:src/usecases/document.rs` の `load`）は `--refresh` 以外で既存キャッシュをそのまま返しており、`expires_at`・`--no-cache`・`cache.enabled=false` の判定漏れを Issue #60 で追跡する。
 
 ### 5.3 検索結果をキャッシュする範囲
 
-状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
+状態: 未実装・実装計画済み（REF:src/core/config/settings.rs, REF:docs/plans.md）
 
-`cache.searchResults`（仕様の既定は `false`）を `Settings` に `#[serde(default)]` で追加し、`usecases::search::run` が真の場合のみ読み書きする。
+`cache.searchResults`（既定 `false`）は `Settings` と `config show` に存在するが、`usecases::search` からのキャッシュ読み書きは未実装である（Issue #55）。
 
 ---
 
@@ -168,15 +168,15 @@ DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列�
 
 ### 6.1 値の検証
 
-状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
+状態: 実装完了（REF:src/core/config/settings.rs, REF:src/usecases/config.rs）
 
-`Settings::validate() -> Vec<Diagnostic>` が全項目を検査し、`fail` が 1 件でもあれば起動を中止する。キーのパスは手書きの文字列リテラルではなく、検証関数の引数として渡す（`("context.maxChars", value, range)`）。
+`Settings::validate()` が設定範囲を検査し、`Fail` が 1 件でもあれば起動時に `E1004` で中止する（`NetworkProfile::validate` / `quota::validate` の `Fail` が起動時に停止しない点と `FilterSet` / `NetworkProfile` の `schemaVersion` 未検査は Issue #59 で追跡）。
 
 ### 6.2 未知キーの温存
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/adapters/config/mod.rs）
 
-各構造体は `#[serde(flatten)] extra: serde_json::Map<String, Value>` を持ち、`extra` が空でない場合に `W1002` を出す。書き戻し（`config init --force`）では `extra` を元の階層へ戻す。
+各構造体は `#[serde(flatten)] extra: serde_json::Map<String, Value>` を持ち、`extra` が空でない場合に `W1002` を出す。`config init --force` は同梱の雛形 JSON で上書きし、既存ファイルの `extra` マージは行わない。
 
 ### 6.3 参照の解決
 
@@ -212,7 +212,7 @@ DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列�
 
 `usecases::config::paths(app, resolved) -> Vec<PathRow>` が `PathRow { label, path, used }` を返す。`used` は実際に読み込んだ（または使用する）パスで、`false` は「存在しない候補」を表す。並びは `settings.json` の探索候補 → `network` / `filters` / `quota`（解決ファイルと探索ディレクトリ候補）→ エンジン定義ディレクトリ → 状態ディレクトリと配下の実ファイル（履歴・カウンタ・セッション・文書・robots）。
 
-`src/ui/render.rs` は `[使用]` / `[候補]` の接頭辞を付けて 1 行 1 件で表示する。`--json` では `paths` に `label` / `path` / `used` を持つ配列を出す。
+`REF:src/ui/commands.rs` の `ConfigAction::Path` は `[used]` / `[candidate]` の接頭辞を付けて 1 行 1 件で表示する。`--json` では `paths` に `label` / `path` / `used` を持つ配列を出す。
 
 ### 7.3 `config init`
 
@@ -224,9 +224,9 @@ DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列�
 
 ### 7.4 `config validate`
 
-状態: 実装完了（REF:src/ui/render.rs）
+状態: 実装完了（REF:src/ui/commands.rs, REF:src/ui/render.rs）
 
-設定 4 種とエンジン定義の検証を順に実行し、`Vec<Diagnostic>` を `src/ui/render.rs` で `[ok]/[warn]/[fail]` に整形する。
+`REF:src/ui/commands.rs` の `ConfigAction::Validate` が `settings`・有効な `network`・`quota` の検証を順に実行し、`Check` 列を `src/ui/render.rs` で `[ok]/[warn]/[fail]` に整形する（エンジン定義とフィルタ集合が `config validate` に含まれていない点は Issue #59 で追跡）。
 
 ### 7.5 `config explain <key>`
 

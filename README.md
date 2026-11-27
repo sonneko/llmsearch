@@ -29,7 +29,7 @@ cargo build --release
 
 ### Linux 配布物の互換性
 
-次回配布から GNU Linux x86_64 バイナリは Ubuntu 22.04（glibc 2.35）を基準にビルドし、Ubuntu 22.04 / 24.04 上で起動検証する。検証は `REF:scripts/check-release.sh`、配布設定は `REF:.github/workflows/release.yml`。musl 静的リンクではない。同梱の `assets/` は実行ファイルと同じディレクトリに置き、バイナリだけを別の場所へ移動しない。
+次回配布から GNU Linux x86_64 バイナリは Ubuntu 22.04（glibc 2.35）を基準にビルドし、Ubuntu 22.04 / 24.04 上で起動検証する。検証は `REF:scripts/check-release.sh`、配布設定は `REF:.github/workflows/release.yml`。musl 静的リンクではない。既定アセットはバイナリへ埋め込まれており単体でも検索・設定確認は動作するが、`network` / `filters` サブコマンドの一覧・表示は現時点でディスク上の定義ディレクトリを参照するため（Issue #59）、配布アーカイブの `assets/` は実行ファイルと同じディレクトリに保ったまま配置することを推奨する。
 
 **既存の v0.1.0 配布物**には新しい glibc を要求して起動しない問題が報告されている（Issue #25）。`GLIBC_2.43 not found` が出る場合は、上記のソースビルドを利用する。システムの libc を置き換えない。この変更だけで既存リリースの添付ファイルは更新されない。
 
@@ -68,9 +68,9 @@ llmsearch next --session <searchで得たID>     # 同じクエリの次ペー�
 llmsearch refine "気候変動 適応策 自治体" --session <searchで得たID>  # 検索語を修正
 ```
 
-引数なしで起動すると対話モードになり、番号を選ぶだけで検索 → 選択 → 取得 → 節読みを進められる（`1)終了 2)検索結果の選択（複数可） 3)8 件目以降を見る 4)検索ワードを修正する`）。
+引数なしで起動すると対話モードになり、番号を選ぶだけで検索 → 選択 → 取得 → 節読みを進められる（`1) Quit / 2) Select results (multiple allowed) / 3) Show more results / 4) Edit the query`）。
 
-エージェントから使う場合やパイプで受ける場合は `--json` を付ける。データは標準出力、メニュー・進捗・警告は標準エラーに出る。
+エージェントから使う場合やパイプで受ける場合は `--json` を付ける。データは標準出力、メニュー・進捗・警告は標準エラーに出る（対話モードのストリーム出力については Issue #63 を参照）。
 
 ## エンジンの追加方法
 
@@ -78,14 +78,22 @@ llmsearch refine "気候変動 適応策 自治体" --session <searchで得たID
 
 ```json
 {
+  "schemaVersion": 1,
   "id": "mysearx",
-  "url": "https://searx.example.jp/search?q={query}&pageno={page}",
+  "name": "My SearXNG",
+  "request": {
+    "url": "https://searx.example.jp/search",
+    "query": {
+      "q": "{{query}}",
+      "pageno": "{{page}}"
+    }
+  },
   "response": {
     "kind": "html",
     "items": { "selector": "article.result" },
     "fields": {
-      "title": { "selector": "h3", "attr": "text" },
-      "url":   { "selector": "a", "attr": "href", "absolutize": true }
+      "title": { "selector": "h3" },
+      "url":   { "selector": "a", "attr": "href", "transform": ["absolutize"] }
     }
   }
 }
@@ -122,9 +130,10 @@ python3 docs/script/verify-docs.py
 | lib（単体） | `src/` 内の `#[cfg(test)]`。URL・抽出・変換・クォータなどの純粋なロジック |
 | `tests/architecture.rs` | 層構造・エンジン非依存・警告コードの発行元・決定論性の構造検査 |
 | `tests/contract.rs` | JSON 定義（エンジン・フィルタ・クォータ・設定）の契約 |
+| `tests/assets.rs` | 同梱 JSON と埋め込み既定資産（`src/assets.rs`）の整合検査 |
 | `tests/integration.rs` | 検索→取得→アウトライン→節読みの一連の流れ |
 | `tests/proxy.rs` / `tests/tls.rs` | ローカルの fixture サーバに対するプロキシ・TLS の挙動 |
-| `tests/m5.rs`〜`tests/m9.rs` | M5〜M9 で直した挙動の回帰（CLI・JSON・取得作法・設定・統合・秘匿情報の伏字化） |
+| `tests/m5.rs`〜`tests/m11.rs`, `tests/m14.rs`〜`tests/m17.rs` | 各マイルストーンで修正・強化した挙動の回帰検査（CLI・JSON・取得作法・設定・配布互換・秘匿情報の伏字化など） |
 | `tests/e2e.rs` | 実バイナリを起動する受け入れ確認（実ネットワークを使うため既定では実行しない） |
 
 実ネットワークを使う E2E は既定で実行しない。動かす場合は次のとおり。

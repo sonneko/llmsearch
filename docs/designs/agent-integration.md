@@ -60,15 +60,15 @@
 
 ### 2.3 結果オブジェクト
 
-状態: 実装完了（REF:src/ui/render.rs, REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/ui/commands.rs, REF:src/core/model.rs）
 
-`From<&SearchHit> for AgentResult` を実装し、`snippet` の再切り詰めは行わない。
+`REF:src/ui/commands.rs` の `hits_json(&[SearchHit], secrets)` が各ヒットの JSON オブジェクト（表示用に伏字化した `url` を含む）を組み立て、`snippet` の再切り詰めは行わない。
 
 ### 2.4 見出しオブジェクト
 
-状態: 実装完了（REF:src/ui/render.rs, REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/ui/commands.rs, REF:src/core/model.rs）
 
-`From<&Heading> for AgentSection`。`line` は 1 始まり。`hidden` フラグ（深度・フィルタで隠れた見出し）も含める。
+`REF:src/ui/commands.rs` の `Command::Outline` が `Heading` から `id` / `level` / `text` / `chars` / `hasChildren` / `line`（`start_line`、1 始まり）/ `hidden`（深度・フィルタで隠れた見出し）を直接組み立てる。
 
 ### 2.5 フィルタ集計オブジェクト
 
@@ -98,7 +98,7 @@
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:docs/plans.md#m2-implement）
 
-`src/ui/cli.rs` の `long_about` に 3 コマンドの例を含める。例は仕様書の記述と一致させる（差分が出たらテストで落とす）。
+`src/ui/cli.rs` の `Cli` 定義は `long_about = None` で簡潔なヘルプに留め、基本フローの詳細は仕様書および `REF:README.md` に集約する。
 
 ### 3.2 一覧を読む際の指針
 
@@ -110,7 +110,7 @@
 
 状態: 実装完了（REF:src/ui/render.rs, REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
 
-`error.hint` はコードごとの固定文言。自動リトライは `network.retry` の範囲でのみ行い、アプリケーション層での再試行はしない。ただし「応答は成功したが抽出規則に 1 件も一致しなかった」場合に限り、`src/adapters/engine/eval.rs` が同じ送信を `retry.maxAttempts`（上限 3）まで繰り返す（一時的な応答の揺れ対策。`REF:src/adapters/engine/eval.rs`）。追加の再試行では警告 `W4004` を出し、最終的に失敗した場合は `E4004` の `warnings[]` に含める。
+`error.hint` はコードごとの固定文言。自動リトライは `network.retry` の範囲でのみ行い、アプリケーション層での再試行はしない。ただし「応答は成功したが抽出規則に 1 件も一致しなかった」場合に限り、`src/adapters/engine/eval.rs` が同じ送信を `retry.maxAttempts`（最大 5 回で頭打ち）まで繰り返す（一時的な応答の揺れ対策。`REF:src/adapters/engine/eval.rs`）。追加の再試行では警告 `W4004` を出し、最終的に失敗した場合は `E4004` の `warnings[]` に含める。
 
 ### 3.4 予算管理
 
@@ -126,13 +126,11 @@
 
 ### 4.1 信頼境界
 
-状態: 実装完了（REF:src/ui/render.rs, REF:src/core/errors.rs, REF:docs/plans.md#m2-implement）
+状態: 実装完了（REF:src/ui/render.rs, REF:src/ui/commands.rs, REF:tests/m16.rs）
 
 `content` イベントは `url` を必ず含み、`text` は外部由来である。`event` フィールドでデータ種別を機械的に判別できるようにする。指示文の解釈禁止は利用側の責務であり、本ツールは出所を明示することで支援する。
 
-M16: JSON の明示的信頼境界（#48）
-
-仕様 §4.1 に従い、`src/ui/commands.rs` の content 生成と共通の `document_event()` に `untrusted: true` を追加する。Renderer の秘匿化は維持する。本文・chars・v は変更せず、テキストの section_block 境界処理も変更しない。追加フィールドを許容する消費側と後方互換とする（未知フィールドを拒否する独自スキーマは更新が必要）。tests/m16.rs で実バイナリから outline/read 両経路、本文の不変性、テキストの境界を確認する。
+仕様 §4.1 に従い、`src/ui/commands.rs` の `content` イベント生成と共通の `document_event()` に `untrusted: true` を付与する。`Renderer` の秘匿化は維持し、本文・`chars`・`v` やテキスト側の `section_block` 境界処理は変更しない。追加フィールドを許容する消費側と後方互換とし、`REF:tests/m16.rs` で実バイナリから `outline` / `read` 両経路・本文の不変性・テキスト境界を検証する。
 
 ### 4.2 秘匿情報
 

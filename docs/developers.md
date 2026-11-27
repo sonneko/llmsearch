@@ -70,9 +70,8 @@ Arena サンドボックスには初期状態で目的のツールチェーン�
 
 1. **ツールチェーンの展開**:
    ```bash
-   bash scripts/bootstrap-toolchain.sh   # 汎用スクリプト（プロジェクト側で調整）
-   # または
-   bash scripts/bootstrap-rust.sh         # Rust 用（dependencies/rust/ から移動）
+   bash scripts/bootstrap-rust.sh         # Rust 1.90.0 + vendored crates を展開して /home/user/build/env.sh を生成（標準手順）
+   # ※ scripts/bootstrap-toolchain.sh はオフラインアーカイブが無い環境向けのダミー env.sh 生成スタブであり、Rust 本体は展開しない
    ```
 2. **各コマンド実行時の環境有効化**:
    `bash` ツール呼び出しは毎回新しいシェルで起動するため、コマンドを実行する際は必ず先頭に環境有効化コマンドを付ける。
@@ -96,12 +95,17 @@ project-root/
 │   ├── specifications/        # 純粋な仕様書（15 本）
 │   └── designs/               # 対応する設計書（同名 15 本）
 ├── scripts/
-│   ├── bootstrap-toolchain.sh # サンドボックス用ツールチェーン展開（Rust を呼ぶ）
-│   ├── bootstrap-rust.sh      # Rust ツールチェーン + vendored crates の展開
+│   ├── bootstrap-rust.sh      # Rust ツールチェーン + vendored crates の展開（標準復旧手順）
+│   ├── bootstrap-toolchain.sh # 汎用フォールバック用ダミー env.sh 生成スクリプト
+│   ├── check-release.sh       # 配布バイナリの glibc 2.35 基準・コンテナ互換検証
+│   ├── check-shapes.sh        # normal / no-assets / nested 3 形態のスモーク検査
+│   ├── test-check-release.sh  # check-release.sh 自体の回帰テスト
 │   └── verify.sh              # コミット前の一括検証スクリプト
 ├── src/
+│   ├── assets.rs              # 同梱 JSON のバイナリ埋め込み既定資産（include_str!）
 │   ├── core/                  # 純粋ドメイン層（I/O なし。ファイルは 1 概念 1 モジュール）
 │   │   ├── config/            # settings / network / filter / quota の型と検証・マージ
+│   │   ├── model.rs           # 検索結果・文書・節などの共通ドメインモデル
 │   │   ├── engine.rs          # エンジン定義の型（JSON スキーマ）
 │   │   ├── extract.rs         # 抽出仕様の評価（HTML / JSON）
 │   │   ├── template.rs        # エンジン定義の {{var}} 展開
@@ -115,16 +119,17 @@ project-root/
 │   │   ├── session.rs         # セッション状態・キャッシュキー
 │   │   ├── robots.rs          # robots.txt の評価
 │   │   ├── secret.rs          # 秘匿値の伏字化
-│   │   ├── text.rs / url.rs   # 文字数・切り詰め / URL 正規化
+│   │   ├── text.rs / url.rs   # 文字数・切り詰め / URL 正規化・クエリ秘匿
 │   │   └── errors.rs          # エラーコード・警告コード・メッセージ
 │   ├── ports/                 # 外部境界のトレイト（http / fetch / state / system）
-│   ├── adapters/              # http / engine（loader・eval）/ extract / state / config / system
+│   ├── adapters/              # http / tls / robots / engine（loader・eval）/ extract / state / config / system
 │   ├── usecases/              # search / document / guard / history / engines / config / doctor / target
 │   ├── ui/                    # cli（引数）・commands（非対話）・interactive・menu・render
 │   ├── lib.rs                 # モジュール公開
-│   └── main.rs                # エントリポイント（依存の組み立てと振り分けのみ）
+│   └── main.rs                # エントリポイント（設定構築・依存配線・非対話/対話ディスパッチ）
 ├── assets/                    # 同梱の既定定義（engines / network / filters / quotas / config）
-├── tests/                     # support / architecture / contract / integration / assets / e2e
+├── tests/                     # support / architecture / contract / integration / assets / proxy / tls / m5..m11 / m14..m17 / e2e
+├── build.rs                   # ビルド時の rustc 版数埋め込み（RUSTC_VERSION）
 ├── Cargo.toml
 └── rust-toolchain.toml
 ```
@@ -221,7 +226,7 @@ project-root/
    - スナップショットで永続化されるのはリポジトリの作業ツリー配下のみであり、除外ディレクトリ（`target/`, `dist/`, `build/`, `node_modules/`, `.cache/` 等）および `/home/user/build/` は消える。
    - コンテナ再起動時は `.git/refs/heads/...` が古い状態に戻ることがあるため、必ず次の手順で復旧する：
      ```bash
-     bash scripts/bootstrap-toolchain.sh
+     bash scripts/bootstrap-rust.sh
      git fetch origin <現在のブランチ名>
      git reset --mixed FETCH_HEAD
      ```
