@@ -22,9 +22,12 @@
 | 表示言語とエンジン言語（M10） | 完了 | CLI メッセージの全英語化・嘘をつく `ui.locale` の削除・`search.language` の追加 | `REF:docs/plans.md#m10-english-and-language` |
 | 配布互換ゲート（M11） | 完了 | CI の Build & Distribution Compatibility の `E1003`（ステージした `assets/` の入れ子）を直し、同梱既定の解決を配布配置に依存させない | `REF:docs/plans.md#m11-distribution-assets` |
 | ドキュメントとソースの同期（M12） | 完了 | docs 全 31 本の総点検・未実装仕様の切り分け・`GUIDE.md` の統合・未使用コードの削除 | `REF:docs/plans.md#m12-docs-source` |
+| 実機監査と CLI・状態整合修正（M13〜M14） | 完了（PR #45 マージ済み） | Issue #37〜#44（ページング識別子・セッション再開・クォータ・doctor・表示整合）の洗い出しと修正 | `REF:docs/plans.md#m14-audit-fixes` |
 | M5 棚卸し残課題の再監査（M15） | 完了（PR #46 マージ済み） | Issue #4/#5/#7/#9/#12/#21/#23 の仕様・設計・実装・回帰検証 | `REF:docs/plans.md#m15-m5-residuals` |
 | 実環境検証のフォローアップ（M16） | 完了（PR #49 マージ済み） | 同一 refine の W4001 抑制（#47）・JSON 非信頼属性（#48）・Muse 検証記録 | `REF:docs/plans.md#m16-real-provider-followup` |
-| 秘匿機能のスタブ検証と修正（M17） | 実装・ローカル検証完了（レビュー待ち） | G1 URL userinfo 成功系・埋込/不正 URL・robots 拒否（#50）と G2 応答ヘッダ・JSON/form body 秘匿・過剰変換修正（#51） | `REF:docs/plans.md#m17-secret-redaction-validation` |
+| 秘匿機能のスタブ検証と修正（M17） | 完了（PR #52 マージ済み） | G1 URL userinfo 成功系・埋込/不正 URL・robots 拒否（#50）と G2 応答ヘッダ・JSON/form body 秘匿・過剰変換修正（#51） | `REF:docs/plans.md#m17-secret-redaction-validation` |
+| ゼロ前提の全量同期監査（M18） | 完了（レビュー待ち） | 全仕様・設計・補助文書と `develop`（`0326c1a`）の再照合、Issue #53〜#64 起票、文書側の誤記・設計乖離修正 | `REF:docs/plans.md#m18-zero-assumption-sync-audit` |
+| 監査指摘の実装修正（M19） | 計画済み（次工程） | M18 で洗い出した実装側バグ・未接続機能・仕様確認事項（Issue #55〜#64）の解消 | `REF:docs/plans.md#m19-audit-remediation` |
 <!-- SYNC:END project-status -->
 
 ---
@@ -118,6 +121,13 @@
 | #21 docs の誤記・残骸 | README のクォータ記述・`--profile`・`--no-filter=all`・`with-body`・`read --heading`・`context.max_chars`（仕様側）・`text/plain`（仕様側）は修正済み。残りは `GUIDE.md` で、M12 で削除・統合した | 解消済み |
 | #23 `hint` / `E2007` / locale | `AppError.hint` を設定（4 箇所）・表示（`Renderer::error`）し、実測でも hint が出る。`E2007` は発行箇所ゼロで仕様も「発行しない」と明記。メッセージは全英語・locale 設定なし | 解消済み |
 
+<a id="m14-audit-fixes"></a>
+### M13〜M14: 実機監査と CLI・状態整合修正
+
+- [x] 実機監査（`127.0.0.1` ループバックスタブ。外部ネットワーク不使用）で Issue #37〜#44 を特定し一括修正した（PR #45。`REF:tests/m14.rs` で回帰固定）
+- [x] 詳細な作業内容・判断理由・計測結果は `REF:docs/history.md` の `MILESTONE:M014` エントリへ移管済み
+- 状態: 完了。
+
 <a id="m15-m5-residuals"></a>
 ### M15: M5 棚卸し残課題の再監査
 
@@ -157,7 +167,7 @@ M5 棚卸しの Issue #4、#5、#7、#9、#12、#21、#23 を、M9 / M12 の修�
 - [x] README・ガイド・仕様・設計全体を再検索し、実装との不一致を修正
 - [x] OS 割り当てポートの `127.0.0.1` 自作スタブで実バイナリを検証。外部サイトには接続しない
 - [x] `bash scripts/verify.sh --quick`（docs / release-gate / fmt-check / clippy / all-target tests）と `git diff --check` を実行
-- [x] 7 Issue を `Closes` する `develop` 向け PR #46 を作成（未マージ）
+- [x] 7 Issue を `Closes` する `develop` 向け PR #46 を作成（マージ済み）
 
 ## 3. フェーズ別実行順序
 
@@ -195,20 +205,20 @@ M5 棚卸しの Issue #4、#5、#7、#9、#12、#21、#23 を、M9 / M12 の修�
 
 | ファイル | 主な内容 | 主な実装単位 |
 |---|---|---|
-| `overview` | 目的・原則・用語・スコープ | 全体配線・ポート定義 |
+| `overview` | 目的・原則・用語・スコープ | `src/lib.rs`, `src/main.rs`, `src/ports/` |
 | `cli-interface` | 対話メニュー・サブコマンド・入出力 | `src/ui/` と `src/usecases/` |
-| `engine-definitions` | エンジン定義 JSON・抽出ルール・検証コマンド | `src/core/engine.rs`, `src/adapters/engine/` |
-| `network` | ネットワークプロファイル JSON・再試行・プロキシ・robots | `src/core/config/network.rs`, `src/adapters/http/` |
-| `filters` | 結果・本文フィルタ JSON | `src/core/filter/` |
-| `quotas` | クォータ・レート制限・カウンタ | `src/core/quota.rs`, `src/usecases/guard/` |
-| `search` | 検索実行・正規化・ページング | `src/usecases/search/`, `src/core/search/` |
-| `document-fetching` | 取得・抽出・変換・キャッシュ | `src/adapters/http/`, `src/adapters/extract/` |
-| `context-assembly` | 見出し・節・予算・出所表示 | `src/core/outline/`, `src/core/context/` |
-| `session-state` | 状態ディレクトリ・セッション・破損対応 | `src/adapters/state/` |
-| `history` | 履歴の記録と参照 | `src/core/history/`, `src/adapters/state/history_jsonl.rs` |
-| `configuration` | 設定 JSON とマージ | `src/core/config/`, `src/usecases/config/` |
+| `engine-definitions` | エンジン定義 JSON・抽出ルール・検証コマンド | `src/core/engine.rs`, `src/core/template.rs`, `src/adapters/engine/` |
+| `network` | ネットワークプロファイル JSON・再試行・プロキシ・robots | `src/core/config/network.rs`, `src/adapters/http.rs`, `src/adapters/tls.rs`, `src/adapters/robots.rs` |
+| `filters` | 結果・本文フィルタ JSON | `src/core/config/filter.rs` |
+| `quotas` | クォータ・レート制限・カウンタ | `src/core/config/quota.rs`, `src/usecases/guard.rs` |
+| `search` | 検索実行・正規化・ページング | `src/usecases/search.rs`, `src/core/search.rs` |
+| `document-fetching` | 取得・抽出・変換・キャッシュ | `src/adapters/extract/mod.rs`, `src/core/convert.rs`, `src/core/markdown.rs` |
+| `context-assembly` | 見出し・節・予算・出所表示 | `src/core/outline.rs`, `src/core/context.rs` |
+| `session-state` | 状態ディレクトリ・セッション・破損対応 | `src/core/session.rs`, `src/adapters/state/` |
+| `history` | 履歴の記録と参照 | `src/core/history.rs`, `src/adapters/state/history_jsonl.rs` |
+| `configuration` | 設定 JSON とマージ | `src/core/config/`, `src/adapters/config/mod.rs`, `src/usecases/config.rs` |
 | `agent-integration` | JSON イベント | `src/ui/render.rs`, `src/ui/commands.rs` |
-| `errors` | エラー・警告・`doctor` | `src/core/errors/`, `src/usecases/doctor/` |
+| `errors` | エラー・警告・`doctor` | `src/core/errors.rs`, `src/usecases/doctor.rs` |
 | `testing` | 受入基準・品質ゲート | `tests/` 全体 |
 
 ---
@@ -266,7 +276,7 @@ M5 棚卸しの Issue #4、#5、#7、#9、#12、#21、#23 を、M9 / M12 の修�
 - 仕様: 同一 refine の W4001 抑制（#47）、JSON content/document に boolean `untrusted: true` を追加（#48）。既存本文・文字数・v=1 は維持。
 - 設計: usecases/search.rs の警告条件、ui/commands.rs の 2 種のイベント生成だけを変更。テキスト境界と秘匿化は維持。
 - 実装・検証: `tests/m16.rs` の loopback HTTP スタブと実プロセスで refine の変更あり／なし、quiet・非 quiet 警告伝播、outline/read の非信頼属性、テキスト境界、機微 query 秘匿と通常 query 保持を検証する。既存回帰テスト・fmt・clippy も実行する。
-- 状態: 実装済み、ローカル回帰検証完了。
+- 状態: 完了（PR #49 として `develop` にマージ済み）。
 - CI と実環境記録を分離し、userinfo 成功系の実サイト検証は未検証のまま残す。PR は develop 向け、自己マージしない。
 
 <a id="m17-secret-redaction-validation"></a>
@@ -283,4 +293,33 @@ M5 棚卸しの Issue #4、#5、#7、#9、#12、#21、#23 を、M9 / M12 の修�
   3. `src/core/markdown.rs`: `absolutize` で基底 URL から `username` / `password` を除去してから相対リンクを解決する。
   4. `src/adapters/robots.rs`・`src/adapters/http.rs`・`src/adapters/extract/mod.rs`・`src/adapters/engine/eval.rs`・`src/usecases/**`・`src/ui/**`: `E2006` 拒否パス秘匿化、ヘッダパラメータ秘匿化、`W4004` / `E4004` 切り詰め前の `redact_body` 適用、`engines::describe` 要約 URL 秘匿化、`filters show` の `redact_json` 適用、統一 redaction list の配線を実装する。
   5. 検証・記録: CI 再現可能な `REF:tests/m17.rs`（`127.0.0.1` OS 割り当てポートのループバックスタブ＋実バイナリ検証）と単体テストを追加し、`REF:reports/m17-validation.md`、`REF:docs/handoff.md`、`REF:docs/history.md` を更新して品質ゲートを通過させたうえで `develop` 向け PR を作成する（自己マージしない）。
-- 状態: 実装・ローカル回帰検証完了（レビュー待ち）。
+- 状態: 完了（PR #52 として `develop` `0326c1a` にマージ済み、2026-11-26）。Issue #50 / #51 解消。
+
+<a id="m18-zero-assumption-sync-audit"></a>
+### M18: ゼロ前提の全量同期監査
+
+- 前提: 過去の監査結果を前提とさず、`develop`（`0326c1a`）の全仕様書 15 本・全設計書 15 本・`REF:README.md`・`REF:docs/developers.md`・本計画・`REF:docs/handoff.md`・`REF:docs/history.md` を `src/`・`tests/`・`assets/`・`scripts/`・`build.rs` と全行照合した。実証は実バイナリ＋`127.0.0.1` ループバック HTTP スタブ・PTY・`no-assets` 隔離配置のみ（外部サイト接続ゼロ）。
+- 起票: GitHub Issue #53〜#64（12 件）。立証ログと対応表は `REF:reports/m18-validation.md`。
+- 処分:
+  - 本 PR で修正（文書側同期・ソース不変更）: #53（トップレベル文書）、#54（全 15 設計書の架空パス・型名）、#64 の一部（`agent-integration.md` §2.2 のイベント・コマンド表）。
+  - M19 バックログ（実装側・`src/` 未修正）: #62（P0）→ #57 / #58 / #59 / #60（P1）→ #55 / #61 / #63（P2）→ #56 と #64 残（`content.omittedChildren`、P3）。
+  - 意図的な仕様変更（Issue 対象外）: M10 / M14 / M15 / M16 / M17 由来 5 項目を `REF:reports/m18-validation.md` §4 に記録。
+- 状態: 完了（本 PR。レビュー待ち）。
+
+<a id="m19-audit-remediation"></a>
+### M19: 監査指摘の実装修正（未着手）
+
+- 範囲: M18 が確定した Issue #55〜#64 の実装側バグ・未接続機能・仕様確認事項の `src/` 修正と、各項目のループバックスタブ／PTY 回帰テスト追加。
+- 優先順位（M18 監査で確定）:
+  1. P0: #62 — `history clear` の `--before` 無視（全件消去）・削除件数 0 固定、`Refine` 要約、隔離ファイル名。
+  2. P1: #60 — 文書キャッシュ無効化無視・`~~~` フェンス閉じ誤り・ATX 見出し誤認・`read` オプション無視。
+  3. P1: #57 — `request.encoding` 破棄・`enabled=false` 無視・`request.body` 変数未検証・`{{apiKey}}` 未配線。
+  4. P1: #58 — HTTP `401` の `E2003` 化・`403` 無条件再試行・`onError` 混同・相対 URL 自動解決・秘匿部分一致誤爆。
+  5. P1: #59 — `network` / `filters` の埋め込み既定・`--state-dir`・起動時検証・`config validate` 範囲。
+  6. P2: #61 — `onExceed="warn"` 誤警告・`quota check --kind` 値域・`quota reset` 空セッション ID。
+  7. P2: #63 — 対話モードのストリーム違反・ページ送り無視・`4) Edit the query` 挙動。
+  8. P2: #55 — 休眠設定フィールド・検索結果キャッシュ等の機能化（仕様維持を確認のうえ）。
+  9. P3: #56 — 未発行エラーコード 5 件・`W4002` 引数逆転・`doctor` の HTTP GET と `rustc` 重複表記。
+  10. P3: #64 残 — `content.omittedChildren` の出力。
+- 規律: 後方互換の出力契約（`v: 1`・イベント形式・CLI オプション）を変更しない。仕様書 → 設計書 → ソース → テストの順で同期し、PR は自己マージしない。
+- 状態: 計画済み（次マイルストーン）。

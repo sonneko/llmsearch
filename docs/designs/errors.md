@@ -16,9 +16,9 @@
 
 ### 1.2 警告
 
-状態: 実装完了（REF:src/core/errors.rs）
+状態: 実装完了（REF:src/core/errors.rs, REF:src/ui/render.rs）
 
-`enum WarningCode`（`W1001`〜`W5005`）と `struct Diagnostic { code: WarningCode, message: String, detail: Option<String> }`。`Reporter::warn` は重複を除いて 1 回だけ表示する（`core/errors/dedupe.rs` の `HashSet<WarningCode>` を使用）。
+`enum WarningCode`（`W1001`〜`W5005`）と `struct Diagnostic { pub code: WarningCode, pub message: String }`。重複抑止は `usecases::CollectingReporter` および `Renderer` のコマンドスコープ警告収集が `(code, message)` 単位で行う。
 
 ---
 
@@ -34,27 +34,27 @@
 
 ### 2.2 ネットワークエラー（`E2xxx`）
 
-状態: 実装完了（REF:src/core/errors.rs）
+状態: 実装完了（REF:src/adapters/http.rs, REF:src/core/errors.rs）
 
-`adapters::http::errors::map_reqwest(e: reqwest::Error) -> AppError` が `is_timeout` / `is_connect` / `is_redirect` を見て写像する。TLS 失敗は `reqwest` の `is_request` + エラーチェーン文字列で判定し、`E2008` へ写像する。
+`src/adapters/http.rs` の `map_reqwest_error` が `is_timeout` / `is_connect` / `is_redirect` と TLS エラーチェーン文字列を見て `E2001` / `E2002` / `E2004` / `E2008` へ写像する。`E2007` は応答サイズ上限を打ち切り＋`W3003` で扱う方針のため定義のみで未発行。
 
 ### 2.3 変換エラー（`E3xxx`）
 
-状態: 実装完了（REF:src/core/errors.rs）
+状態: 実装完了（REF:src/adapters/extract/mod.rs, REF:src/core/convert.rs）
 
-`adapters::extract::errors` が `E3001`〜`E3004` を生成する。`E3001` は「抽出結果が空」、`E3002` は Content-Type 判定、`E3003` は文字コード、`E3004` は Markdown 化の例外に対応する。
+`src/adapters/extract/mod.rs` が Content-Type 判定で `E3002`、`src/core/convert.rs` が Markdown 変換失敗で `E3004` を返す。`E3001` と `E3003` は現状カタログ定義のみで発行箇所が無い（Issue #56）。
 
 ### 2.4 エンジンエラー（`E4xxx`）
 
-状態: 実装完了（REF:src/core/errors.rs）
+状態: 実装完了（REF:src/adapters/engine/eval.rs, REF:src/usecases/search.rs）
 
-`adapters::engine::errors` が抽出段階の失敗を写像する。`E4001` は「抽出後に 0 件」、`E4004` は「抽出ルール不一致（破棄件数が全件）」。`E4005` は読み込み時の重複検出、`E4006` は相対 URL の破棄が全件だった場合。
+`src/adapters/engine/eval.rs` と `src/usecases/search.rs` が抽出段階・選択段階の失敗を写像する。`E4001` は「抽出・終端で 0 件」、`E4002` はエンジン未発見／API キー未設定、`E4003` は `403` / `429` 等の拒否（`401` が `E2003` になる点は Issue #58）、`E4004` は抽出ルール不一致（全件破棄）。`E4005`（重複 ID は `W4002` でスキップ）と `E4006`（相対 URL は自動解決）は現状未発行（Issue #56 / #58）。
 
 ### 2.5 状態エラー（`E5xxx`）
 
-状態: 実装完了（REF:src/core/errors.rs）
+状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/usecases/guard.rs）
 
-状態ストアの読み書きは `src/adapters/state/` から `AppError` を返す。`E5005` は `src/usecases/guard.rs` の `ExceedInfo::to_error()` が要求量、現在量／上限、要求後の見込み量、該当すればリセット時刻を detail に含めて生成する。
+状態ストアの読み書きは `src/adapters/state/` から `AppError` を返す（`E5003` は未発行。Issue #56）。`E5005` は `src/usecases/guard.rs` の `ExceedInfo::to_error()` が要求量、現在量／上限、要求後の見込み量、該当すればリセット時刻を detail に含めて生成する。
 
 ---
 
@@ -136,13 +136,13 @@
 
 ## 5. `doctor` による自己診断
 
-状態: 実装完了（REF:src/core/errors.rs）
+状態: 実装完了（REF:src/usecases/doctor.rs）
 
 ### 5.1 診断項目
 
-状態: 実装完了（REF:src/core/errors.rs）
+状態: 実装完了（REF:src/usecases/doctor.rs, REF:build.rs）
 
-`src/usecases/doctor.rs` に 1 項目 1 関数で実装し、`doctor()` が順に実行する。各チェックは 3 秒でタイムアウトし、失敗しても後続を継続する。
+`src/usecases/doctor.rs` に項目別チェックを実装し、`run()` が順に実行して失敗しても後続を継続する（`build.rs` 由来の `RUSTC_VERSION` 先頭 `"rustc "` と整形文字列の重複は Issue #56 で追跡）。
 
 ### 5.2 結果の表示
 
@@ -152,6 +152,6 @@
 
 ### 5.3 ネットワーク診断の制約
 
-状態: 実装完了（REF:src/core/errors.rs）
+状態: 実装完了（REF:src/usecases/doctor.rs）
 
-到達性確認は `HEAD` 要求 1 回（405 の場合は `GET` に `Range: bytes=0-0`）に限定し、検索クエリを送らない。リトライは行わず、クォータを消費しない（`Guard` を通さずに `HttpClient` を直接使う専用経路を 1 つだけ用意する）。
+クォータを消費しないよう `Guard` を通さずに `HttpClient` を直接呼ぶ（現状 `HttpRequest::get` を通常の `app.network` 設定で送っており、仕様の `HEAD`/`Range`・3 秒固定タイムアウト・再試行なしとの差分は Issue #56 で追跡）。`--no-network` 指定時は到達性チェックをスキップする。

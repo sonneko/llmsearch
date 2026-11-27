@@ -16,15 +16,15 @@
 
 ### 1.2 ポリシーの参照
 
-状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
+状態: 実装完了（REF:src/core/config/quota.rs, REF:src/adapters/config/mod.rs）
 
-`QuotaPolicy` は `core::config::quota` に定義し、`adapters::config::loader` が `quotas/<id>.json` から読む。`RefOr::Inline` の場合は `settings.json` 内の定義をそのまま使う。
+`QuotaPolicy` は `core::config::quota` に定義し、`src/adapters/config/mod.rs` の `resolve_quota` が `quotas/<id>.json`（未発見時は `src/assets.rs` の埋め込み既定）から読む。`RefOr::Inline` の場合は `settings.json` 内の定義をそのまま使う。
 
 ### 1.3 上限到達時の振る舞い
 
-状態: 実装完了（REF:src/ui/render.rs）
+状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs, REF:src/ui/commands.rs）
 
-`Guard::check(metric, amount) -> Result<(), AppError>` が `core::config::quota::check` に委譲する。超過時は `ExceedInfo::to_error()` が `E5005` を作り、`detail` に `<scope>.<項目>: requested <要求量>, used <現在>/<上限> (projected <要求後>/<上限>)`（日次・窓ならリセット時刻付き）を入れる。`quota check` の許可時は `used/limit` と残量を返す。`onExceed=warn` で実効上限の 2 倍未満のときは `QuotaDecision::Allowed { warn: true }` を返し、`Guard` が `W5005` を出す。
+`Guard::check(metric, amount) -> Result<(), AppError>` が `core::config::quota::check` に委譲する。超過時は `ExceedInfo::to_error()` が `E5005` を作り、`detail` に `<scope>.<項目>: requested <要求量>, used <現在>/<上限> (projected <要求後>/<上限>)`（日次・窓ならリセット時刻付き）を入れる。`quota check` の許可時は `used/limit` と残量を返す。`onExceed=warn` は実効上限の 2 倍未満を許可して `W5005` を出す設計だが、現状 `PolicyAction::Warn` が上限未達でも `warn: true` を返す不具合があり Issue #61 で追跡する。
 
 ---
 
@@ -54,7 +54,7 @@
 
 状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
 
-`WindowCounter { started_at: DateTime<Utc>, used: Usage }` を `Vec` で保持し、`core::quota::window_active(&w, now) -> bool` で有効性を判定する。期限切れの窓は次の消費時に作り直す（判定は `started_at + minutes`）。
+`WindowCounter { minutes: u32, started_at: String, used: Usage }` を `Vec` で保持し、`core::config::quota` 内で窓の有効期限（`started_at + minutes`）を判定する。期限切れの窓は次の消費時に作り直す。
 
 ### 2.5 累積（`total`）
 
@@ -94,9 +94,9 @@
 
 ### 3.3 消費の記録
 
-状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
+状態: 実装完了（REF:src/adapters/state/mod.rs, REF:src/adapters/state/session_store.rs）
 
-`CounterStore` トレイトの `save(&Counters)` は `adapters/state/atomic.rs` の原子的書き込みを用いる。`Counters` 全体を 1 ファイルに保存し、部分書き込みを避ける。
+`CounterStore` トレイトの `save(&Counters)` は `REF:src/adapters/state/mod.rs` の `write_atomic` を用いる。`Counters` 全体を状態ディレクトリ直下の `counters.json` 1 ファイルに保存し、部分書き込みを避ける。
 
 ---
 
@@ -126,7 +126,7 @@
 
 状態: 実装完了（REF:src/ui/commands.rs）
 
-`src/ui/commands.rs` の `run_quota` が `show` / `reset` / `check` を実装する。`show` / `check` は最新の有効セッションを再開し、セッション ID と使用量を標準エラーへ通知する（`--quiet` なら抑制）。`check` は許可時に要求メトリクスの `used/limit` と残量を返し、超過時は要求量・現在量・要求後の見込み量を `E5005` detail に含める。`reset` は `--yes` を要求し、`--scope` が `session` / `day` / `window` / `total` / `all` 以外なら `E1004` を返し、許容される `--scope` 値を hint に全て示す（全消去にしない）。成功後は `type: "quota"` の履歴 1 件（`payload.action = "reset"`）を記録する。
+`src/ui/commands.rs` の `run_quota` が `show` / `reset` / `check` を実装する。`show` / `check` は最新の有効セッションを再開し、セッション ID と使用量を標準エラーへ通知する（`--quiet` なら抑制）。`check` は `--kind` に `search(es)` / `fetch(es)` / `result(s)` / `char(s)` を受け付け（仕様 §4.4 の `read` との差分は Issue #61）、許可時に要求メトリクスの `used/limit` と残量を返し、超過時は要求量・現在量・要求後の見込み量を `E5005` detail に含める。`reset` は `--yes` を要求し、`--scope` が `session` / `day` / `window` / `total` / `all` 以外なら `E1004` を返し、許容される `--scope` 値を hint に全て示す（全消去にしない）。成功後は `type: "quota"` の履歴 1 件（`payload.action = "reset"`）を記録する。
 
 ---
 
@@ -158,6 +158,6 @@
 
 ### 6.3 上限の引き上げ
 
-状態: 実装完了（REF:src/core/config/quota.rs, REF:src/usecases/guard.rs）
+状態: 実装完了（REF:src/ui/commands.rs, REF:src/core/config/quota.rs）
 
-適用ポリシー ID を `SessionState.quota_policy` に保持し、履歴の各イベントに含める。
+現在有効なポリシー ID は `App.quota.id` に保持し、`quota show` / `quota check` / `quota reset` の出力および `quota reset` の履歴 `payload.policy` に記録する。

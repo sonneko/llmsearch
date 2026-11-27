@@ -108,7 +108,7 @@
 
 状態: 実装完了（REF:src/usecases/document.rs）
 
-`usecases::document::fetch` が `FetchOptions` に `content_filters` を渡し、`convert` が 1) `stripSelectors` を適用してから本文抽出、2) Markdown 変換、を行う。行単位の後処理は取得時ではなく、`outline` / `read` が `load` の直後に呼ぶ `filter_content(app, markdown)`（`apply_content(&app.filters, markdown, app.no_filter)`）で行う。`apply_content` は `stripPatterns` → `stripLines` → `keepOnly` → `normalize` の順に適用し、除外件数を `FilterStats` に記録する（呼び出し側は現在この統計を使わない）。アウトラインの表示深度は `--depth` と `context.outlineDepth` だけで決める。
+`usecases::document::fetch` が `FetchOptions` に `content_filters` を渡し、`convert` が本文領域の抽出と `stripSelectors` 除去および Markdown 変換を行う（`pick_by_density` と `remove_selectors` の実行順は Issue #60 で追跡）。行単位の後処理は取得時ではなく、`outline` / `read` が `load` の直後に呼ぶ `filter_content(app, markdown)`（`apply_content(&app.filters, markdown, app.no_filter)`）で行う。`apply_content` は `stripPatterns` → `stripLines` → `keepOnly` → `normalize` の順に適用し、除外件数を `FilterStats` に記録する（呼び出し側は現在この統計を使わない）。アウトラインの表示深度は `--depth` と `context.outlineDepth` だけで決める。なお `filters` サブコマンド単体での埋め込み既定・`--state-dir` 対応と `schemaVersion` 検証漏れは Issue #59 で追跡する。
 
 ### 4.6 既定のフィルタ集合（本文）
 

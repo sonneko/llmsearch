@@ -15,21 +15,21 @@
 定義の型は `src/core/engine.rs` に `serde::Deserialize` 付きの構造体として置く。評価器は次の 2 つに分ける。
 
 - `src/core/template.rs`: `{{var}}` の展開（`expand(tmpl, ctx) -> Result<String, AppError>`）。URL エンコードは `encoding_rs` で `query` を符号化する関数 `encode_query` に閉じる。
-- `src/adapters/engine/eval.rs`: HTTP 応答 → `Vec<SearchHit>` への写像。`response.kind` による分岐はここだけに存在し、`Extractor` トレイト（`extract_items`）の実装を `registry` から引く。
+- `src/adapters/engine/eval.rs`: HTTP リクエストを組み立て送信（`template::prepare` → `HttpClient` ポート）し、応答体をデコードして `Vec<SearchHit>` へ写像する。`response.kind` による分岐は `REF:src/core/extract.rs` の `extract()`（`match spec.kind` → `extract_html` / `extract_json`）に集約する。
 
-`core` 側は「定義の妥当性」と「変換の意味」を知るが、HTTP や HTML の具体 API には依存しない。セレクタ構文の検証は `scraper::Selector::parse` を `adapters` 側で行い、`core` では `SelectorSpec`（文字列）として保持する。
+`core` 側は「定義の妥当性」と「変換の意味」を知るが、HTTP の具体 API には依存しない（送信は `REF:src/ports/` の `HttpClient` トレイト経由）。CSS セレクタと HTML 解析は `scraper` に依存し、セレクタ文字列は `FieldSpec` / `ItemSpec`（`REF:src/core/engine.rs`）が保持する。構文検証は定義チェックの `scraper::Selector::parse`（`REF:src/core/engine.rs`）、抽出時の解析は `selector_of`（`REF:src/core/extract.rs`）で行う。
 
 ### 1.2 対象とする応答
 
 状態: 実装完了（REF:src/core/extract.rs）
 
-`Extractor` の実装は `HtmlExtractor`（`src/core/extract.rs`）と `JsonExtractor`（`src/core/extract.rs`）。`xml` を追加する場合は同トレイトの実装を 1 つ足し、`registry.rs` の `match kind` に 1 行追加する。初期リリースでは `xml` を登録しない。
+抽出は `REF:src/core/extract.rs` 内の `extract_html` / `extract_json` の 2 関数で、`extract()` が `ResponseKind`（`REF:src/core/engine.rs`）に応じて選択する。`xml` を追加する場合は `ResponseKind` にバリアントを足し、`extract` に分岐を 1 つ追加して定義検証を更新する。初期リリースでは `xml` を登録しない（仕様はスコープ外。`REF:docs/plans.md#unplanned`）。
 
 ### 1.3 定義の同一性とキャッシュ
 
-状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
+状態: 実装中（`engineHash` の記録は実装済み。検索結果キャッシュは未実装・M19 計画（Issue #55））（REF:src/core/engine.rs, REF:src/usecases/engines.rs）
 
-`EngineDef::hash()` は `serde_json::to_string(self)` の SHA-256 の先頭 8 バイトを 16 進 16 文字で返す。キャッシュキーは `(engine_id, engine_hash, query, page, limit)` とし、`DefaultHasher` ではなく SHA-256 を用いて実行間で安定させる。
+`EngineDef::hash()`（`REF:src/core/engine.rs`）は `serde_json::to_string(self)` の SHA-256 の先頭 8 バイトを 16 進 16 文字で返し、`engines show` 出力の `engineHash` として記録する（`REF:src/usecases/engines.rs`）。`DefaultHasher` ではなく SHA-256 を用いて実行間で安定させる。これをキーとする検索結果キャッシュ（仕様 §1.3）は初期リリースでは未実装（M19 計画。Issue #55）。文書キャッシュはエンジンを含まない `cache_key(url)`（`REF:src/core/session.rs`）を使う。
 
 ---
 
@@ -43,7 +43,7 @@
 
 `EngineDef` は仕様の表のキーをそのまま持つ。`schemaVersion` は `u32` で受け、`SUPPORTED_SCHEMA_VERSION: u32 = 1` 以外は `E1004`。`id` は `Regex`（`^[a-z0-9][a-z0-9._-]*$`）で検証する。`variant` は省略時 `"default"`。
 
-`network` はエンジン定義が優先する。検索の実行時に `REF:src/usecases/search.rs` が「エンジン定義の `network` → 起動引数 `--network` → 設定 `network`」の順で解決するため、`--network` はエンジン固有の指定を持たないエンジンにだけ効く（仕様 engine-definitions.md §2.1 と cli-interface.md §1 の優先順を実装で確定させたもの。挙動の変更ではない）。
+`network` はエンジン定義が優先する。検索の実行時に `REF:src/usecases/search.rs` が「エンジン定義の `network` → 起動引数 `--network` → 設定 `network`」の順で解決するため、`--network` はエンジン固有の指定を持たないエンジンにだけ効く（`REF:docs/specifications/configuration.md` §2.1 の優先順位と `REF:docs/specifications/engine-definitions.md` §2.1 の `network` キーを実装で確定させたもの。挙動の変更ではない）。
 
 ### 2.2 未知キーの扱い
 
@@ -65,9 +65,9 @@
 
 ### 3.2 テンプレート変数
 
-状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
+状態: 実装完了（REF:src/core/template.rs, REF:src/core/engine.rs）
 
-`core/template.rs` の `expand(tmpl: &str, ctx: &TmplCtx) -> Result<String, AppError>` が 1 パスで `{{name}}` を置換する。未知の変数は `E1004`。`encoding` が `utf-8` 以外の場合は `encode_query` を通してから URL エンコードする（`url::form_urlencoded` は UTF-8 前提のため、独自に `%XX` を組み立てる）。
+`src/core/template.rs` の `expand(tmpl: &str, ctx: &TmplCtx) -> Result<String, AppError>` が 1 パスで `{{name}}` を置換する。未知の変数は `E1008`（仕様 §3.4 の `E1004` 表記との差分および `request.encoding` の `encode_query` 結果が `prepare` で未使用となっている不具合、`{{apiKey}}` 未配線は Issue #57 で追跡）。
 
 `TmplCtx` に `language: String`（主言語タグ）を足し、`locale` は同じ `search.language` の正規化後の全体を入れる（M10）。`core/engine.rs` の `ALLOWED_VARS` にも `language` を追加する。`Defaults` は `region` と `#[serde(flatten)] extra` のみとし、`locale` / `language` フィールドを削除する（旧定義では未知キーとして `extra` に落ち、`EngineDef::validate()` が `W1002` を出す。`EngineDef` 側にも `extra` があるため実装はどちらでも温存される）。言語は常に `search.language` が決め、定義からは上書きできない。
 
@@ -107,15 +107,15 @@
 
 ### 4.3 `fields` の指定
 
-状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
+状態: 実装完了（REF:src/core/engine.rs, REF:src/core/extract.rs）
 
-`FieldSpec` は `Selector`, `Path`, `From`, `Const`, `Join` の列挙。`HtmlExtractor` は `Selector` と `Const` のみ、`JsonExtractor` は `Path`・`Const` を直接扱い、`From`・`Join` は共通層（`adapters/engine/derive.rs`）で解決する。これにより変換ロジックの重複を避ける。
+`FieldSpec` は構造体として `selector`, `attr`, `path`, `from`, `const_value`, `join`, `join_with`, `transform` を持ち、`src/core/extract.rs` が HTML / JSON 抽出後の共通段で `from`・`join`・`transform` を解決する。
 
 ### 4.4 変換（`transform`）
 
-状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
+状態: 実装完了（REF:src/core/engine.rs, REF:src/core/extract.rs）
 
-`Transforms` は `Vec<Transform>` を順に適用する純粋関数 `apply_transforms(value: &str, ts: &[Transform], ctx: &TransformCtx) -> String`。`TransformCtx` は `base_url` と追跡パラメータの一覧を持つ（`REF:src/core/url.rs` の `DEFAULT_TRACKING` を `usecases::config` が `App.tracking` へ写す。日付形式は `to_date` が実装内の候補形式を用いる）。`absolutize` は `url::Url::join`、`to_date` は `chrono::NaiveDate::parse_from_str` を候補形式の順に試す。
+`Transforms` は `Vec<Transform>` を順に適用する純粋関数（`src/core/extract.rs`）。`ResponseSpec.transform_args` で `strip_prefix` / `strip_suffix` の引数を渡せる（仕様書への `transformArgs`・`unwrap_redirect` 対象キー反映は Issue #57 で追跡）。`absolutize` は `url::Url::join`、`to_date` は `chrono::NaiveDate::parse_from_str` を候補形式の順に試す。
 
 ### 4.5 結果なしの判定（`errorWhen`）
 
@@ -159,9 +159,9 @@
 
 ## 6. エンジン固有の上限（`limits`）
 
-状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
+状態: 実装完了（REF:src/core/engine.rs, REF:src/usecases/search.rs）
 
-`Limits` は `impl Default` で既定値を持つ。`EngineDef::max_results(global_max)` は `limits.maxResults` / `paging.maxResults` / `search.max_results` の最小値を返し、各 `call_engine` 要求の `limit` は `limits.maxPageSize` で制限する。`requiresApiKey` は `secrets` の解決可否と併せて `engines list` の `available` 列に反映する。
+`Limits` は `impl Default` で既定値を持つ。`EngineDef::max_results(global_max)` は `limits.maxResults` / `paging.maxResults` / `search.max_results` の最小値を返し、各 `call_engine` 要求の `limit` は `limits.maxPageSize` で制限する。`requiresApiKey` は `secrets` の解決可否と併せて `engines list` の `available` 列に反映する（`limits.minIntervalMs` が送信待機に未接続である点と `enabled=false` の検索実行抑止漏れは Issue #55 / #57 で追跡）。
 
 ---
 
@@ -209,20 +209,20 @@
 
 ### 8.2 `engines show <id[@variant]>`
 
-状態: 実装完了（REF:src/core/engine.rs, REF:src/adapters/engine/loader.rs）
+状態: 実装完了（REF:src/usecases/engines.rs, REF:src/ui/commands.rs）
 
-解決済み定義は `EngineDef::resolved()`（既定値を埋めた複製）を `serde_json::to_value` で整形して表示する。`--raw` は `extra` を含む元の JSON を返す。
+テキスト出力は `usecases::engines::describe(&def)` の要約行を表示し、`--raw` または `--json` では `serde_json::to_value(&def)`（`--raw` かつファイル由来なら生 JSON）を `core::secret::redact_json()` で伏字化して出力する。
 
 ### 8.3 `engines validate [<id>...]`
 
-状態: 実装完了（REF:src/usecases/engines.rs）
+状態: 実装完了（REF:src/usecases/engines.rs, REF:src/core/engine.rs）
 
-検証は `src/usecases/engines.rs` に 6 種類のチェック関数を置き、`Vec<Diagnostic>` を返す。セレクタ構文の検査は `scraper::Selector::parse`、JSON パスの検査は `core/extract/jsonpath.rs` のパーサを試す。失敗が 1 件でもあれば終了コード `1`。
+検証は `src/usecases/engines.rs` と `EngineDef::validate`（`src/core/engine.rs`）で行い、`Check` 列を返す。セレクタ構文の検査は `scraper::Selector::parse`、JSON パスの検査は `src/core/extract.rs` 側の構文規則を用いる（`request.body` のテンプレート変数検証漏れは Issue #57 で追跡）。失敗が 1 件でもあれば終了コード `1`。
 
 明示指定された未知の識別子を黙殺せず、`E4002` を含む失敗チェックとして返す。`EngineDef::validate` は `request.method` の GET/POST と、`REF:src/core/template.rs` の `query_encoding` が対応する文字符号化も検査する。`ensure_valid` 経由のロード時にも同じ検証を行う。回帰テストは `REF:tests/m5.rs` と `REF:src/core/engine.rs`。
 
 ### 8.4 `engines test <id[@variant]> --query <q>`
 
-状態: 実装完了（REF:src/ui/render.rs）
+状態: 実装完了（REF:src/usecases/engines.rs, REF:src/ui/commands.rs）
 
-`--dry-run` は `EngineDef::validate()` と `template::prepare` の結果を `usecases::engines::dry_run()` で組み立て、`commands.rs` がテキストまたは JSON で表示する。URL・ヘッダ名・本文の秘匿値を伏せ、`Authorization` / Cookie 類は出自にかかわらずヘッダ名で `***` にする。実送信時は通常の `search` ユースケースを `limit=3` で呼び、クォータ消費を `Reporter` で事前に通知する。
+`--dry-run` は `EngineDef::validate()` と `template::prepare` の結果を `usecases::engines::dry_run()` で組み立て、`commands.rs` がテキストまたは JSON（`diagnostics` イベント）で表示する。URL・ヘッダ名・本文の秘匿値を伏せ、`Authorization` / Cookie 類は出自にかかわらずヘッダ名で `***` にする。実送信時は `usecases::search::run_engine_test` を呼び、`--json` では `search` イベントを出力する。

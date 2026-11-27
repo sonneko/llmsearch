@@ -38,13 +38,13 @@
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`core::model::SearchHit` に仕様のフィールドを持たせる。タイトルとスニペットの切り詰めは `core::text::truncate_chars` を用い、`…` を付す。`site` の導出は `core::url::host_of` が `www.` を 1 回だけ除去する。
+`core::model::SearchHit` に仕様のフィールドを持たせる。`site` の導出は `core::url::host_of` が `www.` を 1 回だけ除去する。`search.titleChars` / `search.snippetChars` による切り詰めは現状 `REF:src/ui/interactive.rs` の対話表示でのみ参照され、非対話出力（`REF:src/ui/render.rs` は端末幅のみで切り詰め）および `--json`・セッション保存値には適用されていない（Issue #55）。
 
 ### 2.2 URL の正規化
 
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
-`core::url::normalize(url, extra_tracking)` が `url::Url` を用いて実施し、スキームとホストを小文字化し、既定ポートを落とし、追跡パラメータ（`core::url::DEFAULT_TRACKING` と `extra_tracking`）を除去する。追跡パラメータの一覧は `App.tracking`（`usecases::config::default_tracking` が `DEFAULT_TRACKING` から作る固定リスト）で、設定キーからは注入しない。フラグメントは保持し、重複判定用のキーは `core::url::dedup_key`（フラグメント除去後の文字列）で作る。
+`core::url::normalize(url, extra_tracking)` が `url::Url` を用いて実施し、スキームとホストを小文字化し、既定ポートを落とし、追跡パラメータ（`core::url::DEFAULT_TRACKING` と `extra_tracking`）を除去する。追跡パラメータの一覧は `App.tracking`（`usecases::config::default_tracking` が `DEFAULT_TRACKING` から作る固定リスト）で、設定キーからは注入しない。フラグメントは保持し、重複判定用のキーは `core::url::dedup_key`（フラグメント除去後の文字列）で作る。なお現状 `REF:src/core/extract.rs` は `absolutize` 変換の指定有無に関わらず相対 URL を `base_url.join` で自動解決し、また `REF:src/core/url.rs` のクエリ秘匿判定が部分一致のため一般語（`author` 等）も伏字化する既知課題がある（Issue #58）。
 
 ### 2.3 重複の除去
 
@@ -100,7 +100,7 @@
 
 `apply_to_session` は page 1 または直近の検索語と異なる結果を新しい `QueryRecord` として `queries` に追加し、`active_query` / `last_query` / `last_engine` を更新する。ページングでは同一クエリの結果を単一の `SessionState.results` に追記し、結果 ID は表示時と同じ値を保存する。クエリごとの別結果スロットは持たず、refine は現在の結果一覧を置き換える。
 
-非対話の `refine` は `commands.rs` が既存セッションの `last_query`（空なら最後の `QueryRecord`）を変更前の検索語として `search::refine` に渡す。新しい検索は page 1 として実行し、`apply_to_session` が現在の `results` を置き換えて `queries` に `QueryRecord` を追加する。`last_query` / `last_engine` / `page` も更新し、履歴には `Search` と `Refine` のイベントを記録する。JSON の `refine` イベントは `previousQuery` を含む。
+非対話の `refine` は `commands.rs` が既存セッションの `last_query`（空なら最後の `QueryRecord`）を変更前の検索語として `search::refine` に渡す。新しい検索は page 1 として実行し、`apply_to_session` が現在の `results` を置き換えて `queries` に `QueryRecord` を追加する。`last_query` / `last_engine` / `page` も更新し、履歴には `Search` と `Refine` のイベントを記録する。JSON の `refine` イベントは `previousQuery` を含む。変更通知 `W4001` は `previous != new_query` のときだけ追加し、同一クエリ再検索時の自己矛盾警告を抑止する（`REF:tests/m16.rs`。ただし `new_query` が正規化前に比較されるため前後空白のみで `W4001` が出る点と履歴要約表示は Issue #58 / #62 で追跡）。
 
 ### 4.2 検索語の履歴
 
@@ -149,7 +149,3 @@ robots.txt の解析は自前の小さな実装（`src/core/robots.rs`）とす�
 状態: 実装完了（REF:src/core/search.rs, REF:src/usecases/search.rs）
 
 クォータは §1.3 の `evaluate_with_preflight` callback が各送信前に `Guard::check` で判定し、成功した操作の全使用量を `Guard::consume_all` で確定する。レート待機は `ReqwestClient::wait_interval` が送信処理内で実施し、`Guard` の責務には含めない。
-
-## M16: 同一クエリの refine（#47）
-
-`refine()` の run・履歴追記は従来どおり実行し、W4001 の追加だけを `previous != new_query` で分岐する。表示文言の変更ではなく偽の変更通知を抑制する。実プロセスで同一セッションの連続 refine を検証し、変更時の JSON 警告と非 quiet stderr も確認する。

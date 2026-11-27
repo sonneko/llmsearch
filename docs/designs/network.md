@@ -16,15 +16,15 @@
 
 ### 1.2 プロファイルの選択順
 
-状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
+状態: 実装完了（REF:src/adapters/config/mod.rs, REF:src/usecases/search.rs）
 
-`usecases::config::network::select(opts, settings, store) -> Result<NetworkProfile>`。エンジン定義が `network` を持つ場合は、そのプロファイルを用いる（設定の既定より優先）。`--verbose` では「どのプロファイルがどの経路で選ばれたか」を表示する。
+起動時の全体プロファイルは `src/adapters/config/mod.rs` の `resolve_network` が `--network` → `LLMSEARCH_NETWORK` → 設定 `network` → `default` の順に解決する。エンジン定義が固有の `network` を持つ場合は検索実行時に `src/usecases/search.rs` の `engine_profile` がそれを優先する（エンジン別プロファイルと `network` サブコマンドでの埋め込み既定・`--state-dir` 対応漏れは Issue #59 で追跡）。
 
 ### 1.3 プロファイルの探索
 
-状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
+状態: 実装完了（REF:src/adapters/config/mod.rs, REF:src/assets.rs）
 
-`adapters::config::layout::network_dirs(config_path) -> Vec<PathBuf>` が 4 経路を返す。同梱既定は `assets/network/*.json` を `include_str!` で埋め込み、`&'static str` として保持する（実行時にファイルシステム上のリポジトリを参照しない）。
+`src/adapters/config/mod.rs` の `resolve_resource_dir` が探索経路を走査し、同梱既定は `assets/network/*.json` を `src/assets.rs` の `include_str!` で埋め込み保持する（実行時にビルド元のリポジトリパスを参照しない）。
 
 `usecases::config::bundled_root(env) -> PathBuf` は同梱アセットの根を次の順で決める（M11）。
 
@@ -66,7 +66,7 @@
 
 再試行は `src/adapters/http.rs` の `ReqwestClient::send_blocking` がループとして実装する（汎用の `retry_with` 関数は持たない）。`send_blocking_with_preflight` 経由の検索は各 transport 試行の直前に callback を呼び、クォータ超過なら追加送信を止める。
 
-- 判定: `retryable(profile, err) -> bool` がエラーコードと `retry.onError` / `retry.onStatus` で決める（`401/403` を表す `E4003` は常に対象）。
+- 判定: `retryable(profile, err) -> bool` がエラーコードと `retry.onError` / `retry.onStatus` で決める（現状 `E4003` を `onStatus` に関わらず再試行対象としている点、および `onError` の `timeout` と `connect` が同一条件に束ねられている点は Issue #58 で追跡）。
 - 待機: `retry_wait(profile, last_error, attempt, jitter) -> u64` が `RetryPolicy::backoff(attempt, jitter)`（`backoffMs * factor^(attempt-1)` を `maxBackoffMs` で頭打ちにし、`jitterMs` の範囲で加算）を呼ぶ。
 - `Retry-After` は秒数と HTTP-date の両方を解釈する（`chrono` 使用）。解釈は `REF:src/core/retry.rs` の `parse_retry_after_ms(value, now)`（純粋関数）に閉じ、日付形式は `RFC 1123`（`%a, %d %b %Y %H:%M:%S GMT`）のみを受理する。解釈できない値は `None` とし、指数バックオフへ戻す。
 - 待機時間は `REF:src/adapters/http.rs` の `send_blocking` が決める。`respectRetryAfter` が真で解釈できた場合はその値をそのまま待ち（揺らぎは加えない）、`maxBackoffMs` を超える場合は再試行を打ち切って `E4003` を返す。値の受け渡しはエラー詳細の文字列解析ではなく `AppError::retry_after_ms`（`REF:src/core/errors.rs`）で行う。
@@ -136,7 +136,7 @@
 
 状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
 
-`core::net::headers::compose(profile, engine, accept) -> HeaderMap` が段階的な合成を 1 か所で行い、禁止ヘッダの検査（`E1004`）もここで行う。`search.language` の `Accept-Language` 補完はエンジン定義の段で行う（`REF:docs/designs/engine-definitions.md` §3.2）ため、プロファイルは `Accept-Language` を設定しない。`NetworkProfile.accept_language` フィールドと `adapters/http.rs` の `Accept-Language` 上書き分岐は M10 で削除した。旧プロファイルに `acceptLanguage` が残っている場合は未知キーとして `W1002` を出す。`reqwest::Client::builder().default_headers()` にはプロファイル分のみを設定し、エンジン固有ヘッダはリクエスト単位で付す（クライアントの再利用で混線しないようにするため）。
+禁止ヘッダの検査は `NetworkProfile::validate()`（`REF:src/core/config/network.rs`）で行い、ヘッダ合成は `ReqwestClient`（`REF:src/adapters/http.rs`）がプロファイル共通ヘッダとリクエスト単位ヘッダを重ねる。`search.language` の `Accept-Language` 補完はエンジン定義の段で行う（`REF:docs/designs/engine-definitions.md` §3.2）ため、プロファイルは `Accept-Language` を設定しない。`NetworkProfile.accept_language` フィールドと `adapters/http.rs` の `Accept-Language` 上書き分岐は M10 で削除した。旧プロファイルに `acceptLanguage` が残っている場合は未知キーとして `W1002` を出す。`reqwest::Client::builder().default_headers()` にはプロファイル分のみを設定し、エンジン固有ヘッダはリクエスト単位で付す（クライアントの再利用で混線しないようにするため）。
 
 `3xx` の扱いは `REF:src/adapters/http.rs` の `send_once` で `status` を見て分岐する（`reqwest` の `Policy::none()` は `manual` と `never` で同じ動きになるため、分岐は自前で行う）。
 
@@ -154,9 +154,9 @@ HTML 中継ページの追従（`<meta http-equiv="refresh">` と JS の locatio
 
 ### 8.1 文字符号化
 
-状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
+状態: 実装完了（REF:src/adapters/extract/mod.rs, REF:src/ports/fetch.rs）
 
-`adapters::http::decode::decode_body(bytes, content_type, profile_charset, html_meta_charset) -> (String, Option<Diagnostic>)` が `encoding_rs` で復号する。順序は仕様のとおり。`U+FFFD` の出現を数え、1 件以上なら警告を返す。
+`src/adapters/extract/mod.rs` の `decode_body` と `src/ports/fetch.rs` の `detect_charset` が `encoding_rs` で復号する。順序は仕様のとおり。`U+FFFD` の出現を検出し、1 件以上なら `W3003` を返す。
 
 ### 8.2 サイズ超過
 
@@ -166,9 +166,9 @@ HTML 中継ページの追従（`<meta http-equiv="refresh">` と JS の locatio
 
 ### 8.3 ステータスの扱い
 
-状態: 実装完了（REF:src/core/config/network.rs, REF:src/adapters/http.rs）
+状態: 実装完了（REF:src/adapters/http.rs）
 
-`adapters::http::status::classify(status, context) -> StatusClass` が仕様の表に従って分類し、`usecases` 側が `AppError` へ写像する。`401/403` をエンジンの `errorWhen` より優先するため、`classify` は抽出より前に呼ぶ。
+`src/adapters/http.rs` の `send_once` が抽出より前に HTTP ステータスを分類して `AppError` へ写像する（`403` / `429` は `E4003`、その他の `4xx`/`5xx` は `E2003`。`401` が `E2003` となっている点は Issue #58 で追跡）。
 
 ### 8.4 ログと秘匿情報
 

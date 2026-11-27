@@ -59,7 +59,7 @@
 | `tls` | 任意 | オブジェクト | TLS の検証方針（§5） |
 | `robots` | 任意 | オブジェクト | robots.txt の扱い（§6） |
 | `charset` | 任意 | 文字列 | 応答の既定文字符号化。省略時は自動判定 |
-| ~~`acceptLanguage`~~ | — | — | 廃止。言語は設定 `search.language` が決める（`configuration.md` §3.2.1）。残っている場合は未知キーとして `W1002` |
+| ~~`acceptLanguage`~~ | — | — | 廃止。言語は設定 `search.language` が決める。残っている場合は未知キーとして `W1002` |
 
 ### 2.2 値の範囲
 
@@ -150,7 +150,7 @@
 1. エンジン定義の `headers`
 2. プロファイルの `headers`（同名なら 1 を上書きする）
 3. プロファイルの `userAgent` / 圧縮
-4. エンジン定義が `Accept-Language` を指定していない場合の `search.language`（`engine-definitions.md` §3.2.1）。この補完はプロファイルの適用より前に行い、エンジン定義が明示した `Accept-Language` を優先する
+4. エンジン定義が `Accept-Language` を指定していない場合の `search.language`（同じ値はリクエストテンプレートの `language` 変数としても利用可能）。この補完はプロファイルの適用より前に行い、エンジン定義が明示した `Accept-Language` を優先する
 5. 本文取得時の `Accept`（HTML 優先）
 
 禁止ヘッダ（`Host`, `Content-Length`, `Connection`, `Transfer-Encoding`）をプロファイルで指定した場合は `E1004` とする。

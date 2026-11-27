@@ -401,3 +401,30 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
   - #50（G1）: `W4006` のクエリ埋込 URL 再帰秘匿化（`REF:src/core/url.rs`）、構文エラー・未展開テンプレート・非 HTTP スキーム URL の `userinfo@` / 秘匿引数マスク（`REF:src/core/secret.rs`）、`RobotsGate` `E2006` 相対パス秘匿引数のマスク（`REF:src/adapters/robots.rs`）、および `markdown::absolutize` での基底 URL 認証情報除去（`REF:src/core/markdown.rs`）。
   - #51（G2）: `REF:src/adapters/engine/eval.rs` での切り詰め前 `redact_body` 適用、JSON body・form body（非秘匿セグメントの `{{query}}` 等は無変換保持）・HTTP ヘッダ行・埋込断片の秘匿化、`Content-Type` / `Retry-After` の秘匿ヘッダパラメータマスク、エンジン定義・ネットワークプロファイルを含む `App::redaction_list` 統一、`engines::describe` 要約 URL 秘匿化、`filters show` への `redact_json` 適用。
 - 検証: `REF:tests/m17.rs`（4 本の実プロセス回帰スイート）および `REF:reports/m17-validation.md`。
+
+### [HIST:MILESTONE:M014] 2026-11-25 M13〜M14（実機監査 Issue #37〜#44 の一括修正）完了（補記） <a id="hist-milestone-m014"></a>
+[HIST-TAG: category=MILESTONE id=M014 topics=m13,m14,paging,session,quota,doctor,cli,pr-45]
+
+- 背景: M18 の同期監査で M13（Issue #37〜#44 起票）および M14（PR #45 マージ済み）のマイルストーン記録が `docs/history.md` に欠落していたため追記する。
+- 対応内容: 次ページ・`--page` の結果識別子整合（#37）、ページ位置と `--limit`・`maxPerHost` 集計（#38）、未知 `--session` の拒否と直近セッション再開（#39）、`<state.dir>/settings.json` 探索と `doctor --no-network` 等の整理（#40）、エラー detail/hint 改善と `lastEngine` 継承（#41）、フッタ・`next` 履歴・トップレベル `engine`・フィルタ camelCase 正規化（#42）、`sessionKey` 維持（#43）、`quota check`・`--color` `W1001` 等の表示改善（#44）を実装し、`REF:tests/m14.rs` で回帰固定した（PR #45）。
+
+### [HIST:MILESTONE:M015] 2026-11-25 M15（M5 棚卸し残課題 Issue #4/#5/#7/#9/#12/#21/#23 の再監査・回帰固定）完了（補記） <a id="hist-milestone-m015"></a>
+[HIST-TAG: category=MILESTONE id=M015 topics=m15,json,warnings,redaction,history,dry-run,pr-46]
+
+- 背景: M18 の同期監査で M15（PR #46 マージ済み）の `MILESTONE` 記録が `docs/history.md` に未追記だったため補記する。
+- 対応内容: 設定解決時・操作中（`Reporter::warn`）の警告を `--quiet` 時も含め JSON イベントへ伝播し、管理系全サブコマンドの `--json` 封筒化、履歴追記・出力および `engines test --dry-run` の秘匿化を補完して `REF:tests/m15.rs` で実プロセス回帰を固定した（PR #46）。
+
+### [HIST:MILESTONE:M016] 2026-11-26 M16（実環境検証フォローアップ #47 / #48）完了（補記） <a id="hist-milestone-m016"></a>
+[HIST-TAG: category=MILESTONE id=M016 topics=m16,refine,w4001,untrusted,json,pr-49]
+
+- 背景: M18 の同期監査で M16（PR #49 マージ済み）の `MILESTONE` 記録が `docs/history.md` に未追記だったため補記する。
+- 対応内容: 同一検索語での `refine` 実行時に自己矛盾する変更通知 `W4001` を抑止（#47）し、JSON の `document` / `content` イベントへ明示的な非信頼境界 `untrusted: true` を追加（#48）。`REF:tests/m16.rs` と `REF:reports/m16-validation.md` で記録した（PR #49）。
+
+### [HIST:MILESTONE:M018] 2026-11-26 M18（ゼロ前提の全量ドキュメント・ソース同期監査）完了 <a id="hist-milestone-m018"></a>
+[HIST-TAG: category=MILESTONE id=M018 topics=m18,audit,docs,sync,designs,specifications,issues-53-64]
+
+- 背景: M17（PR #52）マージ後の `develop`（`0326c1a`）を対象に、過去の監査結果を前提とせず全仕様書 15 本・全設計書 15 本・トップレベル文書（`REF:README.md`・`REF:docs/developers.md`・`REF:docs/plans.md`・`REF:docs/handoff.md`・`REF:docs/history.md`）と `src/`・`tests/`・`assets/`・`scripts/`・`build.rs`・CI ワークフローを全行照合し、`127.0.0.1` ループバック HTTP スタブ＋実バイナリ実行で全項目を実証した（外部サイト接続ゼロ）。
+- 起票 Issue（#53〜#64）:
+  - 文書同期（M18 で解消）: #53（トップレベル文書の誤記・カスタムエンジン JSON 例・M14〜M17 記録漏れ・仕様書内の生注記／他ファイル参照）、#54（全 15 設計書の架空モジュールパス・存在しない型名・古い実装説明の是正）、および #64 のイベント対応表同期分。
+  - M19 実装・仕様課題（`src/` 無変更で継続追跡）: #55（`cache.searchResults` 未実装・非対話 `titleChars`/`snippetChars` 未適用・未接続フィールド群）、#56（未発行エラーコード 5 件・`W4002` 引数逆転・`doctor` の GET 送信と `rustc rustc` 重複表記）、#57（`request.encoding` 破棄・`enabled=false` 無視・`request.body` 変数未検証・`{{apiKey}}` 未配線）、#58（HTTP `401` の `E2003` 化・`403` 無条件再試行・相対 URL 自動解決・URL クエリ秘匿の部分一致誤爆・`refine` 空白比較）、#59（`network`/`filters` の埋め込み既定・`--state-dir` 非対応・起動時検証スルー・`schemaVersion` 未検査）、#60（文書キャッシュ無効化無視・`~~~` フェンス閉じ誤り・`#hashtag` 見出し誤認・画像 `alt` 保持・`read` オプション無視）、#61（`onExceed="warn"` の常時誤警告・`quota check --kind` 値域・`quota reset` 空セッション ID）、#62（`history clear` の `--before` 無視による全件消去・削除件数 0 固定・`export` 200 件上限と Markdown 秘匿漏れ・永続化パス差分）、#63（対話モード `stdout` 出力違反・ページ送り無視・`4) Edit the query` 挙動）、#64 の `omittedChildren` 出力漏れ。
+- 検証と記録: `REF:reports/m18-validation.md`、`python3 docs/script/verify-docs.py`、`bash scripts/verify.sh --quick`。

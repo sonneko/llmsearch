@@ -6,15 +6,15 @@
 
 ## 1. 起動とモード
 
-状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
+状態: 実装完了（REF:src/main.rs, REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グローバルオプション）と `Command`（サブコマンドの列挙）を置き、`main.rs` は `Cli::parse()` → `app::run(cli)` の 2 行のみとする。
+CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グローバルオプション）と `Command`（サブコマンドの列挙）を置き、`src/main.rs` が引数解析・`Bootstrap` 構築・秘匿値登録・非対話／対話モードへの振り分けと終了コード反映を担う。
 
 ### 1.1 起動形態
 
-状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
+状態: 実装完了（REF:src/main.rs, REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-`Command::None` の場合は `main.rs` の `run_interactive` が `ui::interactive::Interactive::run` を回し、それ以外は `ui::commands::run` へ分岐する。両者は同一の `usecases` 関数を呼ぶ。
+サブコマンド省略時は `src/main.rs` が TTY 検査のうえで `ui::interactive::Interactive::run` を回し、サブコマンド指定時は `ui::commands::run` へ分岐する（現状、対話モードの出力先として `std::io::stdout()` を渡している点は仕様 §1.2 との乖離として Issue #63 で追跡）。両者は同一の `usecases` 関数を呼ぶ。
 
 ### 1.2 モード判定
 
@@ -50,7 +50,7 @@ CLI は `clap` の derive API で定義する。`src/ui/cli.rs` に `Cli`（グ�
 
 状態: 実装完了（REF:src/ui/cli.rs, REF:src/ui/interactive.rs）
 
-取得済みの文書からアウトラインを描画する。深度変更（メニュー 3）は `session.outline_depth` を更新して同じ文書から再描画し、`usecases::document::fetch` を再度呼ばない。メニュー 5 は `history_uc::list` の先頭 10 件を `Renderer::history_line` で表示する。
+取得済みの文書からアウトラインを描画する。深度変更（メニュー 3）は `session.outline_depth` を更新して同じ文書から再描画し、`usecases::document::fetch` を再度呼ばない。メニュー 5 は `history_uc::list` の先頭 20 件を `Renderer::history_line` で表示する（対話モードのページ送り開始位置・`4) Edit the query` 等の既知課題は Issue #63 で追跡）。
 
 ### 2.4 節本文の表示形式
 

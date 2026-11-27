@@ -53,8 +53,8 @@ JSON の本文フィールドは `context.maxChars` に従う。出力サイズ�
 | `engine` | `id`, `variant`, `kind`, `definition`（`engines show`） |
 | `network` | `ids[]`, `active`（一覧）／`id`, `path`, `definition`（`network show`） |
 | `filters` | `ids[]`, `active`（一覧）／`id`, `path`, `definition`（`filters show`） |
-| `config` | `values[]`（`config show`）／`key`, `value`, `origin`（`config explain`）／`paths[]`（`config path`） |
-| `diagnostics` | `checks[]`（`engines validate`, `engines test`, `network validate`, `filters validate`, `config validate`, `doctor`） |
+| `config` | `values[]`（`config show`）／`key`, `value`, `origin`, `source`（`config explain`）／`paths[]`（`config path`）／`written[]`, `skipped[]`（`config init`） |
+| `diagnostics` | `checks[]`（`engines validate`, `engines test --dry-run`, `network validate`, `filters validate`, `config validate`, `doctor`。なお `--dry-run` を付けない実通信の `engines test` は `search` イベントを出力する） |
 | `quota` | `metrics[]`, `policy`, `kind`, `amount`, `allowed`（`quota check`。許可時は `usage[]` も含む）／`action`, `scope`（`quota reset`） |
 | `history` | `entries[]`, `total`（`history list` / `show` / `grep` / `export`）／`removed`（`history clear`） |
 | `warnings` | `warnings[]`（`warnings[]` を持たない次イベントへ結び付く設定・操作警告、または独立した `--color --json` の `W1001`。操作警告は `--quiet` でも保持し、`W1001` は `--quiet` 時に抑制） |

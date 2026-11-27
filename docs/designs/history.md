@@ -64,15 +64,15 @@
 
 ### 3.1 再出力・再実行の位置づけ
 
-状態: 未実装・未計画（`plans.md` §7 に記載）
+状態: 未実装・未計画（REF:docs/plans.md#unplanned）
 
 `history show` は表示のみを行い、`--rerun` や本文の再出力は提供しない（`REF:src/ui/commands.rs` の `run_history`。`REF:tests/m9.rs` で `--previous` と併せて未提供を確認している）。節の再出力は `read` レコードの `payload.document` / `payload.section` をそのまま `read` に渡す経路で代替する。
 
 ### 3.2 エクスポート
 
-状態: 実装完了（REF:src/ui/render.rs）
+状態: 実装完了（REF:src/ui/commands.rs, REF:src/core/history.rs）
 
-Markdown は `src/core/history.rs` の `export_markdown(&[HistoryEntry])` が組み立てる（`REF:src/usecases/history.rs` の `export` が新しい順の一覧を古い順へ直してから渡す）。テキストの JSON Lines は各エントリを `Renderer::redacted_value()` で伏字化してから `serde_json::to_string` で 1 行ずつ出す。`--json` のときは形式にかかわらず `history` イベント（`entries[]` / `total`）へ包み、生テキストを標準出力へ出さない（`REF:src/ui/commands.rs` の `run_history`）。
+Markdown は `src/core/history.rs` の `export_markdown(&[HistoryEntry])` が組み立て、`REF:src/ui/commands.rs` の `HistoryAction::Export` が新しい順の一覧を古い順へ反転して渡す（件数上限 200 ハードコードおよび非 `--json` Markdown 出力での伏字化漏れは Issue #62 で追跡）。テキストの JSON Lines は各エントリを `Renderer::redacted_value()` で伏字化してから `serde_json::to_string` で 1 行ずつ出す。`--json` のときは形式にかかわらず `history` イベント（`entries[]` / `total`）へ包み、生テキストを標準出力へ出さない。
 
 ---
 
@@ -94,9 +94,9 @@ Markdown は `src/core/history.rs` の `export_markdown(&[HistoryEntry])` が組
 
 ### 4.3 削除
 
-状態: 実装完了（REF:src/core/history.rs, REF:src/adapters/state/history_jsonl.rs）
+状態: 実装中（REF:src/ui/commands.rs, REF:src/adapters/state/history_jsonl.rs）
 
-全削除は確認入力または `--yes` を要し、削除前に件数を表示する。削除後に空ファイルを作成し、`delete` イベントを 1 件だけ記録する。
+`history clear` は `--yes` を必須とし、未指定時は `E1004` を返す。削除後は空ファイルを作成して `delete` イベントを 1 件記録する。なお現状 `--before` が無視されて全件消去となる不具合および `JsonlHistory::clear` が削除件数として常に `0` を返す不具合、`EventType::Refine` 要約や未発行イベント種別（`engine` / `config`）は Issue #62 で追跡する。
 
 ### 4.4 記録の整合性
 

@@ -112,9 +112,9 @@ robots.txt の判定（`REF:src/adapters/robots.rs`）は `send_blocking` の直
 
 ### 4.2 有効期限
 
-状態: 実装完了（REF:src/adapters/extract/mod.rs, REF:src/core/convert.rs）
+状態: 実装中（REF:src/core/convert.rs, REF:src/usecases/document.rs）
 
-`expires_at` は `REF:src/core/convert.rs` の `build_meta` が `fetched_at + ttlHours` で作る。`REF:src/adapters/extract/mod.rs` の `load_cached` が `expires_at` と現在時刻を比べ、期限切れ・`ttlHours == 0`・`--refresh`・`--no-cache` のいずれかなら再取得する。
+`expires_at` は `REF:src/core/convert.rs` の `build_meta` が `fetched_at + ttlHours` で作る。なお読込側（`REF:src/usecases/document.rs` の `load`）で `expires_at`・`--no-cache`・`cache.enabled=false` の再取得判定が抜けており、画像 `alt` 保持等とあわせて Issue #60 で追跡する。
 
 ### 4.3 無効化
 

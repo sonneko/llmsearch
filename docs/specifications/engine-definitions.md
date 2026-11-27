@@ -84,7 +84,7 @@
 | `apiKey` | 認証情報の値（`value_env` で解決済み）。ヘッダ・クエリの双方で使用可 |
 | `dateFrom` / `dateTo` | 日付指定（`YYYY-MM-DD`）。未指定時は空文字 |
 
-`language` は設定 `search.language`（`configuration.md` §3.2.1）の値で、定義やプロファイルでは上書きできない。`request.headers` に `Accept-Language` が無い場合は `Accept-Language: {{language}}` を付したものとして扱う（定義側で明示した値を優先し、`q` 値は付けない）。ネットワークプロファイルは `Accept-Language` を設定しない（`network.md` §7）。言語パラメータの名前がエンジンごとに異なる（Brave は `search_lang`、SearXNG は `language`）ため、定義側で変数名を対応づける。DuckDuckGo の `kl` は地域と言語の固定対しか取れないため同梱定義では使わず、`Accept-Language` で言語を届ける（`configuration.md` §3.2.1）。
+`language` は設定 `search.language` の値で、定義やプロファイルでは上書きできない。`request.headers` に `Accept-Language` が無い場合は `Accept-Language: {{language}}` を付したものとして扱う（定義側で明示した値を優先し、`q` 値は付けない）。ネットワークプロファイルの既定のヘッダには `Accept-Language` を含めない。言語パラメータの名前がエンジンごとに異なる（Brave は `search_lang`、SearXNG は `language`）ため、定義側で変数名を対応づける。DuckDuckGo の `kl` は地域と言語の固定対しか取れないため同梱定義では使わず、`Accept-Language` で言語を届ける（言語は設定 `search.language` が決める）。
 
 ### 3.3 認証情報の参照
 
@@ -93,7 +93,7 @@
 - `{"value_env": "SEARXNG_TOKEN"}` : 環境変数の値を展開する。
 - `{"value": "fixed"}` : 固定値。API キー以外の用途に限定する。
 
-`value_env` が指す環境変数が未設定の場合、そのエンジンは「利用不可」と判定し、選択時に `E4002` を返す。値そのものはログ・履歴・`engines list` に表示しない。`engines show` の要約・JSON・`--raw` 表示と `engines test --dry-run` でも、解決済みの秘匿値と定義に直接書かれた固定値を表示しない。dry-run の `request.url` / `request.headers` / `request.body` を伏せ、認証ヘッダは値の出自にかかわらずヘッダ名で判定する（`agent-integration.md` §4.2）。
+`value_env` が指す環境変数が未設定の場合、そのエンジンは「利用不可」と判定し、選択時に `E4002` を返す。値そのものはログ・履歴・`engines list` に表示しない。`engines show` の要約・JSON・`--raw` 表示と `engines test --dry-run` でも、解決済みの秘匿値と定義に直接書かれた固定値を表示しない。dry-run の `request.url` / `request.headers` / `request.body` を伏せ、認証ヘッダは値の出自にかかわらずヘッダ名で判定する（秘匿の扱いはすべての表示境界で共通）。
 
 ### 3.4 送信前の検証
 
