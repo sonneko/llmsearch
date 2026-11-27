@@ -66,9 +66,12 @@ impl RobotsGate {
         };
         let path = request_path(url);
         if rules.verdict(&profile.robots.user_agent_token, &path) == Verdict::Deny {
+            let shown_path = Url::parse(&crate::core::url::redact(url, &self.secrets))
+                .map(|redacted| request_path(&redacted))
+                .unwrap_or_else(|_| crate::core::secret::redact_display_text(&path, &self.secrets));
             return Err(AppError::with_detail(
                 ErrorCode::E2006,
-                format!("robots.txt on {origin} disallows {path}"),
+                format!("robots.txt on {origin} disallows {shown_path}"),
             )
             .hint("choose another URL, or check `network.robots.respect`"));
         }
@@ -81,7 +84,8 @@ impl RobotsGate {
             Ok(url) => url,
             Err(_) => return self.on_fetch_failure(profile, origin, "cannot build the URL"),
         };
-        let request = HttpRequest::get(robots_url);
+        let mut request = HttpRequest::get(robots_url);
+        request.secrets = self.secrets.clone();
         let now = self.clock.now_utc();
         match self.client.send_blocking(profile, &request) {
             Ok(response) => {
@@ -105,7 +109,7 @@ impl RobotsGate {
         origin: &str,
         reason: &str,
     ) -> Result<Robots, AppError> {
-        let reason = crate::core::secret::redact_text(reason, &self.secrets);
+        let reason = crate::core::secret::redact_display_text(reason, &self.secrets);
         if profile.robots.on_error.trim().eq_ignore_ascii_case("deny") {
             return Err(AppError::with_detail(
                 ErrorCode::E2006,

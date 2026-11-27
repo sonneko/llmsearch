@@ -40,9 +40,9 @@ HTML→Markdown の性質（見出し・リスト・表・コードブロック�
 
 ### 1.6 安全性の受入基準
 
-状態: 実装完了（REF:tests/integration.rs, REF:tests/m9.rs, REF:src/ui/render.rs）
+状態: 実装完了（REF:tests/integration.rs, REF:tests/m9.rs, REF:tests/m17.rs, REF:src/ui/render.rs）
 
-出所ヘッダと `[untrusted]` マーカーの付与、および本文中のマーカー様行の無害化は `REF:src/ui/render.rs` の単体テストが検証する。`TmplValue::Explicit` と `value_env` を使う自作エンジン定義で `engines show`（要約・JSON・`--raw`）/ `engines test --dry-run`（URL・ヘッダ・本文）/検索結果 URL / fetch・search 履歴 / HTTP エラー詳細を検査し、標準出力・標準エラー・履歴に値が残らないことを `REF:tests/m15.rs` で実プロセス確認する。HTTP は OS 割り当てポートの `127.0.0.1` ローカルスタブを使い、実サイトには接続しない。robots.txt はモック応答で検証する。
+出所ヘッダと `[untrusted]` マーカーの付与、および本文中のマーカー様行の無害化は `REF:src/ui/render.rs` の単体テストが検証する。`TmplValue::Explicit` と `value_env` を使う自作エンジン定義で `engines show`（要約・JSON・`--raw`）/ `engines test --dry-run`（URL・ヘッダ・本文）/検索結果 URL / fetch・search 履歴 / HTTP エラー詳細を検査し、標準出力・標準エラー・履歴に値が残らないことを `REF:tests/m15.rs` で実プロセス確認する。さらに M17（#50, #51）では URL userinfo（成功系・リダイレクト・埋込 URL・不正/非 HTTP URL・robots 拒否）および応答ヘッダ・JSON body・form body・テンプレート保持の実プロセス回帰を `REF:tests/m17.rs` の `127.0.0.1` ループバックスタブで検証する。HTTP は OS 割り当てポートの `127.0.0.1` ローカルスタブを使い、実サイトには接続しない。robots.txt はモック応答で検証する。
 
 ---
 
@@ -58,7 +58,7 @@ HTML→Markdown の性質（見出し・リスト・表・コードブロック�
 |---|---|---|
 | 単体テスト | `src/**` の `#[cfg(test)] mod tests` | `cargo test --lib` |
 | 結合テスト・契約テスト | `REF:tests/integration.rs`, `REF:tests/contract.rs`, `REF:tests/assets.rs` | `cargo test --test integration --test contract --test assets` |
-| マイルストーン別の回帰 | `REF:tests/m5.rs`, `REF:tests/m6.rs`, `REF:tests/m7.rs`, `REF:tests/m8.rs`, `REF:tests/m9.rs`, `REF:tests/m10.rs`, `REF:tests/m11.rs`, `REF:tests/m15.rs` | `cargo test --test m5` など（M15 は `cargo test --test m15`） |
+| マイルストーン別の回帰 | `REF:tests/m5.rs`, `REF:tests/m6.rs`, `REF:tests/m7.rs`, `REF:tests/m8.rs`, `REF:tests/m9.rs`, `REF:tests/m10.rs`, `REF:tests/m11.rs`, `REF:tests/m15.rs`, `REF:tests/m16.rs`, `REF:tests/m17.rs` | `cargo test --test m5` など（M17 は `cargo test --test m17`） |
 | アーキテクチャ検査 | `REF:tests/architecture.rs` | `cargo test --test architecture` |
 | ネットワーク・TLS・プロキシ | `REF:tests/proxy.rs`, `REF:tests/tls.rs`（証明書は `REF:tests/fixtures/tls/`） | `cargo test --test proxy --test tls` |
 | E2E テスト | `REF:tests/e2e.rs` | 既定では起動と決定論性のみ。実ネットワークは `LLMSEARCH_E2E_LIVE=1` |

@@ -392,3 +392,12 @@ grep -n -i '\[HIST-TAG:.*topics=.*<keyword>' docs/history.md
 - 決定: 未使用コード `HistoryStore::skipped_lines` と `JsonlHistory::skipped` を削除した。`W5004` を発行する実装（挙動追加）は行わず、不正行は黙って読み飛ばす。`E2007` は仕様どおり「初期リリースでは発行しない」ため定義を残す。
 - 整理: `docs/plans.md` §2 の完了マイルストーン詳細を `REF:docs/history.md` の `MILESTONE:M005`〜`M009` へ移し、`plans.md` は要約とアンカーだけにした（設計書の `状態:` 行が参照するアンカーは維持）。あわせて `docs/designs/configuration.md` §1.1 の重複段落を削除した。
 - 検査: `python3 docs/script/verify-docs.py`、`bash scripts/verify.sh --quick`、`cargo test --locked --all-targets`、`cargo clippy --all-targets -- -D warnings`、実バイナリでの再測（`--help` 全画面、`config show` / `config explain` / `quota show` / `quota check` / `history` / `history export` / `engines show --raw` / `engines test` / 対話メニュー、ローカル HTTP スタブでの検索・outline・read・秘匿値の伏字化）。
+
+### [HIST:MILESTONE:M017] 2026-11-26 M17（M5 秘匿機能のローカルスタブ検証と修正）実装完了 <a id="hist-milestone-m017"></a>
+[HIST-TAG: category=MILESTONE id=M017 topics=m17,redaction,userinfo,headers,json-body,form-body,robots]
+
+- 背景: Muse のローカル検証（`develop` `5db4708`、2026-11-26）で未確認だった G1（URL userinfo 成功系を含む秘匿）と G2（ヘッダ・JSON body・form body の秘匿と過剰マスク有無）を `127.0.0.1` ループバック HTTP スタブと実バイナリで網羅検証した（外部サイトへの接続なし）。
+- 起票と修正:
+  - #50（G1）: `W4006` のクエリ埋込 URL 再帰秘匿化（`REF:src/core/url.rs`）、構文エラー・未展開テンプレート・非 HTTP スキーム URL の `userinfo@` / 秘匿引数マスク（`REF:src/core/secret.rs`）、`RobotsGate` `E2006` 相対パス秘匿引数のマスク（`REF:src/adapters/robots.rs`）、および `markdown::absolutize` での基底 URL 認証情報除去（`REF:src/core/markdown.rs`）。
+  - #51（G2）: `REF:src/adapters/engine/eval.rs` での切り詰め前 `redact_body` 適用、JSON body・form body（非秘匿セグメントの `{{query}}` 等は無変換保持）・HTTP ヘッダ行・埋込断片の秘匿化、`Content-Type` / `Retry-After` の秘匿ヘッダパラメータマスク、エンジン定義・ネットワークプロファイルを含む `App::redaction_list` 統一、`engines::describe` 要約 URL 秘匿化、`filters show` への `redact_json` 適用。
+- 検証: `REF:tests/m17.rs`（4 本の実プロセス回帰スイート）および `REF:reports/m17-validation.md`。

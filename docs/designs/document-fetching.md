@@ -76,9 +76,9 @@ robots.txt の判定（`REF:src/adapters/robots.rs`）は `send_blocking` の直
 
 ### 3.1 変換規則
 
-状態: 実装完了（REF:src/adapters/extract/mod.rs, REF:src/core/convert.rs）
+状態: 実装完了（REF:src/adapters/extract/mod.rs, REF:src/core/convert.rs, REF:src/core/markdown.rs）
 
-`htmd` の既定変換を用い、後処理は行わない。リンクの絶対化は `REF:src/core/markdown.rs` の `absolutize(md, base)` が `[text](url)` / `![alt](url)` を正規表現で書き換える。`javascript:` のリンクは空文字へ、`data:` のリンクは URL を空にし、`#` / `mailto:` はそのまま残す。`<` 自動リンク記法は対象外。
+`htmd` の既定変換を用い、後処理は行わない。リンクの絶対化は `REF:src/core/markdown.rs` の `absolutize(md, base)` が基底 URL のクローンから `username` / `password` を空にしたうえで `[text](url)` / `![alt](url)` を正規表現で書き換え、リダイレクト先 URL 等に含まれる認証情報が相対リンクやキャッシュ本文（`body.md`）へ伝播しないようにする。`javascript:` のリンクは空文字へ、`data:` のリンクは URL を空にし、`#` / `mailto:` はそのまま残す。`<` 自動リンク記法は対象外。
 
 ### 3.2 見出しの同一性
 

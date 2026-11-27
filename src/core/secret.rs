@@ -75,18 +75,71 @@ pub fn redaction_list(secrets: &Secrets) -> Vec<String> {
         .collect()
 }
 
-/// 環境 secret に加え、エンジン定義の固定 `TmplValue::Explicit` も伏字化対象にする。
+/// 環境 secret に加え、エンジン定義の固定 `TmplValue::Explicit` および秘匿名の
+/// ヘッダ・クエリ固定値も伏字化対象にする。
 pub fn redaction_list_for_engines(
     secrets: &Secrets,
     engines: &crate::core::engine::EngineRegistry,
 ) -> Vec<String> {
     let mut values = redaction_list(secrets);
     for definition in engines.all() {
-        if let Ok(value) = serde_json::to_value(definition) {
-            collect_explicit_values(&value, &mut values);
-        }
+        collect_engine_secrets(definition, &mut values);
     }
     values
+}
+
+/// 環境 secret・エンジン定義・ネットワークプロファイルの固定秘匿値を集約する。
+pub fn redaction_list_for_app(
+    secrets: &Secrets,
+    engines: &crate::core::engine::EngineRegistry,
+    network: &crate::core::config::NetworkProfile,
+) -> Vec<String> {
+    let mut values = redaction_list_for_engines(secrets, engines);
+    collect_network_secrets(network, &mut values);
+    values
+}
+
+/// 単一のエンジン定義から固定秘匿値を抽出して追加する。
+pub fn collect_engine_secrets(
+    definition: &crate::core::engine::EngineDef,
+    secrets: &mut Vec<String>,
+) {
+    if let Ok(value) = serde_json::to_value(definition) {
+        collect_explicit_values(&value, secrets);
+    }
+}
+
+/// ネットワークプロファイルから秘匿ヘッダ値・平文プロキシ認証値を抽出して追加する。
+pub fn collect_network_secrets(
+    network: &crate::core::config::NetworkProfile,
+    secrets: &mut Vec<String>,
+) {
+    if let Ok(value) = serde_json::to_value(network) {
+        collect_explicit_values(&value, secrets);
+    }
+}
+
+fn push_secret_candidate(secrets: &mut Vec<String>, raw: &str) {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "***" || trimmed.contains("{{") {
+        return;
+    }
+    if trimmed.chars().count() >= 4 && !secrets.iter().any(|s| s == trimmed) {
+        secrets.push(trimmed.to_string());
+    }
+    if let Some((scheme, token)) = trimmed.split_once(char::is_whitespace) {
+        let token = token.trim();
+        if matches!(
+            scheme.to_ascii_lowercase().as_str(),
+            "bearer" | "basic" | "token" | "apikey" | "digest"
+        ) && token != "***"
+            && !token.contains("{{")
+            && token.chars().count() >= 4
+            && !secrets.iter().any(|s| s == token)
+        {
+            secrets.push(token.to_string());
+        }
+    }
 }
 
 /// 文字列に含まれる既知の秘匿値を `***` に置換する。
@@ -142,16 +195,16 @@ pub fn redact_text(text: &str, secrets: &[String]) -> String {
     out
 }
 
-/// 表示用の文字列を伏字化する。既知の値に加え、文中に埋め込まれた URL の
-/// userinfo と秘匿 query/path パラメータも `core::url::redact` で処理する。
+/// 表示用の文字列を伏字化する。既知の値に加え、文中に埋め込まれた URL（任意スキームおよび
+/// 構文エラー・未展開テンプレートを含む URL 様トークン）の userinfo と秘匿 query/path
+/// パラメータも `core::url::redact_url_str` で処理する。
 pub fn redact_display_text(text: &str, secrets: &[String]) -> String {
     let text = redact_text(text, secrets);
-    let lower = text.to_ascii_lowercase();
     let mut cursor = 0;
     let mut output = String::with_capacity(text.len());
 
-    while let Some(start) = find_http_url(&lower[cursor..]) {
-        let start = cursor + start;
+    while let Some(rel_start) = find_scheme_url(&text[cursor..]) {
+        let start = cursor + rel_start;
         output.push_str(&text[cursor..start]);
         let rest = &text[start..];
         let end = rest
@@ -162,88 +215,380 @@ pub fn redact_display_text(text: &str, secrets: &[String]) -> String {
             .map(|(index, _)| index)
             .unwrap_or(rest.len());
         let matched = &rest[..end];
-        // `]` is a valid closing delimiter for an IPv6 literal; trimming it would
-        // make the URL unparsable and could leave embedded userinfo exposed.
-        let candidate = matched.trim_end_matches(|ch: char| {
-            matches!(ch, '.' | ',' | ';' | ':' | '!' | '?' | ')' | '}')
-        });
+        let candidate = trim_url_candidate(matched);
         let suffix = &matched[candidate.len()..];
 
-        match url::Url::parse(candidate) {
-            Ok(parsed) if matches!(parsed.scheme(), "http" | "https") => {
-                output.push_str(&crate::core::url::redact(&parsed, secrets));
-                output.push_str(suffix);
-            }
-            _ => output.push_str(matched),
-        }
+        output.push_str(&crate::core::url::redact_url_str(candidate, secrets));
+        output.push_str(suffix);
         cursor = start + end;
     }
     output.push_str(&text[cursor..]);
     output
 }
 
-fn find_http_url(text: &str) -> Option<usize> {
-    let https = text.find("https://");
-    let http = text.find("http://");
-    match (https, http) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (Some(index), None) | (None, Some(index)) => Some(index),
-        (None, None) => None,
+fn find_scheme_url(text: &str) -> Option<usize> {
+    let bytes = text.as_bytes();
+    let mut search_from = 0;
+    while let Some(rel_colon) = text.get(search_from..).and_then(|s| s.find("://")) {
+        let colon_pos = search_from + rel_colon;
+        let mut scheme_start = colon_pos;
+        while scheme_start > search_from {
+            let prev = bytes[scheme_start - 1];
+            if prev.is_ascii_alphanumeric() || matches!(prev, b'+' | b'-' | b'.') {
+                scheme_start -= 1;
+            } else {
+                break;
+            }
+        }
+        if crate::core::url::is_valid_scheme(&text[scheme_start..colon_pos]) {
+            return Some(scheme_start);
+        }
+        search_from = colon_pos + 3;
     }
+    None
 }
 
-/// URL エンコードした form body を認識して、秘匿パラメータと既知の値を伏せる。
-/// JSON body は秘匿フィールド名を再帰的に検査する。その他の body には既知値と
-/// 文中 URL の伏字化を適用する。
+/// 文末の句読点や外側の閉じ括弧だけを URL トークン末尾から切り離す。
+/// IPv6 リテラルの `]` やテンプレート変数 `{{...}}` の `}` は内側と釣り合っている限り残す。
+fn trim_url_candidate(matched: &str) -> &str {
+    let mut cur = matched;
+    while let Some(ch) = cur.chars().next_back() {
+        let strip = match ch {
+            '.' | ',' | ';' | '!' | '?' => true,
+            ':' => !cur.ends_with("://"),
+            ')' => cur.matches('(').count() < cur.matches(')').count(),
+            '}' => cur.matches('{').count() < cur.matches('}').count(),
+            _ => false,
+        };
+        if strip {
+            cur = &cur[..cur.len() - ch.len_utf8()];
+        } else {
+            break;
+        }
+    }
+    cur
+}
+
+/// `Content-Type` や `Retry-After` など応答ヘッダ値に含まれる `; token=...` 等の
+/// 秘匿パラメータと URL・既知秘匿値を伏せる（非秘匿の `charset=utf-8` 等は保持）。
+pub fn redact_header_params(header_value: &str, secrets: &[String]) -> String {
+    let text = redact_display_text(header_value, secrets);
+    if !text.contains('=') {
+        return text;
+    }
+    let mut changed = false;
+    let parts: Vec<String> = text
+        .split(';')
+        .map(|part| {
+            let trimmed_start = part.trim_start();
+            let leading = &part[..part.len() - trimmed_start.len()];
+            let trimmed = trimmed_start.trim_end();
+            let trailing = &trimmed_start[trimmed.len()..];
+            if let Some((name, val)) = trimmed.split_once('=') {
+                let clean_name = name.trim();
+                let clean_val = val.trim().trim_matches(['"', '\'']);
+                if !clean_name.is_empty()
+                    && !clean_val.is_empty()
+                    && clean_val != "***"
+                    && !clean_name.contains('/')
+                    && !clean_name.contains(' ')
+                    && crate::core::url::is_sensitive_param_name(clean_name)
+                {
+                    changed = true;
+                    return format!("{leading}{clean_name}=***{trailing}");
+                }
+            }
+            part.to_string()
+        })
+        .collect();
+    if changed { parts.join(";") } else { text }
+}
+
+/// URL エンコードした form body、JSON body、HTTP ヘッダ行、および非構造テキスト中の
+/// 埋込 JSON / key=value 秘匿フィールドを伏せる。非秘匿フィールドや `{{query}}` 等の
+/// テンプレート記法は変質させずに保持する。
 pub fn redact_body(body: &str, secrets: &[String]) -> String {
-    let text = redact_display_text(body, secrets);
-    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) {
+    let raw_trimmed = body.trim();
+    if (raw_trimmed.starts_with('{') || raw_trimmed.starts_with('['))
+        && let Ok(mut value) = serde_json::from_str::<serde_json::Value>(raw_trimmed)
+    {
         let before = value.clone();
         redact_json_output(&mut value, secrets);
         return if value == before {
-            text
+            redact_display_text(body, secrets)
         } else {
-            serde_json::to_string(&value).unwrap_or(text)
+            serde_json::to_string(&value)
+                .unwrap_or_else(|_| redact_unstructured_body(body, secrets))
         };
     }
 
-    let trimmed = text.trim();
-    if !trimmed.is_empty()
-        && trimmed.contains('=')
-        && trimmed.split('&').all(|part| part.contains('='))
-    {
-        let pairs: Vec<(String, String)> = url::form_urlencoded::parse(trimmed.as_bytes())
-            .map(|(name, value)| (name.into_owned(), value.into_owned()))
-            .collect();
-        let mut changed = false;
-        let safe_pairs: Vec<(String, String)> = pairs
-            .into_iter()
-            .map(|(name, value)| {
-                let secret_value = secrets
-                    .iter()
-                    .any(|secret| secret.chars().count() >= 4 && value.contains(secret.as_str()));
-                let sensitive_name = crate::core::url::is_sensitive_param_name(&name);
-                if (secret_value || sensitive_name) && value != "***" {
-                    changed = true;
-                    (name, "***".to_string())
-                } else {
-                    (name, value)
-                }
-            })
-            .collect();
-        if changed {
-            let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-            for (name, value) in safe_pairs {
-                serializer.append_pair(&name, &value);
-            }
-            return serializer.finish();
-        }
+    if is_form_urlencoded_body(raw_trimmed) {
+        let leading_len = body.len() - body.trim_start().len();
+        let trailing_start = leading_len + raw_trimmed.len();
+        let redacted_form = redact_form_urlencoded(raw_trimmed, secrets);
+        return format!(
+            "{}{}{}",
+            &body[..leading_len],
+            redacted_form,
+            &body[trailing_start..]
+        );
     }
-    text
+
+    redact_unstructured_body(body, secrets)
 }
 
-/// JSON 定義内の固定 `{"value": ...}` を伏せるため、値を redaction list に加える。
-/// 短い値は誤爆防止のため対象外にし、既存値の重複も除く。
+fn is_form_urlencoded_body(trimmed: &str) -> bool {
+    !trimmed.is_empty()
+        && !trimmed.contains('\n')
+        && !trimmed.contains('\r')
+        && !trimmed.contains('<')
+        && trimmed.contains('=')
+        && trimmed.split('&').all(|part| {
+            let Some((name, _)) = part.split_once('=') else {
+                return false;
+            };
+            !name.is_empty()
+                && name
+                    .bytes()
+                    .all(|b| !b.is_ascii_whitespace() && !matches!(b, b':' | b'{' | b'}' | b'"'))
+        })
+}
+
+fn redact_form_urlencoded(trimmed: &str, secrets: &[String]) -> String {
+    trimmed
+        .split('&')
+        .map(|seg| {
+            let Some((raw_name, raw_val)) = seg.split_once('=') else {
+                return redact_display_text(seg, secrets);
+            };
+            let (decoded_name, decoded_val) = url::form_urlencoded::parse(seg.as_bytes())
+                .next()
+                .map(|(n, v)| (n.into_owned(), v.into_owned()))
+                .unwrap_or_else(|| (raw_name.to_string(), raw_val.to_string()));
+            let secret_value = secrets.iter().any(|secret| {
+                secret.chars().count() >= 4
+                    && (raw_val.contains(secret.as_str()) || decoded_val.contains(secret.as_str()))
+            });
+            let sensitive_name = crate::core::url::is_sensitive_param_name(&decoded_name);
+            if (secret_value || sensitive_name) && raw_val != "***" {
+                return format!("{raw_name}=***");
+            }
+            let red_raw = redact_display_text(raw_val, secrets);
+            if red_raw != raw_val {
+                return format!("{raw_name}={red_raw}");
+            }
+            let red_dec = redact_display_text(&decoded_val, secrets);
+            if red_dec != decoded_val {
+                let encoded: String =
+                    url::form_urlencoded::byte_serialize(red_dec.as_bytes()).collect();
+                return format!("{raw_name}={encoded}");
+            }
+            seg.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn redact_unstructured_body(body: &str, secrets: &[String]) -> String {
+    let step1 = redact_header_lines(body);
+    let step2 = redact_inline_json_pairs(&step1);
+    let step3 = redact_inline_kv_pairs(&step2);
+    redact_display_text(&step3, secrets)
+}
+
+fn redact_header_lines(text: &str) -> String {
+    if !text.contains(':') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let (content, ending) = if let Some(stripped) = line.strip_suffix("\r\n") {
+            (stripped, "\r\n")
+        } else if let Some(stripped) = line.strip_suffix('\n') {
+            (stripped, "\n")
+        } else {
+            (line, "")
+        };
+        let trimmed_start = content.trim_start();
+        let indent = &content[..content.len() - trimmed_start.len()];
+        if let Some((name, val)) = trimmed_start.split_once(':')
+            && !name.is_empty()
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+            && is_sensitive_header_name(name)
+            && !val.trim().is_empty()
+            && val.trim() != "***"
+        {
+            out.push_str(indent);
+            out.push_str(name);
+            out.push_str(": ***");
+            out.push_str(ending);
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+fn redact_inline_json_pairs(text: &str) -> String {
+    if !text.contains('"') || !text.contains(':') {
+        return text.to_string();
+    }
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'"' {
+            i += 1;
+            continue;
+        }
+        let Some((key, after_key)) = parse_json_string_span(text, i) else {
+            break;
+        };
+        let mut j = after_key;
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if j >= bytes.len() || bytes[j] != b':' {
+            i = after_key;
+            continue;
+        }
+        j += 1;
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if j < bytes.len() && bytes[j] == b'"' && is_sensitive_json_key(&key) {
+            let val_content_start = j + 1;
+            match parse_json_string_span(text, j) {
+                Some((val_str, after_val)) => {
+                    if !is_public_api_key_state_str(&key, &val_str) && val_str != "***" {
+                        out.push_str(&text[cursor..val_content_start]);
+                        out.push_str("***\"");
+                        cursor = after_val;
+                    }
+                    i = after_val;
+                    continue;
+                }
+                None => {
+                    // Truncated mid-string at end of buffer: redact remaining partial secret!
+                    out.push_str(&text[cursor..val_content_start]);
+                    out.push_str("***");
+                    cursor = bytes.len();
+                    break;
+                }
+            }
+        }
+        i = after_key;
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
+fn parse_json_string_span(text: &str, open_quote: usize) -> Option<(String, usize)> {
+    let bytes = text.as_bytes();
+    if bytes.get(open_quote) != Some(&b'"') {
+        return None;
+    }
+    let mut escaped = false;
+    let mut content = String::new();
+    let mut idx = open_quote + 1;
+    while idx < bytes.len() {
+        let ch = text.get(idx..)?.chars().next()?;
+        let next_idx = idx + ch.len_utf8();
+        if escaped {
+            content.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == '"' {
+            return Some((content, next_idx));
+        } else {
+            content.push(ch);
+        }
+        idx = next_idx;
+    }
+    None
+}
+
+fn redact_inline_kv_pairs(text: &str) -> String {
+    if !text.contains('=') {
+        return text.to_string();
+    }
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'=' {
+            i += 1;
+            continue;
+        }
+        let mut key_start = i;
+        while key_start > cursor {
+            let b = bytes[key_start - 1];
+            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.') {
+                key_start -= 1;
+            } else {
+                break;
+            }
+        }
+        let left_ok = key_start == 0
+            || matches!(
+                bytes[key_start - 1],
+                b'?' | b'&'
+                    | b';'
+                    | b' '
+                    | b'\t'
+                    | b'\r'
+                    | b'\n'
+                    | b'"'
+                    | b'\''
+                    | b'('
+                    | b'['
+                    | b'{'
+                    | b','
+                    | b'>'
+            );
+        let key = &text[key_start..i];
+        if left_ok && !key.is_empty() && crate::core::url::is_sensitive_param_name(key) {
+            let val_start = i + 1;
+            // Skip URLs whose scheme:// appears before '='? Not possible since key is ASCII token.
+            let mut val_end = val_start;
+            while val_end < bytes.len() {
+                let b = bytes[val_end];
+                if b.is_ascii_whitespace()
+                    || matches!(
+                        b,
+                        b'&' | b';' | b'"' | b'\'' | b')' | b']' | b'}' | b',' | b'<' | b'>'
+                    )
+                {
+                    break;
+                }
+                val_end += 1;
+            }
+            // Ensure UTF-8 char boundary
+            while val_end > val_start && !text.is_char_boundary(val_end) {
+                val_end -= 1;
+            }
+            let val = &text[val_start..val_end];
+            if !val.is_empty() && val != "***" {
+                out.push_str(&text[cursor..val_start]);
+                out.push_str("***");
+                cursor = val_end;
+                i = val_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
+/// JSON 定義内の固定 `{"value": ...}` や秘匿名の headers/query の固定値を
+/// redaction list に加える。短い値は誤爆防止のため対象外にし、既存値の重複も除く。
 pub fn collect_explicit_values(value: &serde_json::Value, secrets: &mut Vec<String>) {
     match value {
         serde_json::Value::Array(items) => {
@@ -254,12 +599,31 @@ pub fn collect_explicit_values(value: &serde_json::Value, secrets: &mut Vec<Stri
         serde_json::Value::Object(map) => {
             if !map.contains_key("value_env")
                 && let Some(value) = map.get("value").and_then(serde_json::Value::as_str)
-                && value.chars().count() >= 4
-                && !secrets.iter().any(|secret| secret == value)
             {
-                secrets.push(value.to_string());
+                push_secret_candidate(secrets, value);
             }
-            for item in map.values() {
+            for (key, item) in map {
+                if key.eq_ignore_ascii_case("headers")
+                    && let serde_json::Value::Object(headers) = item
+                {
+                    for (hname, hval) in headers {
+                        if is_sensitive_header_name(hname)
+                            && let Some(s) = hval.as_str()
+                        {
+                            push_secret_candidate(secrets, s);
+                        }
+                    }
+                } else if key.eq_ignore_ascii_case("query")
+                    && let serde_json::Value::Object(query) = item
+                {
+                    for (qname, qval) in query {
+                        if crate::core::url::is_sensitive_param_name(qname)
+                            && let Some(s) = qval.as_str()
+                        {
+                            push_secret_candidate(secrets, s);
+                        }
+                    }
+                }
                 collect_explicit_values(item, secrets);
             }
         }
@@ -435,10 +799,13 @@ fn redact_sensitive_value(value: &mut serde_json::Value) {
 }
 
 fn is_public_api_key_state(key: &str, value: &serde_json::Value) -> bool {
-    key.eq_ignore_ascii_case("apiKey")
-        && value
-            .as_str()
-            .is_some_and(|state| matches!(state, "not-required" | "configured" | "missing"))
+    value
+        .as_str()
+        .is_some_and(|state| is_public_api_key_state_str(key, state))
+}
+
+fn is_public_api_key_state_str(key: &str, state: &str) -> bool {
+    key.eq_ignore_ascii_case("apiKey") && matches!(state, "not-required" | "configured" | "missing")
 }
 
 fn normalized_key(key: &str) -> String {
@@ -450,11 +817,20 @@ fn is_sensitive_json_key(key: &str) -> bool {
         normalized_key(key).as_str(),
         "authorization"
             | "proxyauthorization"
+            | "wwwauthenticate"
+            | "proxyauthenticate"
             | "cookie"
             | "setcookie"
             | "xapikey"
             | "apikey"
+            | "apisecret"
             | "apitoken"
+            | "xauthtoken"
+            | "authtoken"
+            | "sessiontoken"
+            | "idtoken"
+            | "bearertoken"
+            | "csrftoken"
             | "token"
             | "password"
             | "passwd"
@@ -609,6 +985,36 @@ mod tests {
             "client_id=visible&access_token=***"
         );
         assert_eq!(redact_body("secret=***", &[]), "secret=***");
+        assert_eq!(
+            redact_body("q={{query}}&api_key=secret123&normal=KEEP", &[]),
+            "q={{query}}&api_key=***&normal=KEEP"
+        );
+    }
+
+    #[test]
+    fn redact_body_and_headers_mask_raw_headers_truncated_json_and_params() {
+        let raw_headers = "Authorization: Bearer RAW_BEARER_123\r\nSet-Cookie: sid=RAW_COOKIE_456\r\nX-Normal: KEEP_HDR\r\n";
+        let red_headers = redact_body(raw_headers, &[]);
+        assert_eq!(
+            red_headers,
+            "Authorization: ***\r\nSet-Cookie: ***\r\nX-Normal: KEEP_HDR\r\n"
+        );
+
+        let truncated_json = "{\"normal\":\"KEEP_JSON\",\"api_key\":\"TRUNC_SECRET_HALF";
+        let red_trunc = redact_body(truncated_json, &[]);
+        assert_eq!(red_trunc, "{\"normal\":\"KEEP_JSON\",\"api_key\":\"***");
+
+        let ct = redact_header_params("application/pdf; token=CT_SECRET_789; charset=utf-8", &[]);
+        assert_eq!(ct, "application/pdf; token=***; charset=utf-8");
+
+        let non_http = redact_display_text(
+            "cannot interpret ftp://u1:p1@127.0.0.1/doc as a target",
+            &[],
+        );
+        assert_eq!(
+            non_http,
+            "cannot interpret ftp://***:***@127.0.0.1/doc as a target"
+        );
     }
 
     #[test]

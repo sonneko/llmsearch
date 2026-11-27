@@ -40,8 +40,14 @@ pub fn normalize(md: &str, opts: &NormalizeOptions) -> String {
 }
 
 /// Markdown 中のリンク・画像の相対 URL を絶対化する。
+/// 基底 URL に含まれる認証情報（`username` / `password`）は相対リンクへ引き継がない。
 pub fn absolutize(md: &str, base: &url::Url) -> String {
     use regex::Regex;
+    let mut clean_base = base.clone();
+    if !clean_base.username().is_empty() || clean_base.password().is_some() {
+        let _ = clean_base.set_username("");
+        let _ = clean_base.set_password(None);
+    }
     let re = Regex::new(r"(!?\[[^\]]*\]\()([^)\s]+)(\))").expect("link regex");
     re.replace_all(md, |caps: &regex::Captures<'_>| {
         let target = &caps[2];
@@ -56,7 +62,7 @@ pub fn absolutize(md: &str, base: &url::Url) -> String {
         if target.starts_with("javascript:") {
             return String::new();
         }
-        match base.join(target) {
+        match clean_base.join(target) {
             Ok(abs) => format!("{}{}{}", &caps[1], abs.as_str(), &caps[3]),
             Err(_) => caps[0].to_string(),
         }
@@ -92,6 +98,10 @@ mod tests {
         let out = absolutize("[x](../c) ![i](/d.png)", &base);
         assert!(out.contains("https://example.jp/c"), "{out}");
         assert!(out.contains("https://example.jp/d.png"), "{out}");
+
+        let auth_base = url::Url::parse("http://user:pass@127.0.0.1:8080/a/b").unwrap();
+        let auth_out = absolutize("[rel](/rel-link)", &auth_base);
+        assert_eq!(auth_out, "[rel](http://127.0.0.1:8080/rel-link)");
     }
 
     #[test]

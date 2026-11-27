@@ -163,9 +163,8 @@ pub fn dry_run(app: &App, def: &EngineDef, query: &str, page: u32) -> Result<Dry
             .headers
             .insert("Accept-Language".to_string(), ctx.locale.clone());
     }
-    let definition = serde_json::to_value(def).unwrap_or_default();
-    let mut secrets = crate::core::secret::redaction_list(&app.secrets);
-    crate::core::secret::collect_explicit_values(&definition, &mut secrets);
+    let mut secrets = app.redaction_list();
+    crate::core::secret::collect_engine_secrets(def, &mut secrets);
     let mut headers: Vec<(String, String)> = prepared
         .headers
         .iter()
@@ -191,6 +190,8 @@ pub fn dry_run(app: &App, def: &EngineDef, query: &str, page: u32) -> Result<Dry
 
 /// 定義の要約（`engines show`）。
 pub fn describe(def: &EngineDef) -> Vec<(String, String)> {
+    let mut def_secrets = Vec::new();
+    crate::core::secret::collect_engine_secrets(def, &mut def_secrets);
     vec![
         ("id".into(), def.id.clone()),
         ("variant".into(), def.variant().to_string()),
@@ -208,7 +209,10 @@ pub fn describe(def: &EngineDef) -> Vec<(String, String)> {
             "network".into(),
             def.network.clone().unwrap_or_else(|| "default".to_string()),
         ),
-        ("url".into(), def.request.url.clone()),
+        (
+            "url".into(),
+            crate::core::url::redact_url_str(&def.request.url, &def_secrets),
+        ),
         ("method".into(), def.request.method.clone()),
         (
             "paging".into(),

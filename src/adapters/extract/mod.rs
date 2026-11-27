@@ -84,13 +84,11 @@ impl HttpFetcher {
         };
 
         if !is_html_response(&response) {
-            return Err(AppError::with_detail(
-                ErrorCode::E3002,
-                response
-                    .content_type()
-                    .unwrap_or("(no Content-Type)")
-                    .to_string(),
-            ));
+            let shown_ct = response
+                .content_type()
+                .map(|ct| crate::core::secret::redact_header_params(ct, &[]))
+                .unwrap_or_else(|| "(no Content-Type)".to_string());
+            return Err(AppError::with_detail(ErrorCode::E3002, shown_ct));
         }
 
         let (charset, guessed) = detect_charset(

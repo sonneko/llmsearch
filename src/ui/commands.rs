@@ -23,10 +23,7 @@ pub fn run(
     command: &Command,
 ) -> Result<i32, AppError> {
     // 出力境界で URL・既知の secret を伏せる。実プロセス以外からの呼び出しでも同じ。
-    renderer.set_secrets(crate::core::secret::redaction_list_for_engines(
-        &app.secrets,
-        &app.engines,
-    ));
+    renderer.set_secrets(app.redaction_list());
     // 共通枠の `session` を、設定読み込み後の現行セッションに合わせる。
     renderer.set_session(app.current_session_id());
     match command {
@@ -1059,7 +1056,7 @@ fn run_filters(
             let path = crate::adapters::config::find_resource(&dirs, id)
                 .ok_or_else(|| resource_not_found("filter set", id, &dirs, "filters list"))?;
             let value = crate::adapters::config::read_json_file(&path)?;
-            let value = if *raw {
+            let mut value = if *raw {
                 value
             } else {
                 let set: crate::core::config::FilterSet =
@@ -1073,6 +1070,7 @@ fn run_filters(
                     AppError::with_detail(ErrorCode::E1003, format!("{}: {error}", path.display()))
                 })?
             };
+            crate::core::secret::redact_json(&mut value, &app.secrets);
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "filters",
@@ -1687,15 +1685,12 @@ fn display_document(
 }
 
 fn display_url(url: &str, secrets: &[String]) -> String {
-    match url::Url::parse(url) {
-        Ok(parsed) => crate::core::url::redact(&parsed, secrets),
-        Err(_) => crate::core::secret::redact_display_text(url, secrets),
-    }
+    crate::core::url::redact_url_str(url, secrets)
 }
 
 /// 秘匿値の伏字化に使う値の一覧。
 fn secret_values(app: &App) -> Vec<String> {
-    crate::core::secret::redaction_list(&app.secrets)
+    app.redaction_list()
 }
 
 fn hits_json(hits: &[crate::core::model::SearchHit], secrets: &[String]) -> Vec<serde_json::Value> {

@@ -136,15 +136,15 @@ M16: JSON の明示的信頼境界（#48）
 
 ### 4.2 秘匿情報
 
-状態: 実装完了（REF:src/ui/render.rs, REF:src/ui/commands.rs, REF:src/core/secret.rs, REF:src/core/url.rs）
+状態: 実装完了（REF:src/ui/render.rs, REF:src/ui/commands.rs, REF:src/core/secret.rs, REF:src/core/url.rs, REF:src/adapters/engine/eval.rs, REF:src/adapters/robots.rs）
 
-`main.rs` と `commands::run` は App 構築後に環境 secret とエンジン定義の固定値を `Renderer` の伏字化対象へ登録し、`Renderer::event()` は JSON 全体を出力境界で再帰的に伏字化する。テキストの `out` / `err` / `info` / `warn` と `Renderer::error()` も既知の秘匿値と本文中の URL を伏せる。`Secret` は `Serialize` を実装しないため、保持値を直接シリアライズすることもできない。
+`main.rs`、`commands::run`、`Interactive::new`、`App::append_history`、`document::fetch`、`adapters::engine::eval` は環境 secret に加えてエンジン定義（`TmplValue::Explicit` および秘匿名の `request.headers` / `request.query` の固定文字列値）とネットワークプロファイル（秘匿名の `headers` および `ProxyAuth::Plain`）の固定値を共通の redaction list へ集約し、`Renderer::event()` は JSON 全体を出力境界で再帰的に伏字化する。テキストの `out` / `err` / `info` / `warn` と `Renderer::error()` も既知の秘匿値と本文中の URL 様トークンを伏せる。`Secret` は `Serialize` を実装しないため、保持値を直接シリアライズすることもできない。
 
-定義の表示は経路別に二重化する。`engines show` / `network show` / `filters show` の定義と `--raw` は `core::secret::redact_json()` を通し、明示値・秘匿名の query/header・URL の認証情報を伏せる。`engines show` の要約 URL も `core::url::redact()` を通す。`value_env`（環境変数名）は秘匿値ではないため残す。`engines test --dry-run` は解決済み環境変数と `TmplValue::Explicit` の値を redaction list に加え、URL・ヘッダ名・本文のフィールド名と値を使って伏字化する。取得用 URL はセッション内で再取得可能な実体を保持する。
+定義の表示は経路別に二重化する。`engines show` / `network show` / `filters show` の定義と `--raw` はすべて `core::secret::redact_json()` を通し、明示値・秘匿名の query/header・URL の認証情報を伏せる。`engines show` の要約 URL（`usecases::engines::describe`）も URL 秘匿化を通す。`value_env`（環境変数名）は秘匿値ではないため残す。`engines test --dry-run` は解決済み環境変数と固定秘匿値を redaction list に加え、URL・ヘッダ名・本文のフィールド名と値を使って伏字化する。フォーム本文の秘匿化（`core::secret::redact_body`）は `&` 区切りの非秘匿ペアを再エンコードせずそのまま保持し、`q={{query}}` のようなテンプレート記法や通常値を変質させない。取得用 URL はセッション内で再取得可能な実体を保持する。
 
-検索結果・文書 URL の既存経路は `src/ui/commands.rs` の `display_url(url, secrets)` に集約し、`core::url::redact()` が URL ユーザー情報、秘匿 query/path パラメータ、既知の秘匿値を伏せる。`hits_json()` / `hit_line_with()`、見出しヘッダ、`[untrusted]` 行、`content` / `document` の `url` / `finalUrl` はこの関数を使う。履歴は `App::append_history()` が追記前にエンジン名と payload 内の文字列を伏字化し、URL のユーザー情報・秘匿 query/path パラメータも含めて保存する。履歴の JSON・テキスト出力は表示境界でも再度 sanitize する。
+検索結果・文書 URL の既存経路は `src/ui/commands.rs` の `display_url(url, secrets)` に集約し、`core::url::redact()` が URL ユーザー情報、秘匿 query/path パラメータ、クエリ引数値内にエンコードされたネスト URL（`W4006` のリダイレクト展開前 URL など）、および既知の秘匿値を再帰的に伏せる。`core::url::parse()` の構文エラー（`E2005`）や `core::secret::redact_display_text()` の URL 検出は、任意スキームの `scheme://userinfo@host...` やポート不正・テンプレート未展開で `Url::parse` が失敗する URL 様トークンについてもフォールバックで `userinfo@` と秘匿引数を伏せる。`hits_json()` / `hit_line_with()`、見出しヘッダ、`[untrusted]` 行、`content` / `document` の `url` / `finalUrl` はこの関数を使う。履歴は `App::append_history()` が追記前にエンジン名と payload 内の文字列を伏字化し、URL のユーザー情報・秘匿 query/path パラメータも含めて保存する。履歴の JSON・テキスト出力は表示境界でも再度 sanitize する。
 
-送信エラーの `E2001` / `E2002` / `E2004` は `reqwest::Error::without_url()` と `core::secret::redact_text()` を通してから `details` にする（`REF:src/adapters/http.rs`）。本文読み取りエラーも同じ処理にする。robots.txt の取得失敗理由（`E2006`）も既知の秘匿値を伏せる（`REF:src/adapters/robots.rs`）。`Renderer::error()` と JSON イベント全体が出力境界の最終防御となり、個別の `AppError::detail` / 警告に入った既知の秘匿値も出さない。
+送信エラーの `E2001` / `E2002` / `E2004` は `reqwest::Error::without_url()` と `core::secret::redact_text()` を通してから `details` にする（`REF:src/adapters/http.rs`）。本文読み取りエラーも同じ処理にする。`E3002` の `Content-Type` や `E2003` / `E4003` の `Retry-After` など応答ヘッダ由来の文字列は、`; token=...` 等の秘匿ヘッダパラメータを `core::secret::redact_header_params()` で伏せる。robots.txt の取得失敗理由および拒否パス・クエリ（`E2006`）も秘匿化済み URL のパス・クエリと既知の秘匿値を使って構成する（`REF:src/adapters/robots.rs`）。抽出不一致時の応答プレビュー（`W4004` の 2048 文字および `E4004` の 200 文字、`REF:src/adapters/engine/eval.rs`）は文字数切り詰め前に `core::secret::redact_body()` を通し、JSON 本文・フォーム本文・HTTP ヘッダ行・埋込断片の秘匿項目を伏せつつ通常フィールドを維持する。`Renderer::error()` と JSON イベント全体が出力境界の最終防御となり、個別の `AppError::detail` / 警告に入った既知の秘匿値も出さない。M17（#50, #51）では `127.0.0.1` ループバックスタブと実バイナリで G1（URL userinfo 成功系・埋込 URL・不正/非 HTTP URL・robots 拒否）および G2（ヘッダ・JSON body・form body・過剰変換防止）を検証する。
 
 ### 4.3 再現性
 
