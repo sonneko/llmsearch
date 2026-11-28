@@ -106,7 +106,16 @@ pub fn validate(app: &App, selectors: &[String]) -> Vec<(String, Vec<Check>)> {
             .validate()
             .into_iter()
             .map(|check| match check {
-                Check::Fail(text) => Check::Fail(format!("E1004: {text}")),
+                Check::Fail(text) => {
+                    // 未知テンプレート変数は `E1008`（仕様 engine-definitions.md §3.4、
+                    // errors.md §2.1）。その他の定義の不備は `E1004`。
+                    let code = if text.starts_with("unknown template variable") {
+                        "E1008"
+                    } else {
+                        "E1004"
+                    };
+                    Check::Fail(format!("{code}: {text}"))
+                }
                 other => other,
             })
             .collect();

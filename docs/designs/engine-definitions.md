@@ -67,7 +67,7 @@
 
 状態: 実装完了（REF:src/core/template.rs, REF:src/core/engine.rs）
 
-`src/core/template.rs` の `expand(tmpl: &str, ctx: &TmplCtx) -> Result<String, AppError>` が 1 パスで `{{name}}` を置換する。未知の変数は `E1008`（仕様 §3.4 の `E1004` 表記との差分および `request.encoding` の `encode_query` 結果が `prepare` で未使用となっている不具合、`{{apiKey}}` 未配線は Issue #57 で追跡）。
+`src/core/template.rs` の `expand(tmpl: &str, ctx: &TmplCtx) -> Result<String, AppError>` が 1 パスで `{{name}}` を置換し、未知の変数は実行時 `E1008`（フォールバック経路。URL / query / header / `body` 内の未知変数は `EngineDef::ensure_valid` がロード時に `E1004` で fail-fast するため通常は到達しない、仕様 §3.4）。`prepare` は `request.encoding` に従いクエリをエンコードし、`{{apiKey}}` は `value_env` から解決する。
 
 `TmplCtx` に `language: String`（主言語タグ）を足し、`locale` は同じ `search.language` の正規化後の全体を入れる（M10）。`core/engine.rs` の `ALLOWED_VARS` にも `language` を追加する。`Defaults` は `region` と `#[serde(flatten)] extra` のみとし、`locale` / `language` フィールドを削除する（旧定義では未知キーとして `extra` に落ち、`EngineDef::validate()` が `W1002` を出す。`EngineDef` 側にも `extra` があるため実装はどちらでも温存される）。言語は常に `search.language` が決め、定義からは上書きできない。
 
@@ -115,7 +115,7 @@
 
 状態: 実装完了（REF:src/core/engine.rs, REF:src/core/extract.rs）
 
-`Transforms` は `Vec<Transform>` を順に適用する純粋関数（`src/core/extract.rs`）。`ResponseSpec.transform_args` で `strip_prefix` / `strip_suffix` の引数を渡せる（仕様書への `transformArgs`・`unwrap_redirect` 対象キー反映は Issue #57 で追跡）。`absolutize` は `url::Url::join`、`to_date` は `chrono::NaiveDate::parse_from_str` を候補形式の順に試す。
+`Transforms` は `Vec<Transform>` を順に適用する純粋関数（`src/core/extract.rs`）。`truncate` / `replace` / `to_date` / `unwrap_redirect` の引数（`chars` / `pattern`・`with` / `formats` / `keys`）は `ResponseSpec.transform_args`（`transformArgs`）で渡す（仕様 engine-definitions.md §4.1 / §4.4）。`absolutize` は `url::Url::join`、`to_date` は `chrono::NaiveDate::parse_from_str` を候補形式の順に試す。
 
 ### 4.5 結果なしの判定（`errorWhen`）
 
@@ -217,7 +217,7 @@
 
 状態: 実装完了（REF:src/usecases/engines.rs, REF:src/core/engine.rs）
 
-検証は `src/usecases/engines.rs` と `EngineDef::validate`（`src/core/engine.rs`）で行い、`Check` 列を返す。セレクタ構文の検査は `scraper::Selector::parse`、JSON パスの検査は `src/core/extract.rs` 側の構文規則を用いる（`request.body` のテンプレート変数検証漏れは Issue #57 で追跡）。失敗が 1 件でもあれば終了コード `1`。
+検証は `src/usecases/engines.rs` と `EngineDef::validate`（`src/core/engine.rs`）で行い、`Check` 列を返す。セレクタ構文の検査は `scraper::Selector::parse`、JSON パスの検査は `src/core/extract.rs` 側の構文規則を用いる。未知テンプレート変数は `request.url` / query / header / `body` すべてで検査する。失敗が 1 件でもあれば終了コード `1`。
 
 明示指定された未知の識別子を黙殺せず、`E4002` を含む失敗チェックとして返す。`EngineDef::validate` は `request.method` の GET/POST と、`REF:src/core/template.rs` の `query_encoding` が対応する文字符号化も検査する。`ensure_valid` 経由のロード時にも同じ検証を行う。回帰テストは `REF:tests/m5.rs` と `REF:src/core/engine.rs`。
 

@@ -48,7 +48,7 @@
 
 状態: 実装完了（REF:src/adapters/engine/eval.rs, REF:src/usecases/search.rs）
 
-`src/adapters/engine/eval.rs` と `src/usecases/search.rs` が抽出段階・選択段階の失敗を写像する。`E4001` は「抽出・終端で 0 件」、`E4002` はエンジン未発見／API キー未設定、`E4003` は `403` / `429` 等の拒否（`401` が `E2003` になる点は Issue #58）、`E4004` は抽出ルール不一致（全件破棄）。`E4005`（重複 ID は `W4002` でスキップ）と `E4006`（相対 URL は自動解決）は現状未発行（Issue #56 / #58）。
+`src/adapters/engine/eval.rs` と `src/usecases/search.rs` が抽出段階・選択段階の失敗を写像する。`E4001` は「抽出・終端で 0 件」、`E4002` はエンジン未発見／API キー未設定、`E4003` は `401` / `403` / `429` の拒否（仕様 network.md §8.3）、`E4004` は抽出ルール不一致（全件破棄）。`E4005`（重複 ID は `W4002` でスキップ）と `E4006`（`absolutize` 未指定の相対 URL は自動解決せず破棄）はハードエラーとして現状未発行（Issue #56 / #58）。
 
 ### 2.5 状態エラー（`E5xxx`）
 

@@ -96,7 +96,7 @@
 
 状態: 実装完了（REF:src/adapters/state/session_store.rs, REF:src/usecases/document.rs）
 
-`--session` 再開時は `REF:src/adapters/state/session_store.rs` の `FsSessionStore::load` が `SessionState` をそのまま復元する（文書キャッシュ取得時の `expires_at` 失効判定漏れは Issue #60 で追跡）。
+`--session` 再開時は `REF:src/adapters/state/session_store.rs` の `FsSessionStore::load` が `SessionState` をそのまま復元する（文書キャッシュの読込は `cache_entry_valid` で制御され、`--no-cache` / `--refresh` 指定時と `cache.enabled=false` 時は再取得する）。
 
 ### 4.2 破損
 

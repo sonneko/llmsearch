@@ -340,17 +340,16 @@ fn finish_hit(
     }
 
     let title = text::collapse_ws(values.get("title").map(String::as_str).unwrap_or(""));
-    let mut url_str = text::trim(values.get("url").map(String::as_str).unwrap_or(""));
+    let url_str = text::trim(values.get("url").map(String::as_str).unwrap_or(""));
     if url_str.is_empty() || title.is_empty() {
         return None;
     }
-    // 絶対化されていない相対 URL は破棄する（E4006 相当）
+    // 相対 URL は自動で絶対化しない（仕様 search.md §2.2）。`absolutize` 変換を
+    // 指定した定義は上のフィールド変換で既に絶対 URL 化されている。未解決の相対
+    // URL を含む結果は E4006 相当として破棄する（従来は `base_url.join` で変換
+    // 指定の有無に関わらず自動絶対化されていた）。
     if !(url_str.starts_with("http://") || url_str.starts_with("https://")) {
-        if let Ok(abs) = base_url.join(&url_str) {
-            url_str = abs.to_string();
-        } else {
-            return None;
-        }
+        return None;
     }
     let parsed = url::parse(&url_str).ok()?;
     if url::validate_scheme(&parsed).is_err() {
@@ -760,7 +759,9 @@ mod tests {
                 "items": {"selector": "li"},
                 "fields": {
                     "title": {"selector": "a"},
-                    "url": {"selector": "a", "attr": "href", "transform": ["unwrap_redirect"]}
+                    // `absolutize` を併用する（仕様 search.md §2.2: 相対 URL は
+                    // `absolutize` 変換が指定されていれば基準 URL で解決する）。
+                    "url": {"selector": "a", "attr": "href", "transform": ["unwrap_redirect", "absolutize"]}
                 }
             }
         }));
@@ -773,8 +774,35 @@ mod tests {
         let out = extract(&d.response, body, &base(), &[]).unwrap();
         assert_eq!(out.hits[0].url, "https://example.jp/a");
         assert_eq!(out.hits[1].url, "https://example.jp/b");
-        // リダイレクトを含まない相対リンクは基準 URL で絶対化するだけ
+        // `absolutize` 変換で基準 URL に対して絶対化される
         assert_eq!(out.hits[2].url, "https://example.com/local/page");
+    }
+
+    /// `absolutize` 変換が指定されていなければ、相対 URL は破棄される
+    /// （仕様 search.md §2.2 / errors.md E4006）。自動絶対化しない。
+    #[test]
+    fn relative_url_without_absolutize_is_dropped() {
+        let d = def(serde_json::json!({
+            "schemaVersion": 1,
+            "id": "t",
+            "request": {"url": "https://example.com/search"},
+            "response": {
+                "kind": "html",
+                "items": {"selector": "li"},
+                "fields": {
+                    "title": {"selector": "a"},
+                    "url": {"selector": "a", "attr": "href"}
+                }
+            }
+        }));
+        let body = r#"<html><body><ul>
+          <li><a href="https://example.com/abs">A</a></li>
+          <li><a href="/local/page">B</a></li>
+        </ul></body></html>"#;
+        let out = extract(&d.response, body, &base(), &[]).unwrap();
+        // 相対 URL の B は破棄され、絶対 URL の A のみが残る。
+        assert_eq!(out.hits.len(), 1);
+        assert_eq!(out.hits[0].url, "https://example.com/abs");
     }
 
     #[test]

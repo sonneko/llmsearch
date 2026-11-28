@@ -193,6 +193,15 @@ const FORBIDDEN_HEADERS: &[&str] = &["host", "content-length", "connection", "tr
 impl NetworkProfile {
     pub fn validate(&self) -> Vec<Check> {
         let mut out = Vec::new();
+        // 不正な `schemaVersion`（!= 2）を拒否する（仕様 configuration.md §1.3）。
+        // `Settings` / `QuotaPolicy` は検査していたが、`NetworkProfile` は
+        // フィールドを読み込むだけで値を一切検証していなかった。
+        if self.schema_version != 2 {
+            out.push(Check::Fail(format!(
+                "network.schemaVersion = {} (supported: 2)",
+                self.schema_version
+            )));
+        }
         let range = |name: &str, v: u64, min: u64, max: u64, out: &mut Vec<Check>| {
             if v < min || v > max {
                 out.push(Check::Fail(format!(

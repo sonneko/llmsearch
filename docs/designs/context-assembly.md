@@ -12,7 +12,7 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`REF:src/core/outline.rs` の `extract_headings(markdown)` が行単位で走査する。Setext は「次行が `=` 列または `-` 列のみかつ前行が空でない」場合に認識する。ATX は先頭 `#`（1〜6 個）で判定し末尾の `#` 列を除去する（ただし現状 `atx()` は先頭空白 3 文字上限と `#` 直後の空白必須条件を課しておらず、Issue #60 で追跡）。
+`REF:src/core/outline.rs` の `extract_headings(markdown)` が行単位で走査する。Setext は「次行が `=` 列または `-` 列のみかつ前行が空でない」場合に認識する。ATX は先頭 `#`（1〜6 個）で判定し末尾の `#` 列を除去する（`atx()` は CommonMark に合わせ、先頭空白 3 文字以内・`#` 1〜6 個・その直後に空白または行末を必須とする）。
 
 ### 1.2 見出しの識別子
 
@@ -132,7 +132,7 @@
 
 状態: 実装完了（REF:src/core/outline.rs, REF:src/core/context.rs）
 
-`REF:src/core/context.rs` の `truncate_to_budget(text, limit)` は行境界で切り、未閉のフェンスを検出したら閉じフェンスを補う（現状チルダフェンス `~~~` もバッククォートで閉じる不具合があり Issue #60 で追跡）。注記文字列は `REF:src/ui/render.rs` の `section_block` が `[truncated: shown {shown} / total {total} chars]` として組み立てる。
+`REF:src/core/context.rs` の `truncate_to_budget(text, limit)` は行境界で切り、未閉のフェンスを検出したら開きフェンスと同じマーカー（バッククォート ```` ``` ```` かチルダ `~~~`）で閉じフェンスを補う。注記文字列は `REF:src/ui/render.rs` の `section_block` が `[truncated: shown {shown} / total {total} chars]` として組み立てる。
 
 ### 4.4 予算超過時の案内
 

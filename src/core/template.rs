@@ -134,15 +134,35 @@ pub fn prepare(
     })?;
     crate::core::url::validate_scheme(&url)?;
 
-    // クエリ（BTreeMap のため順序は固定）
-    {
-        let mut pairs = url.query_pairs_mut();
-        for (k, v) in &req.query {
-            let raw = resolve_tmpl(v, ctx, secrets)?;
-            let encoded = encode_query(&raw, &req.encoding);
-            // `query_pairs_mut` はさらにエンコードするため、生の値を渡す
-            let _ = encoded;
-            pairs.append_pair(k, &raw);
+    // クエリ（BTreeMap のため順序は固定）。
+    // `request.encoding` が非 UTF-8（`euc-jp` / `shift_jis` 等）の場合は
+    // `encode_query` の結果をそのまま使う。`query_pairs_mut().append_pair` は
+    // 常に UTF-8 で再エンコードするため、この経路では `encoding` が失われた
+    // （仕様 engine-definitions.md §3.3）。UTF-8 の場合は従来どおり
+    // `append_pair`（スペースを `+`）を使って挙動を保つ。
+    if !req.query.is_empty() {
+        let is_utf8 = query_encoding(&req.encoding)
+            .map(|e| e == encoding_rs::UTF_8)
+            .unwrap_or(true);
+        if is_utf8 {
+            let mut pairs = url.query_pairs_mut();
+            for (k, v) in &req.query {
+                let raw = resolve_tmpl(v, ctx, secrets)?;
+                pairs.append_pair(k, &raw);
+            }
+        } else {
+            let mut pairs: Vec<String> = Vec::new();
+            if let Some(existing) = url.query()
+                && !existing.is_empty()
+            {
+                pairs.push(existing.to_string());
+            }
+            for (k, v) in &req.query {
+                let raw = resolve_tmpl(v, ctx, secrets)?;
+                let encoded = encode_query(&raw, &req.encoding);
+                pairs.push(format!("{k}={encoded}"));
+            }
+            url.set_query(Some(&pairs.join("&")));
         }
     }
 

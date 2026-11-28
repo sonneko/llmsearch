@@ -44,9 +44,45 @@ fn upper_check(lower: &str) -> bool {
     lower.starts_with("utm_") || DEFAULT_TRACKING.contains(&lower)
 }
 
+/// パラメータ名が秘匿情報を含みうる「鍵名単位」で一致するか（仕様 network.md）。
+///
+/// 従来は `lower.contains(p)` の部分文字列一致だったため、`author`（`auth` を含む）、
+/// `keyword`（`key` を含む）、`design`（`sig` を含む）のような一般語が誤って伏字
+/// 化されていた。ここでは `_` / `-` / `.` / キャメル境界で区切った「名前の単位」
+/// と、名前の全体を小文字化して、いずれかが既定の秘匿語と**等しく**なる場合にのみ
+/// 判定する。
 pub fn is_sensitive_param_name(name: &str) -> bool {
-    let lower = name.to_ascii_lowercase();
-    SENSITIVE_PARAMS.iter().any(|p| lower.contains(p))
+    let units = param_name_units(name);
+    units
+        .iter()
+        .any(|u| SENSITIVE_PARAMS.iter().any(|p| *u == *p))
+}
+
+/// パラメータ名を `_` / `-` / `.` / キャメル境界で区切り、各単位を小文字化する。
+/// 名前の全体（小文字）も 1 単位として末尾に含める。
+fn param_name_units(name: &str) -> Vec<String> {
+    let mut units: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for c in name.chars() {
+        if c == '_' || c == '-' || c == '.' {
+            if !cur.is_empty() {
+                units.push(std::mem::take(&mut cur).to_ascii_lowercase());
+            }
+        } else if c.is_ascii_uppercase() {
+            // キャメル境界（例: `apiKey` の `K`）
+            if !cur.is_empty() {
+                units.push(std::mem::take(&mut cur).to_ascii_lowercase());
+            }
+            cur.push(c.to_ascii_lowercase());
+        } else {
+            cur.push(c);
+        }
+    }
+    if !cur.is_empty() {
+        units.push(cur.to_ascii_lowercase());
+    }
+    units.push(name.to_ascii_lowercase());
+    units
 }
 
 /// 追跡パラメータを除去し、スキーム・ホストを小文字化し、既定ポートを落とす。

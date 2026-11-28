@@ -603,6 +603,14 @@ fn run_merge(
             ));
             continue;
         };
+        if !def.enabled {
+            // 無効化されたエンジンは選択候補に含めない（仕様 engine-definitions.md §2.1）。
+            warnings.push(Diagnostic::new(
+                WarningCode::W4004,
+                format!("engine '{selector}' is disabled and is excluded from the merge"),
+            ));
+            continue;
+        }
         match search_once(
             app,
             def,
@@ -734,7 +742,69 @@ fn candidate_engines(app: &App) -> Result<Vec<String>, AppError> {
     if out.is_empty() {
         return Err(AppError::new(ErrorCode::E4002));
     }
-    Ok(out)
+    // 無効化されたエンジンは選択候補に含めない（仕様 engine-definitions.md §2.1
+    // 「`enabled: false` のとき選択候補に含めない」）。
+    let enabled: Vec<String> = out
+        .iter()
+        .filter(|sel| match app.engines.get(sel) {
+            Some(def) => def.enabled,
+            None => true, // 未定義は実行時に E4002 として扱う
+        })
+        .cloned()
+        .collect();
+    if enabled.is_empty() {
+        if let Some(sel) = out.first()
+            && let Some(def) = app.engines.get(sel)
+            && !def.enabled
+        {
+            return Err(AppError::with_detail(
+                ErrorCode::E4002,
+                format!(
+                    "engine '{sel}' is disabled (enabled=false); remove `enabled: false` or choose another engine"
+                ),
+            ));
+        }
+        return Err(AppError::new(ErrorCode::E4002));
+    }
+    Ok(enabled)
+}
+
+/// 文字列テンプレート（`url` / `body` / query・headers の `Value`）で
+/// `{{apiKey}}` が使用されているか。
+fn tmpl_uses_api_key(def: &EngineDef) -> bool {
+    let mut strs: Vec<&str> = vec![&def.request.url];
+    for v in def
+        .request
+        .query
+        .values()
+        .chain(def.request.headers.values())
+    {
+        if let crate::core::engine::TmplValue::Value(s) = v {
+            strs.push(s);
+        }
+    }
+    if let Some(body) = &def.request.body {
+        strs.push(body);
+    }
+    strs.iter()
+        .any(|s| crate::core::engine::template_vars(s).contains(&"apiKey".to_string()))
+}
+
+/// `{{apiKey}}` を定義が参照する `value_env` のうち設定済みの最初の値に解決する。
+fn resolve_api_key(def: &EngineDef, secrets: &Secrets) -> Option<String> {
+    for v in def
+        .request
+        .headers
+        .values()
+        .chain(def.request.query.values())
+    {
+        if let crate::core::engine::TmplValue::Env { value_env } = v
+            && let Some(secret) = secrets.get(value_env)
+        {
+            return Some(secret.expose().to_string());
+        }
+    }
+    None
 }
 
 fn call_engine(
@@ -747,6 +817,26 @@ fn call_engine(
     pending_searches: &mut u64,
 ) -> Result<crate::adapters::engine::eval::EngineCall, AppError> {
     let (offset, page_number) = template::paging_values(def.paging.as_ref(), page, limit);
+    // `{{apiKey}}` は定義の `value_env` から解決する（仕様 §3.2 / §3.3）。
+    // 文字列テンプレートで `{{apiKey}}` を使っているのに `value_env` が設定されて
+    // いない場合は「利用不可」として E4002 を返す（従来は常に空文字に展開されていた）。
+    let secrets: Secrets = app.secrets.clone();
+    let api_key = if tmpl_uses_api_key(def) {
+        match resolve_api_key(def, &secrets) {
+            Some(key) => Some(key),
+            None => {
+                return Err(AppError::with_detail(
+                    ErrorCode::E4002,
+                    format!(
+                        "engine '{}' uses {{apiKey}} but none of its referenced value_env is set",
+                        def.selector()
+                    ),
+                ));
+            }
+        }
+    } else {
+        None
+    };
     let ctx = TmplCtx {
         query: query.to_string(),
         query_raw: query.to_string(),
@@ -756,12 +846,10 @@ fn call_engine(
         language: app.language().primary.clone(),
         locale: app.language().tag.clone(),
         region: def.defaults.region.clone().unwrap_or_default(),
-        api_key: None,
+        api_key,
         date_from: String::new(),
         date_to: String::new(),
     };
-    // API キーは定義の `value_env` から解決する（値はここでは保持しない）
-    let secrets: Secrets = app.secrets.clone();
     let profile = engine_profile(app, def);
     crate::adapters::engine::evaluate_with_preflight(
         app.clock.as_ref(),
@@ -790,12 +878,22 @@ pub fn engine_profile(app: &App, def: &EngineDef) -> crate::core::config::Networ
                 "network",
                 &app.bundled,
             );
-            match crate::adapters::config::find_resource(&dirs, id) {
-                Some(path) => crate::adapters::config::read_json_file(&path)
+            // まずディスク、次に埋め込み既定（`src/assets.rs`）、それでも無ければ
+            // アクティブなプロファイルにフォールバックする（Issue #59）。
+            if let Some(path) = crate::adapters::config::find_resource(&dirs, id) {
+                crate::adapters::config::read_json_file(&path)
                     .ok()
                     .and_then(|v| serde_json::from_value(v).ok())
-                    .unwrap_or_else(|| app.network.clone()),
-                None => app.network.clone(),
+                    .unwrap_or_else(|| app.network.clone())
+            } else {
+                match crate::assets::embedded_as::<crate::core::config::NetworkProfile>(
+                    crate::assets::Resource::Network,
+                    id,
+                    "network profile",
+                ) {
+                    Ok(Some(profile)) => profile,
+                    Ok(None) | Err(_) => app.network.clone(),
+                }
             }
         }
         _ => app.network.clone(),
@@ -822,18 +920,24 @@ pub fn next(app: &mut App, query: &str, current: &PageState) -> Result<SearchOut
 /// 検索語を変更して再検索する。
 pub fn refine(app: &mut App, previous: &str, new_query: &str) -> Result<SearchOutcome, AppError> {
     let mut outcome = run(app, new_query, 1)?;
+    // 正規化（空白の集約・制御文字除去・切り詰め）した検索語で比較する。
+    // 前後空白や内部空白の差だけでは `W4001` を出さない（従来は生の
+    // `previous != new_query` で比較し、空白の差でも誤発火していた）。
+    // 履歴・警告表示にも正規化済み文字列を使う。
+    let (prev_norm, _) = text::normalize_query(previous);
+    let (new_norm, _) = text::normalize_query(new_query);
     let entry = crate::core::history::HistoryEntry::new(
         app.history.next_id().unwrap_or_else(|_| "H?".to_string()),
         app.clock.now_utc(),
         app.current_session_id(),
         crate::core::history::EventType::Refine,
-        serde_json::json!({"query": new_query, "previous": previous}),
+        serde_json::json!({"query": new_norm, "previous": prev_norm}),
     );
     let _ = app.append_history(&entry);
-    if previous != new_query {
+    if prev_norm != new_norm {
         outcome.warnings.push(Diagnostic::new(
             WarningCode::W4001,
-            format!("changed the query from '{previous}' to '{new_query}'"),
+            format!("changed the query from '{prev_norm}' to '{new_norm}'"),
         ));
     }
     Ok(outcome)

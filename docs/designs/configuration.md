@@ -152,7 +152,7 @@ DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列�
 
 状態: 実装中（REF:src/usecases/document.rs）
 
-保存時は `cache.enabled` と `--no-cache` を検査して `expires_at` 付きで書き込むが、読込側（`REF:src/usecases/document.rs` の `load`）は `--refresh` 以外で既存キャッシュをそのまま返しており、`expires_at`・`--no-cache`・`cache.enabled=false` の判定漏れを Issue #60 で追跡する。
+保存時は `cache.enabled` と `--no-cache` を検査して `expires_at` 付きで書き込む。読込側（`REF:src/usecases/document.rs` の `load`）は `cache_entry_valid`（`cacheable`・`expires_at` 未経過）を通過したキャッシュのみ再利用し、`--no-cache` / `--refresh` 指定時と `cache.enabled=false` 時は再取得する。
 
 ### 5.3 検索結果をキャッシュする範囲
 
@@ -170,7 +170,7 @@ DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列�
 
 状態: 実装完了（REF:src/core/config/settings.rs, REF:src/usecases/config.rs）
 
-`Settings::validate()` が設定範囲を検査し、`Fail` が 1 件でもあれば起動時に `E1004` で中止する（`NetworkProfile::validate` / `quota::validate` の `Fail` が起動時に停止しない点と `FilterSet` / `NetworkProfile` の `schemaVersion` 未検査は Issue #59 で追跡）。
+`Settings::validate()` が設定範囲を検査し、`Fail` が 1 件でもあれば起動時に `E1004` で中止する。`usecases::config::build` も `NetworkProfile::validate` / `quota::validate` の `Fail` を `E1004` として起動時に停止させる。また `schemaVersion != 2` は `Settings` / `NetworkProfile` / `FilterSet` / `QuotaPolicy` のいずれでも `E1004` で拒否する（仕様 configuration.md §1.3）。
 
 ### 6.2 未知キーの温存
 
@@ -226,7 +226,7 @@ DuckDuckGo の `kl` は地域と言語の固定対（`jp-jp` / `us-en`）を列�
 
 状態: 実装完了（REF:src/ui/commands.rs, REF:src/ui/render.rs）
 
-`REF:src/ui/commands.rs` の `ConfigAction::Validate` が `settings`・有効な `network`・`quota` の検証を順に実行し、`Check` 列を `src/ui/render.rs` で `[ok]/[warn]/[fail]` に整形する（エンジン定義とフィルタ集合が `config validate` に含まれていない点は Issue #59 で追跡）。
+`REF:src/ui/commands.rs` の `ConfigAction::Validate` が `settings`・有効な `network`・`quota`・エンジン定義（`engine.<selector>` 接頭）・フィルタ集合（`CompiledFilters::compile`）の検証を順に実行し、`Check` 列を `src/ui/render.rs` で `[ok]/[warn]/[fail]` に整形する。
 
 ### 7.5 `config explain <key>`
 

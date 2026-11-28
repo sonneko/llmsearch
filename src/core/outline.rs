@@ -38,13 +38,29 @@ pub fn fence_flags(lines: &[&str]) -> Vec<bool> {
 }
 
 fn atx(line: &str) -> Option<(u8, String)> {
-    let trimmed = line.trim_start();
-    let level = trimmed.chars().take_while(|c| *c == '#').count();
+    // CommonMark に従う：先頭空白は 3 文字まで、`#`（1〜6 個）の直後は空白または
+    // 行末でなければならない。`#hashtag`（`#` 直後に空白無し）や 4 スペース以上
+    // 字下げの `#` 行は見出しではなく本文（仕様 context-assembly.md §1.1）。
+    // 従来は `trim_start` で先頭空白をすべて捨てていたため、ハッシュタグや
+    // 4 スペース字下げの `#` 行が見出し節（`S<n>`）として誤抽出されていた。
+    let leading_spaces = line.chars().take_while(|c| *c == ' ').count();
+    if leading_spaces > 3 {
+        return None;
+    }
+    let rest = &line[leading_spaces..];
+    let level = rest.chars().take_while(|c| *c == '#').count();
     if level == 0 || level > 6 {
         return None;
     }
-    let rest = trimmed[level..].trim_start();
-    let text = rest.trim_end().trim_end_matches('#').trim_end();
+    let after = &rest[level..];
+    if !after.is_empty() && !after.starts_with(' ') && !after.starts_with('\t') {
+        return None;
+    }
+    let text = after
+        .trim_start()
+        .trim_end()
+        .trim_end_matches('#')
+        .trim_end();
     Some((level as u8, text.to_string()))
 }
 

@@ -148,7 +148,7 @@
 
 状態: 実装完了（REF:src/assets.rs, REF:.github/workflows/ci.yml, REF:scripts/check-release.sh）
 
-スコープの各項目は `REF:docs/plans.md` のマイルストーンに割り当てる。項目 12（配布パッケージ）は M11 で埋め込み既定資産（`REF:src/assets.rs`）と 3 形態の配布互換ゲート（`REF:scripts/check-release.sh`）を導入して完了した（`network` / `filters` サブコマンド単体での埋め込み参照漏れは Issue #59 で追跡）。
+スコープの各項目は `REF:docs/plans.md` のマイルストーンに割り当てる。項目 12（配布パッケージ）は M11 で埋め込み既定資産（`REF:src/assets.rs`）と 3 形態の配布互換ゲート（`REF:scripts/check-release.sh`）を導入して完了した（`network` / `filters` サブコマンドも `resource_ids_with_embedded` / `resolve_resource_value` により埋め込み参照を踏襲する）。
 
 ### 5.2 非目標
 

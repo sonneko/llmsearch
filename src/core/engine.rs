@@ -559,7 +559,7 @@ const ALLOWED_VARS: &[&str] = &[
     "dateFrom", "dateTo",
 ];
 
-fn template_vars(s: &str) -> Vec<String> {
+pub(crate) fn template_vars(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = s;
     while let Some(start) = rest.find("{{") {
@@ -618,7 +618,8 @@ impl EngineDef {
                 self.request.encoding
             )));
         }
-        // テンプレート変数
+        // テンプレート変数。`request.body` も変数を含むため検査する（否则実行時に
+        // E1008 になるのに `engines validate` が通ってしまう）。
         let mut tmpls: Vec<&str> = vec![&self.request.url];
         for v in self
             .request
@@ -629,6 +630,9 @@ impl EngineDef {
             if let TmplValue::Value(s) = v {
                 tmpls.push(s);
             }
+        }
+        if let Some(body) = &self.request.body {
+            tmpls.push(body);
         }
         for t in tmpls {
             for var in template_vars(t) {
