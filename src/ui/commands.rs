@@ -335,7 +335,7 @@ pub fn run(
         Command::Read {
             target: t,
             sections,
-            children: _,
+            children,
             no_children,
             max_chars,
         } => {
@@ -354,10 +354,28 @@ pub fn run(
             }
             let doc = fetched.document.clone();
             if let Some(max) = max_chars {
-                app.settings.context.max_chars = (*max).clamp(500, 100_000);
+                // 範囲外の `--max-chars` は黙って丸めず `E1004`（仕様
+                // context-assembly.md §4.1「500〜100000 の範囲」）。
+                if *max < 500 || *max > 100_000 {
+                    return Err(AppError::with_detail(
+                        ErrorCode::E1004,
+                        format!("--max-chars must be in the range 500..=100000 (got {max})"),
+                    ));
+                }
+                app.settings.context.max_chars = *max;
             }
             let ids = parse_sections(&doc, sections)?;
-            let outcome = document::read(app, &doc, &ids, !no_children)?;
+            // 子節の扱い：`--no-children` > `--children` > 設定 `context.includeChildren`。
+            // 従来は `--children` を捨てて `!no_children` を渡していたため、
+            // 設定の `context.includeChildren = false` が常に無視されていた。
+            let include_children = if *no_children {
+                false
+            } else if *children {
+                true
+            } else {
+                app.settings.context.include_children
+            };
+            let outcome = document::read(app, &doc, &ids, include_children)?;
             if renderer.json {
                 for body in &outcome.sections {
                     renderer.event(&renderer.envelope(
@@ -491,13 +509,24 @@ fn parse_sections(
             }
         })?;
         for selection in parsed {
+            // 節は対象文書に属する。対象と異なる文書プレフィックス
+            // （例: `read D1 --section D99:S2`）は拒否する。従来は
+            // `if *id != doc.id {}` が空ブロックだったため、別文書 ID 指定が
+            // エラーにならず対象文書の節を返していた。
+            if let Some(doc_id) = selection.document
+                && doc_id != doc.id
+            {
+                return Err(AppError::with_detail(
+                    ErrorCode::E1005,
+                    format!("D{doc_id} is not the target document (D{})", doc.id),
+                )
+                .hint("use a section of the target document, e.g. `S3` or `D1:S3`"));
+            }
             for r in &selection.refs {
                 match r {
                     crate::core::select::Ref::Id { prefix: 'S', id } => out.push(*id),
-                    crate::core::select::Ref::Id { prefix: 'D', id } => {
-                        if *id != doc.id && !doc.url.is_empty() {
-                            // 別文書の指定は受け付けない
-                        }
+                    crate::core::select::Ref::Id { prefix: 'D', .. } => {
+                        // 単独の文書参照（例: `D1`）-> 対象文書全体。
                         out.push(0);
                     }
                     _ => {
@@ -932,7 +961,8 @@ fn run_network(
     );
     match action {
         None | Some(NetworkAction::List) => {
-            let ids = resource_ids(&dirs);
+            // 埋め込み既定も併せて列挙する（no-assets 形態でも `default` 等が表示される）。
+            let ids = resource_ids_with_embedded(&dirs, crate::assets::Resource::Network);
 
             if renderer.json {
                 renderer.event(&renderer.envelope(
@@ -951,16 +981,29 @@ fn run_network(
             Ok(0)
         }
         Some(NetworkAction::Show { id }) => {
-            let path = crate::adapters::config::find_resource(&dirs, id)
-                .ok_or_else(|| resource_not_found("network profile", id, &dirs, "network list"))?;
-            let mut value = crate::adapters::config::read_json_file(&path)?;
+            // ディスクから、なければ埋め込み既定（`src/assets.rs`）から解決する。
+            let (mut value, path) =
+                resolve_resource_value(&dirs, crate::assets::Resource::Network, id).ok_or_else(
+                    || {
+                        resource_not_found(
+                            "network profile",
+                            crate::assets::Resource::Network,
+                            id,
+                            &dirs,
+                            "network list",
+                        )
+                    },
+                )?;
             crate::core::secret::redact_json(&mut value, &app.secrets);
+            let path_str = path
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| crate::assets::EMBEDDED_SOURCE.to_string());
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "network",
                     json!({
                         "id": id,
-                        "path": path.display().to_string(),
+                        "path": path_str,
                         "definition": value,
                     }),
                 ));
@@ -1053,7 +1096,8 @@ fn run_filters(
     );
     match action {
         None | Some(FiltersAction::List) => {
-            let ids = resource_ids(&dirs);
+            // 埋め込み既定も併せて列挙する（no-assets 形態でも `default` が表示される）。
+            let ids = resource_ids_with_embedded(&dirs, crate::assets::Resource::Filters);
 
             if renderer.json {
                 renderer.event(&renderer.envelope(
@@ -1072,21 +1116,29 @@ fn run_filters(
             Ok(0)
         }
         Some(FiltersAction::Show { id, raw }) => {
-            let path = crate::adapters::config::find_resource(&dirs, id)
-                .ok_or_else(|| resource_not_found("filter set", id, &dirs, "filters list"))?;
-            let value = crate::adapters::config::read_json_file(&path)?;
+            // ディスクから、なければ埋め込み既定（`src/assets.rs`）から解決する。
+            let (value, path) = resolve_resource_value(&dirs, crate::assets::Resource::Filters, id)
+                .ok_or_else(|| {
+                    resource_not_found(
+                        "filter set",
+                        crate::assets::Resource::Filters,
+                        id,
+                        &dirs,
+                        "filters list",
+                    )
+                })?;
+            let path_str = path
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| crate::assets::EMBEDDED_SOURCE.to_string());
             let mut value = if *raw {
                 value
             } else {
                 let set: crate::core::config::FilterSet =
                     serde_json::from_value(value).map_err(|error| {
-                        AppError::with_detail(
-                            ErrorCode::E1003,
-                            format!("{}: {error}", path.display()),
-                        )
+                        AppError::with_detail(ErrorCode::E1003, format!("{path_str}: {error}"))
                     })?;
                 serde_json::to_value(set).map_err(|error| {
-                    AppError::with_detail(ErrorCode::E1003, format!("{}: {error}", path.display()))
+                    AppError::with_detail(ErrorCode::E1003, format!("{path_str}: {error}"))
                 })?
             };
             crate::core::secret::redact_json(&mut value, &app.secrets);
@@ -1095,7 +1147,7 @@ fn run_filters(
                     "filters",
                     json!({
                         "id": id,
-                        "path": path.display().to_string(),
+                        "path": path_str,
                         "definition": value,
                     }),
                 ));
@@ -1570,6 +1622,39 @@ fn run_config(
                 }
                 checks.push(check);
             }
+            // エンジン定義・フィルタ定義も検証する（仕様 configuration.md §6
+            // 「全ファイルを検証する」）。従来は settings / network / quota の
+            // 3 種のみ検査していた。
+            for engine in app.engines.all() {
+                for check in engine.validate() {
+                    let check = match check {
+                        crate::core::errors::Check::Fail(t) => {
+                            crate::core::errors::Check::Fail(format!("{}: {t}", engine.selector()))
+                        }
+                        crate::core::errors::Check::Warn(t) => {
+                            crate::core::errors::Check::Warn(format!("{}: {t}", engine.selector()))
+                        }
+                        other => other,
+                    };
+                    if check.is_fail() {
+                        failed = true;
+                    }
+                    checks.push(check);
+                }
+            }
+            // フィルタ定義：`schemaVersion` / 正規表現等の問題を検出するため
+            // 再コンパイルして検証する。
+            match crate::core::config::filter::CompiledFilters::compile(app.filters.set.clone()) {
+                Ok(_) => {}
+                Err(err) => {
+                    failed = true;
+                    checks.push(crate::core::errors::Check::Fail(format!(
+                        "filters: {} ({})",
+                        err.code.as_str(),
+                        err.detail.clone().unwrap_or_default()
+                    )));
+                }
+            }
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "diagnostics",
@@ -1641,13 +1726,45 @@ fn resource_ids(dirs: &[std::path::PathBuf]) -> Vec<String> {
     ids.into_iter().collect()
 }
 
+/// ディスク上の ID と埋め込み既定（`src/assets.rs`）の ID を併せて返す。
+///
+/// `no-assets` 形態（`assets/` を同梱しない単一バイナリ）でも `default` /
+/// `self-hosted` 等が列挙されるようにする（Issue #59）。
+fn resource_ids_with_embedded(
+    dirs: &[std::path::PathBuf],
+    resource: crate::assets::Resource,
+) -> Vec<String> {
+    let mut set: std::collections::BTreeSet<String> = resource_ids(dirs).into_iter().collect();
+    for (name, _) in resource.embedded() {
+        set.insert(name.to_string());
+    }
+    set.into_iter().collect()
+}
+
+/// `<id>.json` をディスクから、見つからなければ埋め込み既定から解決する。
+///
+/// 戻り値は `(JSON 値, ディスク上のパス（埋め込みの場合は `None`）)`。
+fn resolve_resource_value(
+    dirs: &[std::path::PathBuf],
+    resource: crate::assets::Resource,
+    id: &str,
+) -> Option<(serde_json::Value, Option<std::path::PathBuf>)> {
+    if let Some(path) = crate::adapters::config::find_resource(dirs, id)
+        && let Ok(value) = crate::adapters::config::read_json_file(&path)
+    {
+        return Some((value, Some(path)));
+    }
+    crate::assets::embedded_json(resource, id).map(|v| (v, None))
+}
+
 fn resource_not_found(
     kind: &str,
+    resource: crate::assets::Resource,
     id: &str,
     dirs: &[std::path::PathBuf],
     list_command: &str,
 ) -> AppError {
-    let available = resource_ids(dirs);
+    let available = resource_ids_with_embedded(dirs, resource);
     let candidates = if available.is_empty() {
         "none".to_string()
     } else {

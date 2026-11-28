@@ -301,6 +301,7 @@ fn no_panics_outside_tests() {
     const ALLOWED: &[(&str, &str)] = &[
         ("src/adapters/http.rs", "failed to build the tokio runtime"),
         ("src/core/convert.rs", "static selector"),
+        ("src/core/convert.rs", "static regex"),
         ("src/core/markdown.rs", "link regex"),
         ("src/core/select.rs", "static pattern"),
     ];

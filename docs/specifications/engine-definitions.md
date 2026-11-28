@@ -97,7 +97,7 @@
 
 ### 3.4 送信前の検証
 
-次の場合は送信せずに `E1004`（定義の不備）を返す。URL が `http` / `https` 以外、テンプレート変数が未知、`{{apiKey}}` を使用しているのに `value_env` が無い。
+次の場合は送信せずに `E1004`（定義の不備）を返す。URL が `http` / `https` 以外、テンプレート変数が未知（`request.body` に含まれるものも含む）、`{{apiKey}}` を使用しているのに `value_env` が無い。
 
 ---
 
@@ -112,6 +112,7 @@
 | `items` | 必須 | オブジェクト | 1 件の結果を表す範囲の指定 |
 | `fields` | 必須 | オブジェクト | 各フィールドの抽出ルール |
 | `errorWhen` | 任意 | 配列 | 「結果なし」とみなす条件（§4.5） |
+| `transformArgs` | 任意 | オブジェクト | 変換に渡す共通引数（`chars` / `keys` / `formats` / `pattern` / `with`）。§4.4 参照 |
 
 ### 4.2 `items` の指定
 
@@ -134,7 +135,7 @@
 
 ### 4.4 変換（`transform`）
 
-変換は配列で指定し、先頭から順に適用する。
+変換は配列で指定し、先頭から順に適用する。`truncate` / `replace` / `to_date` / `unwrap_redirect` が必要とする引数（`chars` / `pattern`・`with` / `formats` / `keys`）は、`response` 配下の `transformArgs` オブジェクトに指定する（§4.1）。
 
 | 変換 | 内容 |
 |---|---|
@@ -169,7 +170,7 @@
 
 検索エンジンは結果リンクを自前のホストで包んで返すことがある（例: `//duckduckgo.com/l/?uddg=<実 URL>`）。結果 URL として利用者に提示し、また取得するのは、包みを解いた実 URL でなければならない。
 
-- 包みを解く対象は、クエリに実 URL を含むリダイレクト用 URL とする。参照するクエリ名は `unwrap_redirect` の `keys` で指定でき、省略時は一般的な名前（`uddg`, `url`, `u`, `q`, `target`, `redirect`, `redirect_dest` など）を用いる。
+- 包みを解く対象は、クエリに実 URL を含むリダイレクト用 URL とする。参照するクエリ名は `unwrap_redirect` の `keys` で指定でき、省略時は一般的な名前（`uddg`, `url`, `u`, `q`, `target`, `redirect`, `redirect_url`, `dest`, `destination`, `to`, `link`, `href` など）を用いる。
 - リダイレクト用 URL はプロトコル相対（`//host/...`）や相対パスで現れることがある。基準 URL で絶対化してから解釈する。
 - 値のパーセントエンコード、およびリダイレクトが別のリダイレクトを包む入れ子（2 段まで）を解く。
 - 包みを解かずに残った結果 URL があっても、取得時には中継ページ（HTTP の 3xx、`<meta http-equiv="refresh">`、スクリプトによる location 遷移）をたどって実体を取得する。たどる回数は `maxRedirects` を上限とする。

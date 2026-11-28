@@ -1,0 +1,81 @@
+############ BEFORE (/tmp/llmsearch-prefix) ############
+PORT=43863
+
+===== #57-3 engines validate stub (body {{unknown_in_body}}) =====
+[stub]
+[  ok] no issues
+rc=0
+----- engines test stub --dry-run -----
+error: E1008 unknown template variable
+  detail: {{unknown_in_body}}
+  hint: run `engines validate` to see allowed variables
+rc=1
+
+===== #57-1 encoding=euc-jp dry-run (expect EUC-JP %C6%FC%CB%DC) =====
+GET http://127.0.0.1:43863/search?k=&q=%E6%97%A5%E6%9C%AC
+
+===== #57-2 enabled:false search (expect excluded, rc!=0) =====
+disabled search rc=0
+session 20261128-051300-1566 (resume with --session 20261128-051300-1566)
+Q: climate    engine: disabled    showing: 1-2
+[R1] First result <http://127.0.0.1:43863/doc1?author=***&keyword=***&design=***>
+
+===== #58-1 401 (expect E4003 rc4) =====
+401 rc=2 /e401 requests=1
+error: E2003 HTTP error response
+===== #58-1 403 (expect 1 request, no retry) =====
+403 rc=4 /e403 requests=3
+error: E4003 rate limited or blocked
+
+===== #58-2 redaction + relative URL =====
+loop1 search rc=0
+result urls:
+http://127.0.0.1:43863/doc1?author=***&keyword=***&design=***>
+http://127.0.0.1:43863/doc2>
+
+===== #58-5 refine '  hello  ' (expect no W4001 false fire) =====
+(session S1=20261128-051300-3067)
+warning: W4001 changed the query from 'hello' to '  hello  '
+(refine done; W4001 lines above = false fire)
+
+===== #59-1 no-assets (embedded fallback) =====
+-- network list --
+default
+self-hosted
+rc=0
+-- network show default --
+rc=0
+{
+  "schemaVersion": 2,
+-- filters list --
+default
+rc=0
+-- filters show default --
+rc=0
+{
+  "schemaVersion": 2,
+
+===== #59-2 invalid network profile (schemaVersion=99, timeout=1, Host=evil) =====
+invalid network startup rc=0 /search requests=1
+
+===== #60-2 outline doc1 (hashtag must NOT be a heading) =====
+S1    h1  Main title                                (65 chars)
+S2    h1  hashtag\_without\_space is not a headin…  (1980 chars) ↓
+  S3    h2  Second section                            (1910 chars)
+----- read doc1 whole (S0) img line (alt must be empty) -----
+![preserved-alt-text](http://127.0.0.1:43863/img.png)
+
+===== #60-3 ~~~ fence truncation (--max-chars 500) =====
+11:\~~~sh
+18:[truncated: shown 468 / total 2070 chars]
+19:--- end ---
+
+===== #60-4 cross-doc D99:S2 (expect rc!=0) + includeChildren (doc3) =====
+read D1 --section D99:S2 rc=0
+includeChildren default: 'child a body' present=1 (expect 1); --no-children: present=0 (expect 0)
+settings includeChildren=false (no flag): 'child a body' present=1 (1=bug, 0=fixed)
+
+===== #60-5 --max-chars out of range (expect E1004) =====
+read --max-chars 28 rc=0
+
+===== BEFORE DONE =====

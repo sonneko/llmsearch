@@ -142,11 +142,19 @@ pub fn fetch(app: &mut App, url: &url::Url) -> Result<Fetched, AppError> {
 }
 
 /// セッション内の文書を読み込む（キャッシュ失効時は再取得）。
+///
+/// キャッシュを再利用するには、`--refresh`・`--no-cache`・`cache.enabled=false`
+/// がいずれも無効で、かつエントリが TTL（`expires_at`）の有効期限内であること
+/// （仕様 configuration.md §5.1/§5.3、document-fetching.md §5）。従来は読込側が
+/// これらをすべて無視し、古くなったキャッシュ本文を返却していた。
 pub fn load(app: &mut App, document: &DocumentRef) -> Result<LoadedDocument, AppError> {
     let url = crate::core::url::parse(&document.url)?;
     let cached = app.documents.get(&url)?;
-    if let Some((_, markdown)) = cached
+    if let Some((meta, markdown)) = cached
         && !app.refresh
+        && !app.no_cache
+        && app.settings.cache.enabled
+        && cache_entry_valid(app.settings.cache.ttl_hours, app.clock.now_utc(), &meta)
     {
         return Ok(LoadedDocument {
             document: document.clone(),
@@ -154,14 +162,34 @@ pub fn load(app: &mut App, document: &DocumentRef) -> Result<LoadedDocument, App
             refetched: false,
         });
     }
-    // 保存されない場合（`--no-cache` と `robots.respect = false`）でも、
-    // いま取った本文をそのまま使う（取り直さない）。
     let fetched = fetch(app, &url)?;
     Ok(LoadedDocument {
         document: fetched.document,
         markdown: fetched.markdown,
         refetched: true,
     })
+}
+
+/// キャッシュエントリが再利用可能か（TTL・キャッシュ可能性・設定 `ttl_hours` を検査する）。
+///
+/// 純関数として `ttl_hours` と `now` を受け取り、単体検証できるようにする
+/// （問題 #60-1: 読込側が `expires_at`・`--no-cache`・`cache.enabled=false` を
+/// 無視していた。呼び出し側は `!no_cache` と `cache.enabled` を併せて検査する）。
+fn cache_entry_valid(
+    ttl_hours: u64,
+    now: chrono::DateTime<chrono::Utc>,
+    meta: &crate::core::model::DocumentMeta,
+) -> bool {
+    if !meta.cacheable {
+        return false;
+    }
+    if ttl_hours == 0 {
+        return false;
+    }
+    let Ok(expires) = chrono::DateTime::parse_from_rfc3339(&meta.expires_at) else {
+        return false;
+    };
+    now <= expires.with_timezone(&chrono::Utc)
 }
 
 /// アウトライン（見出し一覧）。
@@ -339,6 +367,15 @@ pub fn read(
     let total_chars: usize = bodies.iter().map(|b| text::chars(&b.text)).sum();
     let truncated = bodies.iter().any(|b| b.truncated);
 
+    // まず chars クォータを確定する。超過（`E5004`）で失敗した場合は履歴に
+    // 成功イベントを残さない（従来は `append_history` が `consume_all` より先
+    // に来たため、失敗した `read` も成功として履歴に残っていた）。
+    let mut guard = app.guard()?;
+    guard.consume_all(Usage {
+        chars: total_chars as u64,
+        ..Default::default()
+    })?;
+
     if let Some(first) = bodies.first() {
         let entry = crate::core::history::HistoryEntry::new(
             app.history.next_id().unwrap_or_else(|_| "H?".to_string()),
@@ -355,12 +392,6 @@ pub fn read(
         );
         let _ = app.append_history(&entry);
     }
-
-    let mut guard = app.guard()?;
-    guard.consume_all(Usage {
-        chars: total_chars as u64,
-        ..Default::default()
-    })?;
 
     Ok(ReadOutcome {
         sections: bodies,
@@ -461,5 +492,39 @@ mod tests {
         let headings = outline::extract_headings(md);
         let next = next_heading_id(&headings, &headings[1]);
         assert_eq!(next, Some(3));
+    }
+
+    /// #60-1: キャッシュの読込側が `expires_at`（TTL）・`ttl_hours`・`cacheable` を
+    /// 検査すること（`--no-cache` と `cache.enabled=false` は `load` の呼び出し側で
+    /// `!app.no_cache` / `app.settings.cache.enabled` として併せて検査される）。
+    #[test]
+    fn cache_entry_valid_gates_ttl_cacheable_and_expiry() {
+        use crate::core::model::DocumentMeta;
+        let now = chrono::DateTime::parse_from_rfc3339("2026-11-28T00:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let mut meta = DocumentMeta {
+            url: "https://e.jp/".into(),
+            final_url: "https://e.jp/".into(),
+            title: "t".into(),
+            fetched_at: "2026-11-28T00:00:00Z".into(),
+            expires_at: "2026-11-29T00:00:00Z".into(),
+            chars: 10,
+            headings: 1,
+            extractor: "density".into(),
+            cacheable: true,
+            ..Default::default()
+        };
+        // 有効期限内 & cacheable & ttl_hours>0 -> 再利用可能。
+        assert!(cache_entry_valid(24, now, &meta));
+        // 期限切れ（`expires_at` が過去）-> 再利用不可（再取得）。
+        meta.expires_at = "2000-01-01T00:00:00Z".into();
+        assert!(!cache_entry_valid(24, now, &meta));
+        // `ttl_hours=0` -> 再利用不可。
+        meta.expires_at = "2026-11-29T00:00:00Z".into();
+        assert!(!cache_entry_valid(0, now, &meta));
+        // `cacheable=false`（例: `Cache-Control: no-store`）-> 再利用不可。
+        meta.cacheable = false;
+        assert!(!cache_entry_valid(24, now, &meta));
     }
 }

@@ -105,32 +105,34 @@ pub fn convert(
         strip.extend(cf.strip_selectors.iter().cloned());
     }
 
+    // まず除去セレクタ（`nav` / `aside` / `footer` 等）を本文に適用してから、
+    // 密度 / readability でメインコンテンツを選ぶ（仕様 document-fetching.md
+    // §2.1 / §2.2）。従来は `remove_selectors` より先に `pick_by_density` を
+    // 走らせており、nav / aside / footer が密度の計算に含まれていた。
+    let body_html = doc
+        .select(&sel("body"))
+        .next()
+        .map(|e| e.inner_html())
+        .unwrap_or_else(|| doc.root_element().inner_html());
+    let cleaned_body = remove_selectors(&body_html, &strip);
+    let cleaned_doc = Html::parse_document(&cleaned_body);
+
     let container = match mode {
         ExtractMode::Whole => None,
-        ExtractMode::Density => pick_by_density(&doc),
-        ExtractMode::Readability => pick_by_readability(&doc),
+        ExtractMode::Density => pick_by_density(&cleaned_doc),
+        ExtractMode::Readability => pick_by_readability(&cleaned_doc),
     };
 
     let html_fragment = match container {
-        Some(element) => {
-            let mut clone = element.html();
-            clone = remove_selectors(&clone, &strip);
-            clone
-        }
+        Some(element) => element.html(),
         None => {
-            let body = doc
-                .select(&sel("body"))
-                .next()
-                .map(|e| e.inner_html())
-                .unwrap_or_else(|| doc.root_element().inner_html());
-            let cleaned = remove_selectors(&body, &strip);
             if mode != ExtractMode::Whole {
                 warnings.push(Diagnostic::new(
                     WarningCode::W3001,
                     "main content detection failed; the whole body was converted",
                 ));
             }
-            cleaned
+            cleaned_body
         }
     };
 
@@ -141,6 +143,10 @@ pub fn convert(
         .map_err(|e| {
             AppError::with_detail(ErrorCode::E3004, format!("Markdown conversion failed: {e}"))
         })?;
+
+    // 画像は alt を保持しない（仕様 document-fetching.md §3.1）。`![alt](url)` は
+    // `![](url)` へ置き換える（従来は alt 文字列をそのまま保持していた）。
+    md = strip_image_alt(&md);
 
     // 見出しの無い文書はタイトルを見出しとして補う（節選択を可能にするため）
     let heads = outline::extract_headings(&md);
@@ -258,6 +264,16 @@ fn remove_selectors(html: &str, strip: &[String]) -> String {
         }
     }
     out
+}
+
+/// 画像記法の alt を除去する（`![alt](url)` -> `![](url)`）。
+///
+/// 仕様 document-fetching.md §3.1 は「画像は代替テキストを空にした画像記法で出力
+/// する（元の `alt` は出力しない）」とする。
+fn strip_image_alt(md: &str) -> String {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"!\[[^\]]*\]").expect("static regex"));
+    re.replace_all(md, "![]").into_owned()
 }
 
 fn node_key(el: &scraper::node::Element) -> String {

@@ -390,7 +390,9 @@ fn http_status_error(
     let wait_ms = retry_after.and_then(|v| crate::core::retry::parse_retry_after_ms(v, now));
     let with_meta = |err: AppError| err.retry_after_ms(wait_ms).status(status);
     match status {
-        429 | 403 => with_meta(AppError::with_detail(ErrorCode::E4003, detail)),
+        // `401` / `403` は `E4003`（制限・認証）。`429` は再試行対象で最終失敗時も `E4003`。
+        // 仕様 network.md §8.3。
+        401 | 403 | 429 => with_meta(AppError::with_detail(ErrorCode::E4003, detail)),
         408 => with_meta(AppError::with_detail(ErrorCode::E2002, detail)),
         _ => with_meta(AppError::with_detail(ErrorCode::E2003, detail)),
     }
@@ -490,15 +492,26 @@ fn retryable(profile: &NetworkProfile, err: &AppError) -> bool {
         return false;
     }
     match err.code {
-        ErrorCode::E2001 | ErrorCode::E2002 => profile
+        // タイムアウト（E2002）：`onError` に "timeout" が含まれる場合のみ再試行。
+        ErrorCode::E2002 => profile
             .retry
             .on_error
             .iter()
-            .any(|e| matches!(e.as_str(), "timeout" | "connect")),
-        ErrorCode::E4003 => true,
-        ErrorCode::E2003 => {
-            // 状態番号は詳細文の解析ではなくエラーが持つ値を使う
-            // （詳細文には `Retry-After` などが混ざり解析できないため）。
+            .any(|e| e.as_str() == "timeout"),
+        // 接続失敗（E2001）：`onError` に "connect" が含まれる場合のみ再試行。
+        // （従来は timeout / connect を論理和で判定し、片方だけでも両方が
+        // 再試行されていた。）
+        ErrorCode::E2001 => profile
+            .retry
+            .on_error
+            .iter()
+            .any(|e| e.as_str() == "connect"),
+        // HTTP ステータス由来（401/403/429 -> E4003、4xx/5xx -> E2003）：
+        // そのステータスが `onStatus` に含まれる場合のみ再試行する。
+        // （従来は E4003 を無条件に再試行し、`onStatus` に無い 401/403 も
+        // 再試行されていた。）状態番号は詳細文の解析ではなくエラーが持つ値を使う
+        // （詳細文には `Retry-After` などが混ざり解析できないため）。
+        ErrorCode::E4003 | ErrorCode::E2003 => {
             let status = err.status.unwrap_or(0);
             profile.retry.on_status.contains(&status)
         }

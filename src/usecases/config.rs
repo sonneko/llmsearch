@@ -141,7 +141,17 @@ pub fn build(
         resolved.sources.push(path.clone());
     }
     resolved.network_path = network_path.clone();
-    resolved.checks.extend(network.validate());
+    // NetworkProfile の検証失敗（範囲外の値・禁止ヘッダ上書き・不正な
+    // `schemaVersion` 等）は起動を止めないまま継続されていた（仕様
+    // configuration.md §6.1 / network.md §2.2「検証に失敗した場合は処理を開始しない」）。
+    let network_checks = network.validate();
+    if let Some(fail) = network_checks.iter().find(|c| c.is_fail()) {
+        return Err(AppError::with_detail(
+            ErrorCode::E1004,
+            format!("network profile: {}", fail.text()),
+        ));
+    }
+    resolved.checks.extend(network_checks);
     for w in crate::adapters::http::profile_warnings(&network) {
         resolved.warnings.push(w);
     }
@@ -170,9 +180,16 @@ pub fn build(
         resolved.sources.push(path.clone());
     }
     resolved.quota_path = quota_path.clone();
-    resolved
-        .checks
-        .extend(crate::core::config::quota::validate(&quota));
+    // QuotaPolicy の検証失敗（不正な `schemaVersion` 等）は無視されて起動・実行が
+    // 継続していた（仕様 configuration.md §6.1「検証に失敗した場合は処理を開始しない」）。
+    let quota_checks = crate::core::config::quota::validate(&quota);
+    if let Some(fail) = quota_checks.iter().find(|c| c.is_fail()) {
+        return Err(AppError::with_detail(
+            ErrorCode::E1004,
+            format!("quota policy: {}", fail.text()),
+        ));
+    }
+    resolved.checks.extend(quota_checks);
 
     // エンジン定義
     let dirs = engine_dirs(env.as_ref(), &base_dir, &bundled, &bootstrap.engines_dirs);
@@ -684,6 +701,14 @@ fn origin_of(app: &App, resolved: &Resolved, key: &str) -> (Origin, String) {
     if let Some(_value) = by_argv {
         return (Origin::Argument, String::new());
     }
+    // 引数だが `Option<String>` では表現できないものをここで扱う。
+    // `--engines-dir`（複数可）と `--no-cache`。
+    if key == "engines.dir" && !argv.engines_dirs.is_empty() {
+        return (Origin::Argument, String::new());
+    }
+    if key == "cache.enabled" && argv.no_cache {
+        return (Origin::Argument, String::new());
+    }
 
     // 2. 環境変数（同一キーへ写す複数の変数のうち、実効のものを選ぶ）
     let env = app.env.as_ref();
@@ -728,6 +753,12 @@ fn origin_of(app: &App, resolved: &Resolved, key: &str) -> (Origin, String) {
             return (
                 Origin::Env("LLMSEARCH_STATE_DIR".into()),
                 "LLMSEARCH_STATE_DIR".into(),
+            );
+        }
+        "engines.dir" if env.var("LLMSEARCH_ENGINES_DIR").is_some() => {
+            return (
+                Origin::Env("LLMSEARCH_ENGINES_DIR".into()),
+                "LLMSEARCH_ENGINES_DIR".into(),
             );
         }
         _ => {}

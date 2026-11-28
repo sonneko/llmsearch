@@ -1,0 +1,82 @@
+############ AFTER (/home/user/llmsearch/target/debug/llmsearch) ############
+PORT=43863
+
+===== #57-3 engines validate stub (body {{unknown_in_body}}) =====
+error: E1004 invalid configuration value
+  detail: stub: unknown template variable {{unknown_in_body}}
+  hint: run `config validate` / `engines validate`
+rc=1
+----- engines test stub --dry-run -----
+error: E1004 invalid configuration value
+  detail: stub: unknown template variable {{unknown_in_body}}
+  hint: run `config validate` / `engines validate`
+rc=1
+
+===== #57-1 encoding=euc-jp dry-run (expect EUC-JP %C6%FC%CB%DC) =====
+GET http://127.0.0.1:43863/search?k=&q=%C6%FC%CB%DC
+
+===== #57-2 enabled:false search (expect excluded, rc!=0) =====
+disabled search rc=4
+error: E4002 search engine is unavailable
+  detail: engine 'disabled' is disabled (enabled=false); remove `enabled: false` or choose another engine
+  hint: run `engines list`
+
+===== #58-1 401 (expect E4003 rc4) =====
+401 rc=4 /e401 requests=1
+error: E4003 rate limited or blocked
+===== #58-1 403 (expect 1 request, no retry) =====
+403 rc=4 /e403 requests=1
+error: E4003 rate limited or blocked
+
+===== #58-2 redaction + relative URL =====
+loop1 search rc=0
+result urls:
+http://127.0.0.1:43863/doc1?author=alice&keyword=climate&design=modern>
+
+===== #58-5 refine '  hello  ' (expect no W4001 false fire) =====
+(session S1=20261128-051305-1548)
+(refine done; W4001 lines above = false fire)
+
+===== #59-1 no-assets (embedded fallback) =====
+-- network list --
+default
+self-hosted
+rc=0
+-- network show default --
+rc=0
+{
+  "schemaVersion": 2,
+-- filters list --
+default
+rc=0
+-- filters show default --
+rc=0
+{
+  "schemaVersion": 2,
+
+===== #59-2 invalid network profile (schemaVersion=99, timeout=1, Host=evil) =====
+invalid network startup rc=1 /search requests=0
+error: E1004 invalid configuration value
+
+===== #60-2 outline doc1 (hashtag must NOT be a heading) =====
+S1    h1  Main title                                (2068 chars) ↓
+  S2    h2  Second section                            (1910 chars)
+----- read doc1 whole (S0) img line (alt must be empty) -----
+![](http://127.0.0.1:43863/img.png)
+
+===== #60-3 ~~~ fence truncation (--max-chars 500) =====
+7:\~~~sh
+16:[truncated: shown 464 / total 1972 chars]
+17:--- end ---
+
+===== #60-4 cross-doc D99:S2 (expect rc!=0) + includeChildren (doc3) =====
+read D1 --section D99:S2 rc=1
+error: E1005 cannot parse the selection
+includeChildren default: 'child a body' present=1 (expect 1); --no-children: present=0 (expect 0)
+settings includeChildren=false (no flag): 'child a body' present=0 (1=bug, 0=fixed)
+
+===== #60-5 --max-chars out of range (expect E1004) =====
+read --max-chars 28 rc=1
+error: E1004 invalid configuration value
+
+===== AFTER DONE =====

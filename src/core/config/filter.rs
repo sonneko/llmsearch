@@ -323,6 +323,19 @@ pub struct CompiledFilters {
 
 impl CompiledFilters {
     pub fn compile(set: FilterSet) -> Result<Self, AppError> {
+        // 不正な `schemaVersion`（!= 2）を拒否する（仕様 configuration.md §1.3）。
+        // `Settings` / `NetworkProfile` / `QuotaPolicy` は検査していたが、
+        // `FilterSet` は `schema_version` フィールドを読み込むだけで値を一切
+        // 検証していなかった。
+        if set.schema_version != 2 {
+            return Err(AppError::with_detail(
+                ErrorCode::E1004,
+                format!(
+                    "filters.schemaVersion = {} (supported: 2)",
+                    set.schema_version
+                ),
+            ));
+        }
         let compile_list =
             |prefix: &str, rules: &[RuleSpec]| -> Result<Vec<CompiledRule>, AppError> {
                 rules

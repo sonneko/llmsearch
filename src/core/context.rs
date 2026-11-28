@@ -42,33 +42,38 @@ pub fn truncate_to_budget(text: &str, limit: usize) -> (String, bool, usize) {
     }
     let mut used = 0usize;
     let mut out: Vec<&str> = Vec::new();
-    let mut open_fence: Option<String> = None;
+    // 開いているフェンスのマーカー（"```" / "~~~"）。閉じフェンスは開きフェンスと
+    // 同一の文字で補う（仕様 context-assembly.md §4.3「コードブロックの途中で
+    // 終わった場合は閉じフェンスを補う」）。従来は閉じが "```" 固定のため、
+    // `~~~sh` ブロック途中で切り詰めると `~~~` が閉じられず、`[truncated: ...]` と
+    // `--- end ---` がコードブロック内に飲み込まれていた。
+    let mut open_fence: Option<&'static str> = None;
     for line in text.lines() {
         let line_chars = chars(line) + 1; // 改行込み
         if used + line_chars > limit {
             break;
         }
         let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("```") {
-            if open_fence.is_some() {
-                open_fence = None;
-            } else {
-                open_fence = Some(format!("```{rest}"));
-            }
-        } else if let Some(rest) = trimmed.strip_prefix("~~~") {
-            if open_fence.is_some() {
-                open_fence = None;
-            } else {
-                open_fence = Some(format!("~~~{rest}"));
-            }
+        if trimmed.starts_with("```") {
+            open_fence = match open_fence {
+                Some("```") => None, // 同一マーカーで閉じる
+                Some(other) => Some(other),
+                None => Some("```"),
+            };
+        } else if trimmed.starts_with("~~~") {
+            open_fence = match open_fence {
+                Some("~~~") => None,
+                Some(other) => Some(other),
+                None => Some("~~~"),
+            };
         }
         used += line_chars;
         out.push(line);
     }
     let mut body = out.join("\n");
-    if open_fence.is_some() {
+    if let Some(marker) = open_fence {
         body.push('\n');
-        body.push_str("```");
+        body.push_str(marker);
     }
     (body, true, total)
 }
@@ -105,5 +110,23 @@ mod tests {
         assert_eq!(out, "abc");
         assert!(!truncated);
         assert_eq!(total, 3);
+    }
+
+    /// #60-3: `~~~sh` ブロックを途中で切り詰めても、閉じフェンスは開きフェンスと同じ
+    /// `~~~` で補う（従来は ` ``` ` 固定で閉じられず、フェンスが開いたまま
+    /// `[truncated: ...]` / `--- end ---` がコードブロック内に飲み込まれていた）。
+    #[test]
+    fn truncates_and_closes_tilde_fence_with_tilde() {
+        let body = (0..40)
+            .map(|i| format!("echo line_{i:04} payload_padding_padding_padding"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let text = format!("~~~sh\n{body}\n~~~\n");
+        let (out, truncated, total) = truncate_to_budget(&text, 200);
+        assert!(truncated);
+        assert!(total > 200);
+        // 開いた `~~~` フェンスは `~~~` で閉じられ、バッククォートで閉じられない。
+        assert!(out.ends_with("~~~"));
+        assert!(!out.ends_with("```"));
     }
 }

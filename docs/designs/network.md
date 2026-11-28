@@ -18,7 +18,7 @@
 
 状態: 実装完了（REF:src/adapters/config/mod.rs, REF:src/usecases/search.rs）
 
-起動時の全体プロファイルは `src/adapters/config/mod.rs` の `resolve_network` が `--network` → `LLMSEARCH_NETWORK` → 設定 `network` → `default` の順に解決する。エンジン定義が固有の `network` を持つ場合は検索実行時に `src/usecases/search.rs` の `engine_profile` がそれを優先する（エンジン別プロファイルと `network` サブコマンドでの埋め込み既定・`--state-dir` 対応漏れは Issue #59 で追跡）。
+起動時の全体プロファイルは `src/adapters/config/mod.rs` の `resolve_network` が `--network` → `LLMSEARCH_NETWORK` → 設定 `network` → `default` の順に解決する。エンジン定義が固有の `network` を持つ場合は検索実行時に `src/usecases/search.rs` の `engine_profile` がそれを優先する（エンジン別プロファイルもディスク → 埋め込み既定 → アクティブプロファイルの順で解決し、`network` サブコマンドも埋め込み既定・`--state-dir` を踏襲する）。
 
 ### 1.3 プロファイルの探索
 
@@ -66,7 +66,7 @@
 
 再試行は `src/adapters/http.rs` の `ReqwestClient::send_blocking` がループとして実装する（汎用の `retry_with` 関数は持たない）。`send_blocking_with_preflight` 経由の検索は各 transport 試行の直前に callback を呼び、クォータ超過なら追加送信を止める。
 
-- 判定: `retryable(profile, err) -> bool` がエラーコードと `retry.onError` / `retry.onStatus` で決める（現状 `E4003` を `onStatus` に関わらず再試行対象としている点、および `onError` の `timeout` と `connect` が同一条件に束ねられている点は Issue #58 で追跡）。
+- 判定: `retryable(profile, err) -> bool` がエラーコードと `retry.onError` / `retry.onStatus` で決める（HTTP ステータス由来のエラー（`E4003` / `E2003`）はそのステータスが `onStatus` に含まれる場合のみ再試行し、`onError` の `timeout`（`E2002`）と `connect`（`E2001`）はそれぞれ別条件で判定する）。
 - 待機: `retry_wait(profile, last_error, attempt, jitter) -> u64` が `RetryPolicy::backoff(attempt, jitter)`（`backoffMs * factor^(attempt-1)` を `maxBackoffMs` で頭打ちにし、`jitterMs` の範囲で加算）を呼ぶ。
 - `Retry-After` は秒数と HTTP-date の両方を解釈する（`chrono` 使用）。解釈は `REF:src/core/retry.rs` の `parse_retry_after_ms(value, now)`（純粋関数）に閉じ、日付形式は `RFC 1123`（`%a, %d %b %Y %H:%M:%S GMT`）のみを受理する。解釈できない値は `None` とし、指数バックオフへ戻す。
 - 待機時間は `REF:src/adapters/http.rs` の `send_blocking` が決める。`respectRetryAfter` が真で解釈できた場合はその値をそのまま待ち（揺らぎは加えない）、`maxBackoffMs` を超える場合は再試行を打ち切って `E4003` を返す。値の受け渡しはエラー詳細の文字列解析ではなく `AppError::retry_after_ms`（`REF:src/core/errors.rs`）で行う。
@@ -168,7 +168,7 @@ HTML 中継ページの追従（`<meta http-equiv="refresh">` と JS の locatio
 
 状態: 実装完了（REF:src/adapters/http.rs）
 
-`src/adapters/http.rs` の `send_once` が抽出より前に HTTP ステータスを分類して `AppError` へ写像する（`403` / `429` は `E4003`、その他の `4xx`/`5xx` は `E2003`。`401` が `E2003` となっている点は Issue #58 で追跡）。
+`src/adapters/http.rs` の `send_once` が抽出より前に HTTP ステータスを分類して `AppError` へ写像する（`401` / `403` / `429` は `E4003`（仕様 network.md §8.3）、`408` は `E2002`、その他の `4xx` / `5xx` は `E2003`）。
 
 ### 8.4 ログと秘匿情報
 

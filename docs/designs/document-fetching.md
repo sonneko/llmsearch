@@ -114,7 +114,7 @@ robots.txt の判定（`REF:src/adapters/robots.rs`）は `send_blocking` の直
 
 状態: 実装中（REF:src/core/convert.rs, REF:src/usecases/document.rs）
 
-`expires_at` は `REF:src/core/convert.rs` の `build_meta` が `fetched_at + ttlHours` で作る。なお読込側（`REF:src/usecases/document.rs` の `load`）で `expires_at`・`--no-cache`・`cache.enabled=false` の再取得判定が抜けており、画像 `alt` 保持等とあわせて Issue #60 で追跡する。
+`expires_at` は `REF:src/core/convert.rs` の `build_meta` が `fetched_at + ttlHours` で作る。なお読込側（`REF:src/usecases/document.rs` の `load`）は `cache_entry_valid`（`cacheable`・`expires_at` 未経過）を通過したキャッシュのみ再利用し、`--no-cache` / `--refresh` 指定時と `cache.enabled=false` 時は再取得する。画像は `strip_image_alt` が代替テキストを空にして出力する（仕様 document-fetching.md §3.1）。
 
 ### 4.3 無効化
 
