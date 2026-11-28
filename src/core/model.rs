@@ -47,6 +47,15 @@ pub struct DocumentMeta {
     pub warnings: Vec<String>,
     #[serde(default)]
     pub cacheable: bool,
+    /// HTTP ステータスコード（取得時に記録。キャッシュ由来・旧データでは 0）。
+    #[serde(default)]
+    pub status: u16,
+    /// レスポンス本文のバイト数（取得時に記録。キャッシュ由来・旧データでは 0）。
+    #[serde(default)]
+    pub bytes: u64,
+    /// 取得に要したミリ秒（取得時に記録。キャッシュ由来・旧データでは 0）。
+    #[serde(default)]
+    pub duration_ms: u64,
 }
 
 /// 見出し。

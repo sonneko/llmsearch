@@ -1,0 +1,83 @@
+############ generate history (loopback) ############
+(session S1=20261127-082657-1233)
+#### 1) history list (all kinds) ####
+H6    2026-11-27 08:26  search   loop1            coastal defenses  3 results (2 filtered out)
+H5    2026-11-27 08:26  refine   -                adaptation policy (from climate adaptation)
+H4    2026-11-27 08:26  search   loop1            adaptation policy  3 results (2 filtered out)
+H3    2026-11-27 08:26  outline  -                3 headings (depth=3)
+H2    2026-11-27 08:26  fetch    -                http://127.0.0.1:47151/doc?n=1&token=***&keep=normal1  (361 chars)
+H1    2026-11-27 08:26  search   loop1            climate adaptation  3 results (2 filtered out)
+
+#### 2) refine summary row  [BUG: '0 results (0 filtered out)'] ####
+H5    2026-11-27 08:26  refine   -                adaptation policy (from climate adaptation)
+
+#### 3) export --format markdown (non --json) ####
+# History
+
+### session 20261127-082657-1233
+
+- `2026-11-27T08:26:57Z` **search** climate adaptation  3 results (2 filtered out)
+- `2026-11-27T08:26:58Z` **fetch** http://127.0.0.1:47151/doc?n=1&token=***&keep=normal1  (361 chars)
+- `2026-11-27T08:26:58Z` **outline** 3 headings (depth=3)
+- `2026-11-27T08:26:58Z` **search** adaptation policy  3 results (2 filtered out)
+- `2026-11-27T08:26:58Z` **refine** adaptation policy (from climate adaptation)
+
+### session 20261127-082658-1119
+
+- `2026-11-27T08:26:59Z` **search** coastal defenses  3 results (2 filtered out)
+
+
+#### 4) export honors --limit and does NOT silently cap at 200 ####
+-- parent form: history --limit 3 export --format jsonl (expect 3 entries after fix) --
+3
+  (parent-form rc=0)
+-- export with NO --limit should emit ALL entries (count below) --
+6
+
+#### 4b) NO 200-cap proof: append 210 fabricated entries, export must return all ####
+entries on disk after append:
+216
+export --format jsonl row count (expect = disk count, i.e. > 200):
+216
+
+#### 5) clear --before 2000 [subcommand form]  [BUG: clap error before fix] ####
+Cleared the history (0 entries)
+  (rc=0)
+remaining entries after --before 2000 (expect the 2026 entries kept):
+7
+H7    2026-11-27 08:26  delete   -                history  0 entries
+H6    2026-11-27 08:26  search   loop1            coastal defenses  3 results (2 filtered out)
+
+#### 6) clear --before 2027 [subcommand form]  [should remove ALL, report real count] ####
+Cleared the history (6 entries)
+  (rc=0)
+remaining entries after --before 2027 (expect 0 / No history):
+H1    2026-11-27 08:26  delete   -                history  6 entries
+
+#### 7) clear via PARENT --before 2000  [BUG: discards --before -> wipes ALL] ####
+Cleared the history (0 entries)
+  (rc=0)
+remaining entries after parent --before 2000 (expect 2026 entries kept):
+7
+
+#### 8) clear WITHOUT --yes  [spec 4.3: stop with E1004] ####
+error: E1004 invalid configuration value
+  detail: --yes is required
+  hint: run `config validate` / `engines validate`
+  (rc=1)
+
+#### 9) state files (layout) ####
+./cache/robots.json
+./counters.json
+./documents/0b4bb22cd15add42/body.md
+./documents/0b4bb22cd15add42/meta.json
+./engines/loop1.json
+./history/history.jsonl
+./sessions/20261127-082657-1233.json
+./sessions/20261127-082658-1119.json
+
+#### 10) raw jsonl: refine + fetch payloads (as recorded) ####
+-- refine payload (expect {query, previous}) --
+{"id":"H5","at":"2026-11-27T08:26:58Z","session":"20261127-082657-1233","type":"refine","payload":{"query":"adaptation policy","previous":"climate adaptation"}}
+-- fetch payload (expect finalUrl/status/bytes/durationMs/extractor present) --
+{"id":"H2","at":"2026-11-27T08:26:58Z","session":"20261127-082657-1233","type":"fetch","payload":{"url":"http://127.0.0.1:47151/doc?n=1&token=***&keep=normal1","finalUrl":"http://127.0.0.1:47151/doc?n=1&token=***&keep=normal1","status":200,"bytes":416,"durationMs":1014,"extractor":"density","document":"D1","chars":361,"cached":false,"robotsSkipped":false}}

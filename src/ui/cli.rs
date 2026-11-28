@@ -141,9 +141,9 @@ pub enum Command {
     History {
         #[command(subcommand)]
         action: Option<HistoryAction>,
-        /// Number of entries to show.
-        #[arg(long, default_value_t = 20)]
-        limit: usize,
+        /// Number of entries to show (all when omitted).
+        #[arg(long)]
+        limit: Option<usize>,
         /// Keyword filter.
         #[arg(long)]
         query: Option<String>,
@@ -204,10 +204,13 @@ pub enum HistoryAction {
         #[arg(long, default_value = "markdown")]
         format: String,
     },
-    /// Clear all entries.
+    /// Clear entries (all, or only those before a cutoff with `--before`).
     Clear {
         #[arg(long)]
         yes: bool,
+        /// Remove only entries strictly before this instant (ISO 8601).
+        #[arg(long)]
+        before: Option<String>,
     },
 }
 

@@ -518,7 +518,7 @@ fn parse_sections(
 /// 履歴サブコマンドの引数。
 struct HistoryArgs {
     action: Option<HistoryAction>,
-    limit: usize,
+    limit: Option<usize>,
     query: Option<String>,
     kinds: Vec<String>,
     before: Option<String>,
@@ -544,13 +544,15 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
     let history_session = (!selected_session.is_empty()).then_some(selected_session.as_str());
     match action {
         None | Some(HistoryAction::List) => {
+            // 一覧の既定は 20 件、上限は 200 件（仕様 history.md §2.1）。
+            let list_limit = Some(limit.unwrap_or(20).min(200));
             let entries = history_uc::search(
                 app,
                 query.as_deref(),
                 &kinds,
                 history_session,
                 before.as_deref(),
-                Some(limit),
+                list_limit,
             )?;
             if renderer.json {
                 renderer.event(&renderer.envelope(
@@ -604,8 +606,10 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
             Ok(0)
         }
         Some(HistoryAction::Grep { query }) => {
+            // grep の既定は 20 件（一覧と同じ）、上限は 200 件（仕様 §2.1）。
+            let grep_limit = Some(limit.unwrap_or(20).min(200));
             let entries =
-                history_uc::search(app, Some(query), &[], history_session, None, Some(limit))?;
+                history_uc::search(app, Some(query), &[], history_session, None, grep_limit)?;
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "history",
@@ -627,7 +631,9 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
             Ok(0)
         }
         Some(HistoryAction::Export { format }) => {
-            let entries = history_uc::list(app, Some(200), history_session)?;
+            // export は既定で全件を出力し、201 件目以降を黙って落とさない。
+            // `--limit` を指定したらその件数までにする。
+            let entries = history_uc::list(app, limit, history_session)?;
             if format == "json" || format == "jsonl" {
                 if renderer.json {
                     // `--json` のときは履歴もイベント封筒に入れる（生の JSON Lines を出さない）。
@@ -670,18 +676,31 @@ fn run_history(app: &mut App, renderer: &Renderer, args: HistoryArgs) -> Result<
             } else {
                 let mut ordered = entries;
                 ordered.reverse();
-                renderer.out(&crate::core::history::export_markdown(&ordered));
+                let markdown = crate::core::history::export_markdown(&ordered);
+                // Markdown 書き出しも JSON パス（`renderer.redacted_value`）と同じ
+                // 生 SECRET セットで伏字化する。記録時には既に伏字化済みだが、
+                // 表示時に同一機構で再適用し、両フォーマットの整合を保つ（防御的深度）。
+                renderer.out(&crate::core::secret::redact_display_text(
+                    &markdown,
+                    &secret_values(app),
+                ));
             }
             Ok(0)
         }
-        Some(HistoryAction::Clear { yes: action_yes }) => {
+        Some(HistoryAction::Clear {
+            yes: action_yes,
+            before: action_before,
+        }) => {
             if !(yes || *action_yes) {
                 return Err(AppError::with_detail(
                     ErrorCode::E1004,
                     "--yes is required".to_string(),
                 ));
             }
-            let removed = history_uc::clear(app, None)?;
+            // `--before` をそのまま通し（仕様 history.md §4.3）、指定時刻より前の
+            // エントリだけ削除できるようにする。アクション側が無ければ親の --before を使う。
+            let clear_before = action_before.clone().or_else(|| before.clone());
+            let removed = history_uc::clear(app, clear_before.as_deref())?;
             if renderer.json {
                 renderer.event(&renderer.envelope(
                     "history",

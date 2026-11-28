@@ -72,7 +72,7 @@
 
 状態: 実装完了（REF:src/ui/commands.rs, REF:src/core/history.rs）
 
-Markdown は `src/core/history.rs` の `export_markdown(&[HistoryEntry])` が組み立て、`REF:src/ui/commands.rs` の `HistoryAction::Export` が新しい順の一覧を古い順へ反転して渡す（件数上限 200 ハードコードおよび非 `--json` Markdown 出力での伏字化漏れは Issue #62 で追跡）。テキストの JSON Lines は各エントリを `Renderer::redacted_value()` で伏字化してから `serde_json::to_string` で 1 行ずつ出す。`--json` のときは形式にかかわらず `history` イベント（`entries[]` / `total`）へ包み、生テキストを標準出力へ出さない。
+Markdown は `src/core/history.rs` の `export_markdown(&[HistoryEntry])` が組み立て、`REF:src/ui/commands.rs` の `HistoryAction::Export` が新しい順の一覧を古い順へ反転して渡す（export は `--limit` 未指定で全件を出力し 200 件で打ち切らず、非 `--json` の Markdown 出力も JSON と同じ生 secret セットで `redact_display_text` を当てて伏字化する）。テキストの JSON Lines は各エントリを `Renderer::redacted_value()` で伏字化してから `serde_json::to_string` で 1 行ずつ出す。`--json` のときは形式にかかわらず `history` イベント（`entries[]` / `total`）へ包み、生テキストを標準出力へ出さない。
 
 ---
 
@@ -96,7 +96,7 @@ Markdown は `src/core/history.rs` の `export_markdown(&[HistoryEntry])` が組
 
 状態: 実装中（REF:src/ui/commands.rs, REF:src/adapters/state/history_jsonl.rs）
 
-`history clear` は `--yes` を必須とし、未指定時は `E1004` を返す。削除後は空ファイルを作成して `delete` イベントを 1 件記録する。なお現状 `--before` が無視されて全件消去となる不具合および `JsonlHistory::clear` が削除件数として常に `0` を返す不具合、`EventType::Refine` 要約や未発行イベント種別（`engine` / `config`）は Issue #62 で追跡する。
+`history clear` は `--yes` を必須とし、未指定時は対話確認をせず `E1004` を返す。`--before <ISO8601>` を付けた場合はその日時より前のエントリだけ削除し（省略で全件）、`JsonlHistory::clear` は「全件 - 保持件数」の実測値を削除件数として返す。削除後は空ファイル（または保持分）を作成して `delete` イベントを 1 件記録する。`EventType::Refine` の要約は実ペイロード `{query, previous}` を表示し、一度も発行されない `engine` / `config` イベント種別は列挙と仕様から除去した。
 
 ### 4.4 記録の整合性
 
